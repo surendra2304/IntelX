@@ -6,8 +6,8 @@ Welcome to the engineering diary of **IntelX**. This document tracks daily progr
 
 ## 📅 Daily Logs
 
-### 📈 [Day 1 — 2026-08-28: Steps 1 & 2 Foundation & Evidence Data Model](diary/2026-08-28.md)
-- **🎯 Focus**: Repository genesis, Step 1 architectural setup, async database engine with SQLite WAL, Alembic baseline, FastAPI app factory, request-ID middleware, structured JSON logging, Step 2 relational evidence data model (18 tables), typed repositories, span integrity enforcement, cryptographic AuditChain, and FTS5 search.
+### 📈 [Day 1 — 2026-08-28: Steps 1, 2 & 3 Architecture, Evidence Model & Model Gateway](diary/2026-08-28.md)
+- **🎯 Focus**: Repository genesis, Step 1 architectural setup, async database engine with SQLite WAL, Alembic baseline, FastAPI app factory, request-ID middleware, structured JSON logging, Step 2 relational evidence data model (18 tables), typed repositories, span integrity enforcement, cryptographic AuditChain, FTS5 search, Step 3 central Model Gateway, role-based routing, deterministic MockProvider, OpenAI/Anthropic providers, and structured output self-correction.
 - **💡 What I Accomplished**:
   - I created the official IntelX repository and pushed the baseline to GitHub.
   - I established the engineering diary framework (`diary/YYYY-MM-DD.md` and `INTELX_DIARY.md`) and automated validation script `scripts/verify_diary.py`.
@@ -15,12 +15,13 @@ Welcome to the engineering diary of **IntelX**. This document tracks daily progr
   - I configured async SQLAlchemy 2.0 with SQLite WAL mode and set up Alembic migrations (`0001_initial_schema` and `0002_evidence_data_model`).
   - I implemented all 18 typed SQLAlchemy 2.0 models covering runs, tasks, sources, documents, chunks, entities, claims, evidence, findings, artifacts, and audit events.
   - I authored typed repository layer in `intelx/db/repos.py` (`RunRepo`, `SourceRepo`, `ClaimRepo`, `EvidenceRepo`, `AuditChain`).
-  - I enforced span-integrity rules guaranteeing verbatim quotes match exact document character slice offsets.
-  - I built cryptographic append-only `AuditChain` with SHA256 canonical hash chaining and tamper detection.
-  - I integrated SQLite FTS5 full-text search virtual tables and synchronization triggers.
-  - I developed comprehensive test suites with 16 passing tests and verified zero ruff lint errors.
-- **🛡️ Fixes & Hardening**: Fixed in-memory SQLite isolation across test cases, standardized audit timestamp normalization for hash verification, and resolved StrEnum linting rules.
-- **📊 Test Results**: **16 tests passed** (100% green pass rate).
+  - I built the central `ModelGateway` in `intelx/models/gateway.py` with role-based routing (`planner`, `extractor`, `verifier`, `analyst`, `synthesizer`, `critic`).
+  - I created `MockProvider` delivering deterministic canned outputs and dynamic Pydantic mock instances.
+  - I implemented structured output validation with single-attempt self-healing retry logic and `StructuredOutputError`.
+  - I added OpenAI-compatible and Anthropic provider adapters with 3-attempt exponential backoff.
+  - I developed comprehensive test suites with 20 passing tests and verified zero ruff lint errors.
+- **🛡️ Fixes & Hardening**: Fixed Pydantic v2 `PydanticUndefined` default handling in mock generator, stripped markdown code fences from JSON output, and standardized audit timestamp formatting.
+- **📊 Test Results**: **20 tests passed** (100% green pass rate).
 
 ---
 

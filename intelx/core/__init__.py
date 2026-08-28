@@ -8,6 +8,7 @@ from intelx.core.errors import (
     IntelXError,
     NotFoundError,
     ProviderError,
+    StructuredOutputError,
     ValidationError,
 )
 from intelx.core.logging import setup_logging
@@ -28,4 +29,5 @@ __all__ = [
     "ValidationError",
     "ProviderError",
     "BudgetExceededError",
+    "StructuredOutputError",
 ]

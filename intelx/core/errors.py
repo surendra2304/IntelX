@@ -46,6 +46,10 @@ class BudgetExceededError(IntelXError):
     """Raised when execution limits or budgets are exceeded."""
 
 
+class StructuredOutputError(IntelXError):
+    """Raised when model response fails schema validation after retry."""
+
+
 async def intelx_exception_handler(request: Request, exc: IntelXError) -> JSONResponse:
     """Handle custom IntelX errors gracefully."""
     logger.error(
