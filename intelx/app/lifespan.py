@@ -55,6 +55,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database schemas initialized.")
 
+    # 3.5 Seed API keys from settings
+    from intelx.core.auth import seed_api_keys_from_settings
+    from intelx.db.session import get_sessionmaker
+
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        await seed_api_keys_from_settings(session, settings)
+    logger.info("API keys seeded from settings.")
+
     # 4. Start background worker hook
     await worker_hook.start()
 

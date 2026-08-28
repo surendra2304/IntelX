@@ -9,25 +9,34 @@ from intelx.core.settings import Settings, get_settings
 
 
 def default_policy_guard(domain: str, settings: Settings | None = None) -> bool:
-    """Default security guard checking domain allowlist and denylist."""
-    cfg = settings or get_settings()
+    """Default security guard checking domain allowlist and denylist via PolicyEngine."""
+    from intelx.core.policy import policy_engine
+
+    cfg = policy_engine._cached_config
     normalized = domain.lower().strip()
 
-    # 1. Denylist check
-    for denied in cfg.DOMAIN_DENYLIST:
+    # 1. Dynamic policy denylist
+    for denied in cfg.domain_denylist:
         denied_norm = denied.lower().strip()
         if denied_norm and (normalized == denied_norm or normalized.endswith(f".{denied_norm}")):
             return False
 
-    # 2. Allowlist check (if non-empty, only allowlisted domains allowed)
-    if cfg.DOMAIN_ALLOWLIST:
+    # 2. Dynamic policy allowlist
+    if cfg.domain_allowlist:
         allowed = False
-        for allow in cfg.DOMAIN_ALLOWLIST:
+        for allow in cfg.domain_allowlist:
             allow_norm = allow.lower().strip()
             if allow_norm and (normalized == allow_norm or normalized.endswith(f".{allow_norm}")):
                 allowed = True
                 break
         if not allowed:
+            return False
+
+    # 3. Settings fallback denylist
+    s = settings or get_settings()
+    for denied in s.DOMAIN_DENYLIST:
+        denied_norm = denied.lower().strip()
+        if denied_norm and (normalized == denied_norm or normalized.endswith(f".{denied_norm}")):
             return False
 
     return True

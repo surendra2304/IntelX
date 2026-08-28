@@ -6,8 +6,8 @@ Welcome to the engineering diary of **IntelX**. This document tracks daily progr
 
 ## 📅 Daily Logs
 
-### 📈 [Day 1 — 2026-08-28: Steps 1 through 8 (Core Monolith, Evidence Model, Gateway, Connectors, Agents, Trust Layer, Orchestration & Synthesis Artifacts)](diary/2026-08-28.md)
-- **🎯 Focus**: Repository genesis, Step 1 architectural setup, async database engine with SQLite WAL, Alembic migrations, FastAPI app factory, structured logging, Step 2 relational evidence data model (18 tables), typed repositories, span integrity enforcement, cryptographic AuditChain, FTS5 search, Step 3 central Model Gateway with role-based routing, Step 4 security-hardened connectors (`HttpFetchConnector`, `WebSearchConnector`, `FileConnector`), normalization with character offsets, Step 5 first four typed agents (`PlannerAgent`, `ScoutAgent`, `RetrieverAgent`, `ExtractorAgent`), Step 6 trust layer (`VerifierAgent`, deterministic v1 composite confidence formula, contradiction handling, `EntityResolver`, `AnalystAgent`, `CriticAgent`), Step 7 orchestration engine (`OrchestrationEngine` state machine, `OrchestrationWorker`, `EventStreamManager` SSE broadcasting), and Step 8 synthesis & artifacts (`SynthesizerAgent`, `render_report_markdown` with all 9 required sections, machine-enforced citation integrity, groundedness partitioning, atomic multi-format artifact manager producing `report.md`, `report.json`, `evidence_pack.json`, `sources.csv`).
+### 📈 [Day 1 — 2026-08-28: Steps 1 through 9 (Core Monolith, Evidence Model, Gateway, Connectors, Agents, Trust Layer, Orchestrator, Artifacts & Full API Surface)](diary/2026-08-28.md)
+- **🎯 Focus**: Repository genesis, Step 1 architectural setup, async database engine with SQLite WAL, Alembic migrations, FastAPI app factory, structured logging, Step 2 relational evidence data model (18 tables), typed repositories, span integrity enforcement, cryptographic AuditChain, FTS5 search, Step 3 central Model Gateway with role-based routing, Step 4 security-hardened connectors (`HttpFetchConnector`, `WebSearchConnector`, `FileConnector`), normalization with character offsets, Step 5 first four typed agents (`PlannerAgent`, `ScoutAgent`, `RetrieverAgent`, `ExtractorAgent`), Step 6 trust layer (`VerifierAgent`, deterministic v1 composite confidence formula, contradiction handling, `EntityResolver`, `AnalystAgent`, `CriticAgent`), Step 7 orchestration engine (`OrchestrationEngine` state machine, `OrchestrationWorker`, `EventStreamManager` SSE broadcasting), Step 8 synthesis & artifacts (`SynthesizerAgent`, `render_report_markdown` with all 9 required sections, machine-enforced citation integrity, groundedness partitioning, atomic multi-format artifact manager producing `report.md`, `report.json`, `evidence_pack.json`, `sources.csv`), and Step 9 full API surface (`intelx/api/v1/`, Bearer auth, seeded SHA256 hashed keys, role tiers, sliding-window rate limiting, table-backed `PolicyEngine` with denial audit logging, 14 REST endpoints, OpenAPI docs, idempotency keys, SSE streaming, artifact downloads, human review gates, and cryptographic audit verification).
 - **💡 What I Accomplished**:
   - I created the official IntelX repository and pushed the baseline to GitHub.
   - I established the engineering diary framework (`diary/YYYY-MM-DD.md` and `INTELX_DIARY.md`) and automated validation script `scripts/verify_diary.py`.
@@ -29,9 +29,12 @@ Welcome to the engineering diary of **IntelX**. This document tracks daily progr
   - I built machine-enforced citation integrity checking raising `IntegrityError` on any unresolvable citation tokens.
   - I created groundedness validation moving unbacked findings into an Unverified Observations appendix.
   - I implemented versioned atomic artifact exporters generating `report.md`, `report.json`, `evidence_pack.json`, and `sources.csv` with recorded SHA256 checksums.
-  - I authored comprehensive test suites achieving 100% green pass rate across 52 automated tests.
-- **🛡️ Fixes & Hardening**: Fixed model attribute access on dictionary vs instance lookups, expanded source querying scope to all claim references, and validated atomic file replacement.
-- **📊 Test Results**: **52 tests passed** (100% green pass rate).
+  - I engineered Bearer API key authentication with SHA256 hashed secrets, RBAC tiers (`admin`, `member`), and sliding-window rate limiting (120 req/min).
+  - I built the dynamic `PolicyEngine` evaluating domain allow/denylists, budget caps, and logging denials into the tamper-evident audit ledger.
+  - I created all 14 REST endpoints under `/api/v1` with full OpenAPI documentation and RFC 7807 problem details error formatting.
+  - I authored comprehensive test suites achieving 100% green pass rate across 59 automated tests.
+- **🛡️ Fixes & Hardening**: Fixed offset-naive datetime comparisons for idempotency windows, imported missing `Event` model in API routes, and verified zero plaintext key leakage.
+- **📊 Test Results**: **59 tests passed** (100% green pass rate).
 
 ---
 

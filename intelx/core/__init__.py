@@ -1,5 +1,6 @@
 """INTELX Core Package."""
 
+from intelx.core.auth import get_current_api_key, hash_api_key, require_role
 from intelx.core.confidence import compute_confidence_score, get_confidence_label
 from intelx.core.errors import (
     BudgetExceededError,
@@ -20,6 +21,7 @@ from intelx.core.errors import (
 )
 from intelx.core.independence import compute_3gram_jaccard, is_independent_evidence
 from intelx.core.logging import setup_logging
+from intelx.core.policy import PolicyConfig, PolicyEngine, policy_engine
 from intelx.core.report import (
     filter_and_ground_findings,
     render_report_markdown,
@@ -41,6 +43,12 @@ __all__ = [
     "render_report_markdown",
     "validate_citations",
     "filter_and_ground_findings",
+    "policy_engine",
+    "PolicyEngine",
+    "PolicyConfig",
+    "hash_api_key",
+    "get_current_api_key",
+    "require_role",
     "IntelXError",
     "ConfigError",
     "DatabaseError",
