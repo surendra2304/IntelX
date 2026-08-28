@@ -31,6 +31,10 @@ class Settings(BaseSettings):
         default="intelx-super-secret-key-change-in-production",
         description="Secret key used for crypto and session signing",
     )
+    DATA_DIR: str = Field(
+        default="./data",
+        description="Local root directory for data, raw files, and artifacts",
+    )
 
     # Mock & Provider Controls
     MOCK_MODE: bool = Field(

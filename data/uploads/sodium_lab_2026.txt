@@ -1,0 +1,10 @@
+# Laboratory Evaluation Report: Sodium-Ion Cathode Benchmarks
+Published: 2026-03-15
+Domain: nature-energy.org
+Publisher: Nature Publishing Group
+
+Experimental trials conducted at the Energy Storage Institute evaluated Prussian white and layered oxide cathodes.
+The optimized layered oxide formulation demonstrated an active gravimetric energy density of 160 Wh/kg at 1C discharge rate.
+Cyclical testing showed 92% capacity retention after 1200 full charge-discharge cycles under standard ambient temperatures.
+The electrolyte exhibits significant thermal stability with no thermal runaway observed up to 180 degrees Celsius.
+Commercial deployment in urban transport fleets is anticipated by late 2027.

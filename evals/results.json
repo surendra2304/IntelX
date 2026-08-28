@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-28T11:00:30Z",
+  "timestamp": "2026-08-28T11:16:53Z",
   "eval_provider": "mock",
   "total_tasks": 8,
   "completed_tasks": 8,
@@ -12,7 +12,7 @@
     "null_result_correctness": 1.0,
     "completion_rate": 1.0,
     "avg_usd_cost": 0.0,
-    "avg_latency_seconds": 17.86
+    "avg_latency_seconds": 19.23
   },
   "tasks": [
     {
@@ -20,56 +20,56 @@
       "status": "COMPLETED",
       "outcome": "ANSWERED",
       "cost_usd": 0.0,
-      "latency_sec": 18.39
+      "latency_sec": 20.07
     },
     {
       "task_id": "task_02_solid_state_cycling",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
       "cost_usd": 0.0,
-      "latency_sec": 18.9
+      "latency_sec": 18.95
     },
     {
       "task_id": "task_03_quantum_annealing",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
       "cost_usd": 0.0,
-      "latency_sec": 17.09
+      "latency_sec": 19.6
     },
     {
       "task_id": "task_04_syndicated_reuters_wire",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
       "cost_usd": 0.0,
-      "latency_sec": 17.82
+      "latency_sec": 20.46
     },
     {
       "task_id": "task_05_contradictory_energy_density",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
       "cost_usd": 0.0,
-      "latency_sec": 21.25
+      "latency_sec": 24.11
     },
     {
       "task_id": "task_06_unsupported_perpetual_motion",
       "status": "COMPLETED",
       "outcome": "INSUFFICIENT_EVIDENCE",
       "cost_usd": 0.0,
-      "latency_sec": 13.99
+      "latency_sec": 14.44
     },
     {
       "task_id": "task_07_poisoned_injection_doc",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
       "cost_usd": 0.0,
-      "latency_sec": 16.59
+      "latency_sec": 17.71
     },
     {
       "task_id": "task_08_stale_historical_data",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
       "cost_usd": 0.0,
-      "latency_sec": 18.89
+      "latency_sec": 18.53
     }
   ]
 }

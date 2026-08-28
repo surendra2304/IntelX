@@ -1,0 +1,8 @@
+# Physical Limitations of Silicon Anodes under Dynamic Cycling
+Published: 2026-05-18
+Domain: prl-physics.org
+Publisher: American Physical Society
+
+Re-examination of silicon composite anode benchmarks demonstrates that reported 420 Wh/kg figures fail to account for electrolyte consumption.
+Under full calendar aging constraints, the achievable cell energy density is capped at 310 Wh/kg due to irreversible solid-electrolyte interphase thickening.
+Volumetric swelling leads to delamination after 400 cycles under commercial pouch packaging.

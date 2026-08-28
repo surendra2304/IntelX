@@ -1,0 +1,52 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: intelx-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - INTELX_ENV=production
+      - INTELX_MOCK_MODE=true
+      - INTELX_DB_URL=sqlite+aiosqlite:////app/data/intelx.db
+      - INTELX_DATA_DIR=/app/data
+      - INTELX_API_KEYS={"dev-admin-key":"admin","dev-member-key":"member"}
+      - INTELX_SECRET_KEY=change-this-in-production-intelx-super-secret-key-32-chars
+    volumes:
+      - intelx_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: intelx-postgres
+    restart: unless-stopped
+    profiles:
+      - postgres
+    environment:
+      - POSTGRES_USER=intelx
+      - POSTGRES_PASSWORD=intelx_secret
+      - POSTGRES_DB=intelx
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U intelx -d intelx"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  intelx_data:
+    driver: local
+  postgres_data:
+    driver: local
