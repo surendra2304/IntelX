@@ -6,19 +6,21 @@ Welcome to the engineering diary of **IntelX**. This document tracks daily progr
 
 ## 📅 Daily Logs
 
-### 📈 [Day 1 — 2026-08-28: Step 1 Foundation & System Scaffolding](diary/2026-08-28.md)
-- **🎯 Focus**: Repository genesis, Step 1 architectural setup, async database engine with SQLite WAL, Alembic baseline, FastAPI app factory, request-ID middleware, structured JSON logging, health endpoints, and diary discipline enforcement.
+### 📈 [Day 1 — 2026-08-28: Steps 1 & 2 Foundation & Evidence Data Model](diary/2026-08-28.md)
+- **🎯 Focus**: Repository genesis, Step 1 architectural setup, async database engine with SQLite WAL, Alembic baseline, FastAPI app factory, request-ID middleware, structured JSON logging, Step 2 relational evidence data model (18 tables), typed repositories, span integrity enforcement, cryptographic AuditChain, and FTS5 search.
 - **💡 What I Accomplished**:
   - I created the official IntelX repository and pushed the baseline to GitHub.
   - I established the engineering diary framework (`diary/YYYY-MM-DD.md` and `INTELX_DIARY.md`) and automated validation script `scripts/verify_diary.py`.
   - I built the complete FastAPI application factory with lifespan management and background worker hooks.
-  - I configured async SQLAlchemy 2.0 with SQLite WAL mode and set up Alembic migrations (`0001_initial_schema`).
-  - I implemented Pydantic v2 `Settings` with role-specific LLM overrides, budgets, crawl policies, and secret redaction.
-  - I engineered `RequestContextMiddleware` for request ID propagation and execution timing.
-  - I created `/healthz`, `/readyz`, and `/api/v1/version` endpoints with database connectivity checks.
-  - I developed comprehensive test suites with 10 passing tests and verified zero ruff lint errors.
-- **🛡️ Fixes & Hardening**: Fixed missing data directory creation during SQLite migrations, formatted long setting descriptions, and eliminated unused test imports.
-- **📊 Test Results**: **10 tests passed** (100% green pass rate).
+  - I configured async SQLAlchemy 2.0 with SQLite WAL mode and set up Alembic migrations (`0001_initial_schema` and `0002_evidence_data_model`).
+  - I implemented all 18 typed SQLAlchemy 2.0 models covering runs, tasks, sources, documents, chunks, entities, claims, evidence, findings, artifacts, and audit events.
+  - I authored typed repository layer in `intelx/db/repos.py` (`RunRepo`, `SourceRepo`, `ClaimRepo`, `EvidenceRepo`, `AuditChain`).
+  - I enforced span-integrity rules guaranteeing verbatim quotes match exact document character slice offsets.
+  - I built cryptographic append-only `AuditChain` with SHA256 canonical hash chaining and tamper detection.
+  - I integrated SQLite FTS5 full-text search virtual tables and synchronization triggers.
+  - I developed comprehensive test suites with 16 passing tests and verified zero ruff lint errors.
+- **🛡️ Fixes & Hardening**: Fixed in-memory SQLite isolation across test cases, standardized audit timestamp normalization for hash verification, and resolved StrEnum linting rules.
+- **📊 Test Results**: **16 tests passed** (100% green pass rate).
 
 ---
 

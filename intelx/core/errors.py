@@ -34,6 +34,10 @@ class ValidationError(IntelXError):
     """Raised when input validation fails."""
 
 
+class IntegrityError(IntelXError):
+    """Raised when evidence span quote does not match exact document text slice."""
+
+
 class ProviderError(IntelXError):
     """Raised when an external LLM or search provider fails."""
 

@@ -47,6 +47,11 @@ def get_async_engine(db_url: str | None = None) -> AsyncEngine:
     }
 
     if "sqlite" in url:
+        if ":memory:" in url:
+            from sqlalchemy.pool import StaticPool
+
+            engine_kwargs["poolclass"] = StaticPool
+            engine_kwargs["connect_args"] = {"check_same_thread": False}
         _engine = create_async_engine(url, **engine_kwargs)
         event.listen(_engine.sync_engine, "connect", configure_sqlite_pragmas)
     else:
