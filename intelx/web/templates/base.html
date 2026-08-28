@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}IntelX{% endblock %} — Intelligence Platform</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="navbar">
+    <a href="/" class="brand">
+      <span>INTELX</span>
+      <span class="brand-badge">EVIDENCE</span>
+    </a>
+    <nav>
+      <ul class="nav-links">
+        <li><a href="/" class="nav-link {% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a></li>
+        <li><a href="/research/new" class="nav-link {% if active_page == 'new' %}active{% endif %}">New Research</a></li>
+        <li><a href="/knowledge" class="nav-link {% if active_page == 'knowledge' %}active{% endif %}">Knowledge</a></li>
+        {% if user and user.role == 'ADMIN' %}
+        <li><a href="/review" class="nav-link {% if active_page == 'review' %}active{% endif %}">Review Queue</a></li>
+        <li><a href="/admin/audit" class="nav-link {% if active_page == 'audit' %}active{% endif %}">Audit Trail</a></li>
+        {% endif %}
+        {% if user %}
+        <li style="margin-left: 16px; display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 12px; color: var(--text-muted);">{{ user.name }} ({{ user.role }})</span>
+          <a href="/logout" class="btn btn-secondary btn-sm">Logout</a>
+        </li>
+        {% else %}
+        <li><a href="/login" class="btn btn-primary btn-sm">Login</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </header>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Side Citation Drawer -->
+  <div class="drawer-backdrop" id="drawerBackdrop" onclick="closeDrawer()"></div>
+  <div class="drawer-panel" id="citationDrawer">
+    <div class="drawer-header">
+      <h3 id="drawerTitle" style="font-size: 15px; font-weight: 700;">Citation Details</h3>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="closeDrawer()">✕</button>
+    </div>
+    <div class="drawer-body" id="drawerBody">
+      <!-- Injected via JavaScript -->
+    </div>
+  </div>
+
+  <footer class="footer">
+    INTELX Evidence-Driven Research Platform &bull; Standalone Monolith &bull; v0.1.0
+  </footer>
+
+  <script src="/static/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

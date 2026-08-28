@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}New Research — IntelX{% endblock %}
+{% block content %}
+<div style="max-width: 760px; margin: 0 auto;">
+  <div style="margin-bottom: 20px;">
+    <h1 style="font-size: 22px; font-weight: 800; color: var(--text-main);">Launch Research Investigation</h1>
+    <p style="color: var(--text-muted); font-size: 13px;">Decompose objectives, retrieve primary evidence, and synthesize verified intelligence.</p>
+  </div>
+
+  {% if error %}
+  <div style="background: var(--color-red-bg); color: var(--color-red); padding: 10px 14px; border-radius: var(--radius-md); margin-bottom: 16px; font-size: 13px;">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <form method="POST" action="/research/new">
+      <div class="form-group">
+        <label class="form-label" for="objective">Research Objective / Core Question *</label>
+        <textarea id="objective" name="objective" class="form-textarea" placeholder="e.g. Assess the commercial viability and recent lab benchmarks of sodium-ion cathode energy densities" required></textarea>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <div class="form-group">
+          <label class="form-label" for="depth">Investigation Depth</label>
+          <select id="depth" name="depth" class="form-select">
+            <option value="standard" selected>Standard (Balanced verification)</option>
+            <option value="quick">Quick (Rapid synthesis)</option>
+            <option value="deep">Deep (Strict multi-corroboration & critique)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="max_sources">Maximum Sources</label>
+          <input type="number" id="max_sources" name="max_sources" class="form-input" value="30" min="5" max="100">
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <div class="form-group">
+          <label class="form-label" for="max_usd">Max Budget (USD)</label>
+          <input type="number" id="max_usd" name="max_usd" class="form-input" value="5.00" step="0.50" min="0.50">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="max_minutes">Timeout (Minutes)</label>
+          <input type="number" id="max_minutes" name="max_minutes" class="form-input" value="15" min="1" max="60">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="allowed_domains">Domain Hints / Allowed Domains (comma-separated)</label>
+        <input type="text" id="allowed_domains" name="allowed_domains" class="form-input" placeholder="e.g. nature.com, arxiv.org, local">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="blocked_domains">Blocked Domains (comma-separated)</label>
+        <input type="text" id="blocked_domains" name="blocked_domains" class="form-input" placeholder="e.g. unverified-blog.io">
+      </div>
+
+      <div style="margin-top: 24px; display: flex; justify-content: flex-end; gap: 12px;">
+        <a href="/" class="btn btn-secondary">Cancel</a>
+        <button type="submit" class="btn btn-primary">Dispatch Orchestration DAG &rarr;</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}Report: {{ run.objective[:40] }} — IntelX{% endblock %}
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+  <div>
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+      <a href="/research/{{ run.id }}" style="color: var(--text-muted); font-size: 12px; text-decoration: none;">&larr; Back to Job DAG</a>
+      <span style="color: var(--border-color);">&bull;</span>
+      <span style="font-size: 12px; color: var(--text-muted);">Completed {{ run.completed_at.strftime('%Y-%m-%d %H:%M UTC') if run.completed_at else '' }}</span>
+    </div>
+    <h1 style="font-size: 20px; font-weight: 800; color: var(--text-main);">{{ run.objective }}</h1>
+  </div>
+
+  <div style="display: flex; gap: 8px;">
+    {% for art in artifacts %}
+    <a href="/api/v1/artifacts/{{ art.id }}?format={{ art.format.value.lower() }}" download class="btn btn-secondary btn-sm">
+      Download .{{ art.format.value.lower() }}
+    </a>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Tabs Navigation -->
+<div class="tabs">
+  <button type="button" class="tab-btn active" data-tab="tab-report" onclick="switchTab('tab-report')">Research Report</button>
+  <button type="button" class="tab-btn" data-tab="tab-claims" onclick="switchTab('tab-claims')">Claims ({{ claims|length }})</button>
+  <button type="button" class="tab-btn" data-tab="tab-contra" onclick="switchTab('tab-contra')">Contradictions ({{ disputed_claims|length }})</button>
+  <button type="button" class="tab-btn" data-tab="tab-sources" onclick="switchTab('tab-sources')">Sources ({{ sources|length }})</button>
+  <button type="button" class="tab-btn" data-tab="tab-gaps" onclick="switchTab('tab-gaps')">Gaps & Degradations</button>
+</div>
+
+<!-- Tab 1: Rendered Report -->
+<div id="tab-report" class="tab-content active">
+  <div class="card">
+    <div class="report-content">
+      {{ report_html | safe }}
+    </div>
+  </div>
+</div>
+
+<!-- Tab 2: Claims Table -->
+<div id="tab-claims" class="tab-content">
+  <div class="card">
+    <div class="table-container">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Claim Proposition</th>
+            <th>Type</th>
+            <th>Confidence</th>
+            <th>Status</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in claims %}
+          <tr>
+            <td>
+              <button type="button" class="citation-badge citation-claim" onclick="openCitationDrawer('C', '{{ c.id }}')">[C:{{ c.id[:8] }}]</button>
+            </td>
+            <td style="font-weight: 500;">{{ c.text }}</td>
+            <td><code>{{ c.claim_type.value }}</code></td>
+            <td>{{ "%.1f"|format(c.confidence * 100) }}%</td>
+            <td><span class="status-chip status-{{ c.status.value.lower() }}">{{ c.status.value }}</span></td>
+            <td>
+              <button type="button" class="citation-badge citation-source" onclick="openCitationDrawer('S', '{{ c.source_id }}')">[S:{{ c.source_id[:8] }}]</button>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">No claims registered.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Tab 3: Contradictions -->
+<div id="tab-contra" class="tab-content">
+  <div class="card">
+    <div class="card-header"><h3 style="font-size: 15px; font-weight: 700;">Disputed Assertions & Contradictions</h3></div>
+    {% if disputed_claims %}
+    <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 12px;">
+      {% for dc in disputed_claims %}
+      <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius-md); padding: 14px;">
+        <div style="font-weight: 700; color: #b45309; margin-bottom: 4px;">Contested Assertion</div>
+        <div style="font-size: 14px; margin-bottom: 8px;">"{{ dc.text }}"</div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button type="button" class="citation-badge citation-claim" onclick="openCitationDrawer('C', '{{ dc.id }}')">[C:{{ dc.id[:8] }}]</button>
+          <button type="button" class="citation-badge citation-source" onclick="openCitationDrawer('S', '{{ dc.source_id }}')">[S:{{ dc.source_id[:8] }}]</button>
+          <span class="status-chip status-review_required">DISPUTED</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px 0;">No contradictions or disputed assertions identified. Evidence consensus achieved.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Tab 4: Sources -->
+<div id="tab-sources" class="tab-content">
+  <div class="card">
+    <div class="table-container">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Title</th>
+            <th>Domain</th>
+            <th>Trust Tier</th>
+            <th>Risk</th>
+            <th>Retrieved</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in sources %}
+          <tr>
+            <td>
+              <button type="button" class="citation-badge citation-source" onclick="openCitationDrawer('S', '{{ s.id }}')">[S:{{ s.id[:8] }}]</button>
+            </td>
+            <td style="font-weight: 600;">{{ s.title or 'Untitled' }}</td>
+            <td><code>{{ s.domain or 'local' }}</code></td>
+            <td><span class="tier-badge tier-{{ s.trust_tier.value.lower() }}">{{ s.trust_tier.value }}</span></td>
+            <td>
+              {% if s.injection_risk %}
+              <span style="color: var(--color-red); font-weight: 700;">⚠️ Risk</span>
+              {% else %}
+              <span style="color: var(--color-green);">Clean</span>
+              {% endif %}
+            </td>
+            <td style="font-size: 12px; color: var(--text-muted);">{{ s.retrieved_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">No sources ingested.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Tab 5: Gaps -->
+<div id="tab-gaps" class="tab-content">
+  <div class="card">
+    <div class="card-header"><h3 style="font-size: 15px; font-weight: 700;">Identified Epistemic Gaps</h3></div>
+    <ul class="report-list" style="margin-top: 12px;">
+      {% if findings %}
+        {% for f in findings %}
+          {% for gap in f.gaps_json %}
+          <li>{{ gap }}</li>
+          {% endfor %}
+        {% endfor %}
+      {% else %}
+        <li>No unresolved empirical gaps documented.</li>
+      {% endif %}
+    </ul>
+  </div>
+</div>
+{% endblock %}

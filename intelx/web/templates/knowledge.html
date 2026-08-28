@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Knowledge Base — IntelX{% endblock %}
+{% block content %}
+<div style="margin-bottom: 24px;">
+  <h1 style="font-size: 22px; font-weight: 800; color: var(--text-main);">Knowledge Base Search</h1>
+  <p style="color: var(--text-muted); font-size: 13px;">Full-text indexing over primary documents, extracted claims, and entity relationships.</p>
+</div>
+
+<div class="card">
+  <form method="GET" action="/knowledge" style="display: flex; gap: 12px;">
+    <input type="text" name="q" value="{{ query }}" placeholder="Search facts, measurements, entities, keywords..." class="form-input" autofocus>
+    <button type="submit" class="btn btn-primary" style="white-space: nowrap;">Search &rarr;</button>
+  </form>
+</div>
+
+{% if query %}
+<div class="card">
+  <div class="card-header">
+    <h2 style="font-size: 16px; font-weight: 700;">Results for "{{ query }}" ({{ results|length }})</h2>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 12px;">
+    {% for r in results %}
+    <div style="border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+        <span style="font-weight: 600; font-size: 14px;">{{ r.title or 'Indexed Source Document' }}</span>
+        <span class="tier-badge tier-{{ (r.trust_tier or 'standard').lower() }}">{{ r.trust_tier }}</span>
+      </div>
+      <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;">
+        Location: <code>{{ r.location }}</code> &bull; Snippet Match
+      </div>
+      <div style="background: var(--bg-subtle); padding: 8px 12px; border-radius: 4px; font-size: 13px; font-style: italic;">
+        "{{ r.snippet }}"
+      </div>
+    </div>
+    {% else %}
+    <div style="text-align: center; color: var(--text-muted); padding: 24px;">
+      No matching documents or knowledge entries found for "{{ query }}".
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

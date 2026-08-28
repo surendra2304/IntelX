@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Login — IntelX{% endblock %}
+{% block content %}
+<div style="max-width: 440px; margin: 60px auto;">
+  <div class="card">
+    <div class="card-header">
+      <h2 style="font-size: 18px; font-weight: 700;">Workspace Access</h2>
+    </div>
+    
+    {% if error %}
+    <div style="background: var(--color-red-bg); color: var(--color-red); padding: 10px 14px; border-radius: var(--radius-md); margin-bottom: 16px; font-size: 13px; font-weight: 500;">
+      {{ error }}
+    </div>
+    {% endif %}
+
+    <form method="POST" action="/login">
+      <div class="form-group">
+        <label class="form-label" for="api_key">API Key Secret</label>
+        <input type="password" id="api_key" name="api_key" class="form-input" placeholder="Enter your bearer API key" required autofocus>
+        <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
+          Your key will be securely hashed and preserved in a signed session cookie.
+        </span>
+      </div>
+
+      <div style="margin-top: 24px;">
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Authenticate & Enter</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

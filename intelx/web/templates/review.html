@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Review Queue — IntelX{% endblock %}
+{% block content %}
+<div style="margin-bottom: 24px;">
+  <h1 style="font-size: 22px; font-weight: 800; color: var(--text-main);">Governance & Review Queue</h1>
+  <p style="color: var(--text-muted); font-size: 13px;">Manage runs paused for human verification and evaluate quarantined source domains.</p>
+</div>
+
+<!-- Paused Jobs -->
+<div class="card">
+  <div class="card-header">
+    <h2 style="font-size: 16px; font-weight: 700;">Jobs Requiring Review ({{ review_runs|length }})</h2>
+  </div>
+
+  <div class="table-container">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Job Objective</th>
+          <th>Disputed Claims</th>
+          <th>Submitted</th>
+          <th>Governance Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in review_runs %}
+        <tr>
+          <td>
+            <a href="/research/{{ r.id }}" style="font-weight: 600; text-decoration: none; color: var(--text-main);">
+              {{ r.objective }}
+            </a>
+          </td>
+          <td><span class="status-chip status-review_required">REVIEW_REQUIRED</span></td>
+          <td style="font-size: 12px; color: var(--text-muted);">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>
+            <form method="POST" action="/review/job/{{ r.id }}" style="display: flex; gap: 8px;">
+              <input type="text" name="notes" placeholder="Reviewer notes..." class="form-input" style="padding: 4px 8px; font-size: 12px; width: 160px;">
+              <button type="submit" name="decision" value="APPROVED" class="btn btn-primary btn-sm">Approve</button>
+              <button type="submit" name="decision" value="REJECTED" class="btn btn-danger btn-sm">Reject</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 24px;">No active runs pending human review.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Quarantined Sources -->
+<div class="card">
+  <div class="card-header">
+    <h2 style="font-size: 16px; font-weight: 700;">Quarantined Sources ({{ quarantine_sources|length }})</h2>
+  </div>
+
+  <div class="table-container">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Source Title</th>
+          <th>Domain</th>
+          <th>Tier</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in quarantine_sources %}
+        <tr>
+          <td style="font-weight: 600;">{{ s.title or 'Untitled Source' }}</td>
+          <td><code>{{ s.domain or 'local' }}</code></td>
+          <td><span class="tier-badge tier-quarantine">QUARANTINE</span></td>
+          <td>
+            <form method="POST" action="/review/source/{{ s.id }}" style="display: flex; gap: 6px;">
+              <button type="submit" name="tier" value="STANDARD" class="btn btn-secondary btn-sm">Promote to Standard</button>
+              <button type="submit" name="tier" value="BLOCKED" class="btn btn-danger btn-sm">Block Domain</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 24px;">No quarantined sources in need of review.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Job {{ run.id[:8] }} — IntelX{% endblock %}
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+  <div>
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+      <span class="status-chip status-{{ run.status.value.lower() }}" id="statusChip">{{ run.status.value }}</span>
+      <span style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted);">ID: {{ run.id }}</span>
+    </div>
+    <h1 style="font-size: 20px; font-weight: 800; color: var(--text-main);">{{ run.objective }}</h1>
+  </div>
+
+  <div style="display: flex; gap: 8px;">
+    {% if run.status.value == 'COMPLETED' %}
+    <a href="/research/{{ run.id }}/report" class="btn btn-primary">Open Research Report &rarr;</a>
+    {% elif run.status.value not in ['COMPLETED', 'FAILED', 'CANCELLED'] %}
+    <form method="POST" action="/research/{{ run.id }}/cancel" style="display: inline;">
+      <button type="submit" class="btn btn-danger btn-sm">Cancel Run</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid-3">
+  <div class="card">
+    <div class="card-header"><h3 style="font-size: 14px; font-weight: 600;">Execution Telemetry</h3></div>
+    <div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px;">
+      <div><strong>Tokens In/Out:</strong> {{ run.input_tokens }} / {{ run.output_tokens }}</div>
+      <div><strong>Running Cost:</strong> ${{ "%.4f"|format(run.usd_cost) }}</div>
+      <div><strong>Tool Invocations:</strong> {{ run.tool_calls }}</div>
+      <div><strong>Started:</strong> {{ run.started_at.strftime('%H:%M:%S UTC') if run.started_at else 'Queued' }}</div>
+    </div>
+  </div>
+
+  <div class="card" style="grid-column: span 2;">
+    <div class="card-header"><h3 style="font-size: 14px; font-weight: 600;">Pipeline Stages</h3></div>
+    {% set stages = ['PLANNING', 'DISCOVERING', 'RETRIEVING', 'EXTRACTING', 'VERIFYING', 'ANALYZING', 'SYNTHESIZING', 'COMPLETED'] %}
+    <div style="display: flex; justify-content: space-between; position: relative; margin-top: 12px;">
+      {% for st in stages %}
+      <div style="text-align: center; flex: 1;">
+        <div style="width: 14px; height: 14px; border-radius: 50%; margin: 0 auto 6px; background: {% if run.status.value == st or (run.status.value == 'COMPLETED') %}var(--color-green){% else %}var(--border-color){% endif %};"></div>
+        <div style="font-size: 10px; font-weight: 600; color: var(--text-muted);">{{ st }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- Streaming Event Log -->
+<div class="card">
+  <div class="card-header">
+    <h3 style="font-size: 14px; font-weight: 600;">Live Event Stream</h3>
+    <span style="font-size: 11px; color: var(--text-light);" id="pollIndicator">Auto-polling</span>
+  </div>
+
+  <div style="max-height: 360px; overflow-y: auto; background: #0f172a; color: #f8fafc; border-radius: var(--radius-md); padding: 14px; font-family: var(--font-mono); font-size: 12px;" id="eventLog">
+    {% for ev in events %}
+    <div style="margin-bottom: 6px;">
+      <span style="color: #64748b;">[{{ ev.created_at.strftime('%H:%M:%S') }}]</span>
+      <span style="color: #38bdf8; font-weight: 600;">{{ ev.type }}</span> &mdash;
+      <span style="color: #cbd5e1;">{{ ev.payload_json }}</span>
+    </div>
+    {% else %}
+    <div style="color: #64748b;">Awaiting initial orchestration events...</div>
+    {% endfor %}
+  </div>
+</div>
+
+{% if run.status.value not in ['COMPLETED', 'FAILED', 'CANCELLED'] %}
+<script>
+  let lastEventId = {{ events[-1].id if events else 0 }};
+  const jobId = "{{ run.id }}";
+
+  async function pollUpdates() {
+    try {
+      const res = await fetch(`/api/v1/research/jobs/${jobId}/events?after=${lastEventId}`);
+      if (res.ok) {
+        const newEvents = await res.json();
+        const log = document.getElementById('eventLog');
+        newEvents.forEach(ev => {
+          lastEventId = Math.max(lastEventId, ev.id);
+          const div = document.createElement('div');
+          div.style.marginBottom = '6px';
+          div.innerHTML = `<span style="color: #64748b;">[${ev.created_at.substring(11, 19)}]</span> <span style="color: #38bdf8; font-weight: 600;">${ev.type}</span> &mdash; <span style="color: #cbd5e1;">${JSON.stringify(ev.payload)}</span>`;
+          log.appendChild(div);
+          log.scrollTop = log.scrollHeight;
+        });
+
+        // Check if run completed
+        const jobRes = await fetch(`/api/v1/research/jobs/${jobId}`);
+        if (jobRes.ok) {
+          const job = await jobRes.json();
+          if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status)) {
+            window.location.reload();
+          }
+        }
+      }
+    } catch (e) {
+      console.log('Poll error', e);
+    }
+  }
+
+  setInterval(pollUpdates, 2000);
+</script>
+{% endif %}
+{% endblock %}

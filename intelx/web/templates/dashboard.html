@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — IntelX{% endblock %}
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+  <div>
+    <h1 style="font-size: 22px; font-weight: 800; color: var(--text-main);">Research Operations</h1>
+    <p style="color: var(--text-muted); font-size: 13px;">Evidence-backed intelligence synthesis runs</p>
+  </div>
+  <a href="/research/new" class="btn btn-primary">+ New Research Job</a>
+</div>
+
+<!-- Stat Counters -->
+<div class="grid-3">
+  <div class="stat-widget">
+    <div class="stat-title">Total Investigations</div>
+    <div class="stat-val">{{ total_runs }}</div>
+    <div class="stat-sub">Lifetime submitted runs</div>
+  </div>
+  <div class="stat-widget">
+    <div class="stat-title">Completion Rate</div>
+    <div class="stat-val">{{ completion_rate }}%</div>
+    <div class="stat-sub">{{ completed_runs }} answered runs</div>
+  </div>
+  <div class="stat-widget">
+    <div class="stat-title">Average Cost</div>
+    <div class="stat-val">${{ "%.4f"|format(avg_cost) }}</div>
+    <div class="stat-sub">USD per research execution</div>
+  </div>
+</div>
+
+<!-- Recent Runs Table -->
+<div class="card">
+  <div class="card-header">
+    <h2 style="font-size: 16px; font-weight: 700;">Recent Research Jobs</h2>
+  </div>
+
+  <div class="table-container">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Objective</th>
+          <th>Outcome</th>
+          <th>Cost</th>
+          <th>Submitted</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in runs %}
+        <tr>
+          <td>
+            <span class="status-chip status-{{ run.status.value.lower() }}">{{ run.status.value }}</span>
+          </td>
+          <td>
+            <a href="/research/{{ run.id }}" style="font-weight: 600; color: var(--text-main); text-decoration: none;">
+              {{ run.objective }}
+            </a>
+          </td>
+          <td>
+            {% if run.outcome %}
+            <span style="font-size: 12px; font-weight: 500; color: {% if run.outcome.value == 'ANSWERED' %}var(--color-green){% else %}var(--color-amber){% endif %};">
+              {{ run.outcome.value }}
+            </span>
+            {% else %}
+            <span style="color: var(--text-light);">&mdash;</span>
+            {% endif %}
+          </td>
+          <td>${{ "%.4f"|format(run.usd_cost) }}</td>
+          <td style="color: var(--text-muted); font-size: 12px;">{{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>
+            {% if run.status.value == 'COMPLETED' %}
+            <a href="/research/{{ run.id }}/report" class="btn btn-secondary btn-sm">View Report</a>
+            {% else %}
+            <a href="/research/{{ run.id }}" class="btn btn-secondary btn-sm">Live Job</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 32px;">
+            No research investigations found. Submit your first research run above.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
