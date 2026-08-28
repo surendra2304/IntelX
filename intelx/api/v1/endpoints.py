@@ -607,3 +607,20 @@ async def verify_audit_ledger(
         "errors": errors,
         "verified_at": datetime.now(UTC).isoformat(),
     }
+
+
+# 15. Retention Management
+@router.post("/admin/retention/purge", summary="Purge stale raw data files (Admin)")
+async def trigger_retention_purge(
+    days: int | None = Query(None, description="Override retention days threshold"),
+    admin_key: ApiKey = Depends(require_role(ApiKeyRole.ADMIN)),
+    session: AsyncSession = Depends(get_db_session),
+):
+    from intelx.core.retention import purge_raw_files
+
+    result = await purge_raw_files(
+        session=session,
+        retention_days=days,
+        actor=admin_key.name,
+    )
+    return result

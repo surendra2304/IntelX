@@ -110,6 +110,11 @@ def setup_logging(level: str = "INFO") -> None:
     console_handler.setFormatter(JSONFormatter())
     root_logger.addHandler(console_handler)
 
+    # Attach global regex secret scrubber
+    from intelx.core.security import install_log_scrubber
+
+    install_log_scrubber()
+
     # Silence overly verbose third-party loggers
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("aiosqlite").setLevel(logging.WARNING)

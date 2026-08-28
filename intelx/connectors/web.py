@@ -39,6 +39,36 @@ BLOCKED_EXPLICIT_IPS = {
 }
 
 
+def is_ip_allowed(ip_str: str) -> bool:
+    """Check if an IP address is safe for external requests (publicly routable)."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        if (
+            str(ip) in BLOCKED_EXPLICIT_IPS
+            or ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return False
+        return True
+    except ValueError:
+        return False
+
+
+def validate_and_resolve_url(url: str) -> bool:
+    """Validate that a URL does not resolve to a prohibited IP."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname or ""
+        HttpFetchConnector.validate_ssrf(hostname, parsed.port or 80)
+        return True
+    except SSRFBlockedError:
+        return False
+
+
 @dataclass
 class FetchResult:
     """Outcome of an HTTP fetch operation."""

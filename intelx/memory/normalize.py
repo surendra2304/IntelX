@@ -168,9 +168,18 @@ async def ingest_and_normalize(
             )
         return existing_source, doc, [], False
 
+    # 2.5 Redact high-entropy secrets while preserving character offsets
+    from intelx.core.security import redact_document_text_preserving_length
+
+    processed_text, redactions = redact_document_text_preserving_length(normalized_text)
+    if redactions:
+        sidecar_path = Path("./data/raw").resolve() / f"{fingerprint}.redactions.json"
+        sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+        sidecar_path.write_text(json.dumps(redactions, indent=2), encoding="utf-8")
+
     # 3. Prompt injection scan
     sanitizer = IngestionSanitizer()
-    scan_res = sanitizer.scan(normalized_text, fingerprint=fingerprint)
+    scan_res = sanitizer.scan(processed_text, fingerprint=fingerprint)
 
     # 4. Determine initial trust tier
     if kind == SourceKind.FILE:
@@ -213,11 +222,13 @@ async def ingest_and_normalize(
     doc = await SourceRepo.create_document(
         session=session,
         source_id=source.id,
-        text_content=normalized_text,
+        text_content=processed_text,
     )
+    if redactions:
+        doc.version = 2
 
     # 8. Create Chunks with strict offset verification
-    chunks_spec = chunk_text_with_offsets(normalized_text)
+    chunks_spec = chunk_text_with_offsets(processed_text)
     persisted_chunks: list[Chunk] = []
 
     for spec in chunks_spec:

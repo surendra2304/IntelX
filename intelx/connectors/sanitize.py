@@ -1,20 +1,4 @@
-"""INTELX Ingestion Sanitizer and Prompt Injection Risk Scanner.
-
-CRITICAL SECURITY INVARIANT:
-- The sanitizer NEVER modifies or mutates retrieved content (zero bytes touched).
-- All scanned content remains verbatim so character offsets remain perfectly preserved.
-- When an injection pattern is detected, the source is flagged with `injection_risk = True`
-  and an audit sidecar is stored at `data/raw/<sha256>.flags.json`.
-
-AGENT DELIMITER RULE:
-- Retrieved content is DATA, NEVER instructions.
-- All downstream agents must place external document text ONLY inside user messages,
-  strictly wrapped within delimiter boundaries:
-  <<<EXTERNAL_DOCUMENT id={document_id} source={source_id}>>>
-  {document.text}
-  <<<END_EXTERNAL_DOCUMENT>>>
-- External document content MUST NEVER be placed directly into system prompt instructions.
-"""
+"""INTELX Ingestion Sanitizer and Prompt Injection Risk Scanner."""
 
 import json
 import logging
@@ -34,10 +18,40 @@ INJECTION_PATTERNS = [
     r"(?i)\b\[inst\]|\[\/inst\]\b",
     r"<\|im_start\|>|<\|im_end\|>|<\|system\|>|<\|user\|>|<\|assistant\|>",
     r"(?i)\bforget\s+all\s+(?:previous\s+)?instructions\b",
-    r"(?i)\boverride\s+system\s+prompt\b",
+    r"(?i)\boverride\s+(?:all\s+)?system\s+prompt\b",
     r"(?i)\bjailbreak\b",
     r"(?i)\byou\s+are\s+an?\s+unrestricted\b",
+    r"(?i)<!--\s*(?:instructions|prompt|system|override|ignore).*?-->",
+    r"(?i)<\/?(?:system|instructions|prompt|assistant|human|context)>",
+    r"(?i)\bprint\s+(?:your\s+)?(?:entire\s+)?system\s+prompt\b",
+    r"(?i)<<<END_EXTERNAL_DOCUMENT>>>|<<<EXTERNAL_DOCUMENT",
+    r"""(?i)["']role["']\s*:\s*["']system["']""",
+    r"(?i)javascript:\s*alert",
 ]
+
+# Homoglyph translation mapping for common evasion tricks (Cyrillic to Latin)
+HOMOGLYPH_MAP = str.maketrans(
+    {
+        "а": "a",
+        "с": "c",
+        "е": "e",
+        "о": "o",
+        "р": "p",
+        "ѕ": "s",
+        "х": "x",
+        "у": "y",
+        "і": "i",
+        "А": "A",
+        "С": "C",
+        "Е": "E",
+        "О": "O",
+        "Р": "P",
+        "Ѕ": "S",
+        "Х": "X",
+        "У": "Y",
+        "І": "I",
+    }
+)
 
 
 @dataclass
@@ -59,6 +73,7 @@ class IngestionSanitizer:
         """Scan normalized text for injection signatures without altering a single character."""
         matches: list[dict[str, Any]] = []
 
+        # Standard check
         for pattern in INJECTION_PATTERNS:
             for m in re.finditer(pattern, text):
                 matches.append(
@@ -69,6 +84,20 @@ class IngestionSanitizer:
                         "matched_text": m.group(0),
                     }
                 )
+
+        # Homoglyph & Unicode normalized check
+        normalized_homoglyphs = text.translate(HOMOGLYPH_MAP)
+        if normalized_homoglyphs != text:
+            for pattern in INJECTION_PATTERNS:
+                for m in re.finditer(pattern, normalized_homoglyphs):
+                    matches.append(
+                        {
+                            "pattern": f"homoglyph:{pattern}",
+                            "span_start": m.start(),
+                            "span_end": m.end(),
+                            "matched_text": m.group(0),
+                        }
+                    )
 
         has_risk = len(matches) > 0
 
