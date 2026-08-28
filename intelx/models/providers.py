@@ -53,6 +53,41 @@ class MockProvider(BaseLLMProvider):
                     "What empirical evidence exists regarding future scalability?",
                 ],
                 "stages": ["DISCOVERY", "EXTRACTION", "SYNTHESIS"],
+                "source_strategy": {
+                    "connector_kinds": ["web_search", "file_ingest"],
+                    "domain_hints": ["nature.com", "arxiv.org"],
+                    "time_range": "past_2_years",
+                    "expected_source_count": 5,
+                },
+                "completion_criteria": {
+                    "min_sources_per_subquestion": 2,
+                    "min_independent_corroborations": 2,
+                },
+                "budget_allocation": {
+                    "scout_pct": 0.15,
+                    "retrieve_pct": 0.20,
+                    "extract_pct": 0.25,
+                    "verify_pct": 0.20,
+                    "analyze_pct": 0.10,
+                    "synthesize_pct": 0.10,
+                },
+            }
+        elif normalized_role == "scout":
+            return {
+                "candidates": [
+                    {
+                        "location": "https://nature.com/articles/s41586-quantum-breakthrough",
+                        "title": "Quantum Error Correction Demonstrations",
+                        "reason": "Primary peer-reviewed empirical evidence",
+                        "expected_relevance": 0.95,
+                    },
+                    {
+                        "location": "https://arxiv.org/abs/2608.12345",
+                        "title": "Scalable Surface Code Topologies",
+                        "reason": "Technical theoretical bounds",
+                        "expected_relevance": 0.90,
+                    },
+                ]
             }
         elif normalized_role == "extractor":
             return {
@@ -63,17 +98,17 @@ class MockProvider(BaseLLMProvider):
                         "predicate": "improves",
                         "object": "Baseline Performance",
                         "claim_type": "FACT",
-                        "confidence": 0.95,
+                        "entities": ["System Efficiency", "Baseline Performance"],
+                        "quote": "measurable efficiency improvements",
+                        "relative_span": {"start": 0, "end": 35},
+                        "preliminary_confidence": 0.95,
+                        "rationale": "Direct assertion in source text",
                     },
-                    {
-                        "text": "Production deployments increased by 40 percent year-over-year.",
-                        "subject": "Production Deployments",
-                        "predicate": "increased_by",
-                        "object": "40 percent",
-                        "claim_type": "MEASUREMENT",
-                        "confidence": 0.90,
-                    },
-                ]
+                ],
+                "entities": [
+                    {"name": "System Efficiency", "type": "TECH", "aliases": ["Efficiency"]},
+                ],
+                "events": [],
             }
         elif normalized_role == "verifier":
             return {
