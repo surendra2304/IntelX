@@ -1,6 +1,18 @@
 """INTELX Agents Package."""
 
+from intelx.agents.analyst import (
+    AnalysisResult,
+    AnalystAgent,
+    EntityRelationItem,
+    ThemeItem,
+    TimelineEntry,
+)
 from intelx.agents.base import AgentRegistry, BaseAgent, format_external_document
+from intelx.agents.critic import (
+    CriticAgent,
+    CritiqueReport,
+    OverconfidentClaim,
+)
 from intelx.agents.extractor import (
     ExtractedClaim,
     ExtractedEntity,
@@ -23,6 +35,15 @@ from intelx.agents.retriever import (
     RetrieverOutput,
 )
 from intelx.agents.scout import ScoutAgent, ScoutOutput, SourceCandidate
+from intelx.agents.synthesizer import (
+    SynthesisResult,
+    SynthesizedFinding,
+    SynthesizerAgent,
+)
+from intelx.agents.verifier import (
+    VerificationVerdict,
+    VerifierAgent,
+)
 
 __all__ = [
     "BaseAgent",
@@ -46,4 +67,17 @@ __all__ = [
     "ExtractedEntity",
     "ExtractedEvent",
     "RelativeSpan",
+    "VerifierAgent",
+    "VerificationVerdict",
+    "AnalystAgent",
+    "AnalysisResult",
+    "TimelineEntry",
+    "EntityRelationItem",
+    "ThemeItem",
+    "CriticAgent",
+    "CritiqueReport",
+    "OverconfidentClaim",
+    "SynthesizerAgent",
+    "SynthesisResult",
+    "SynthesizedFinding",
 ]

@@ -119,19 +119,52 @@ class MockProvider(BaseLLMProvider):
             }
         elif normalized_role == "analyst":
             return {
-                "key_themes": ["Scalability", "Cost Efficiency", "Supply Chain Constraints"],
+                "timeline": [
+                    {
+                        "date": "2026-01-15",
+                        "event": "Commercial scaling milestone achieved",
+                        "claim_ids": ["c1"],
+                    }
+                ],
+                "entity_relations": [
+                    {
+                        "subject": "System Efficiency",
+                        "predicate": "accelerates",
+                        "object": "Adoption",
+                        "claim_id": "c1",
+                    }
+                ],
+                "themes": [{"label": "Scalability", "claim_ids": ["c1"]}],
                 "gaps": ["Independent third-party benchmark data is limited."],
+                "key_themes": ["Scalability", "Cost Efficiency", "Supply Chain Constraints"],
                 "confidence_score": 0.88,
             }
         elif normalized_role == "critic":
             return {
+                "unsupported_conclusions": [],
+                "overconfident_claims": [],
+                "missing_angles": ["Long-term lifecycle degradation data"],
+                "severity": "LOW",
+                "summary": "Analysis is well-supported by primary evidence.",
                 "approved": True,
                 "critique": "Analysis is well-supported by primary evidence.",
                 "suggested_improvements": [],
             }
         elif normalized_role == "synthesizer":
             return {
-                "executive_summary": "Comprehensive evidence supports positive trajectory.",
+                "executive_summary": "Comprehensive evidence supports positive scaling trajectory.",
+                "findings": [
+                    {
+                        "conclusion": "High confidence in core architectural scalability.",
+                        "confidence": 0.90,
+                        "confidence_label": "High",
+                        "claim_ids": ["c1"],
+                        "gaps": [],
+                        "contradictions": [],
+                        "unverified": [],
+                    }
+                ],
+                "gaps": [],
                 "primary_findings": [
                     "High confidence in core architectural scalability.",
                     "Supply chain dependencies remain a key execution risk.",

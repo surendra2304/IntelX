@@ -13,6 +13,7 @@ from intelx.core.enums import (
     ClaimStatus,
     ClaimType,
     EvidenceSupportType,
+    RunOutcome,
     RunStatus,
     SourceKind,
     TrustTier,
@@ -88,6 +89,45 @@ class RunRepo:
         run.started_at = datetime.now(UTC)
         await session.flush()
         return run
+
+    @classmethod
+    async def claim_next_queued_run(cls, session: AsyncSession) -> ResearchRun | None:
+        """Alias for claiming the next queued job."""
+        return await cls.get_or_claim_next_queued_job(session)
+
+    @staticmethod
+    async def set_status(
+        session: AsyncSession,
+        run_id: str,
+        status: RunStatus,
+        outcome: RunOutcome | None = None,
+        error_json: dict[str, Any] | None = None,
+    ) -> ResearchRun:
+        """Update run status, outcome, and error metadata."""
+        run = await RunRepo.get_run(session, run_id)
+        if not run:
+            raise NotFoundError(f"Run {run_id} not found")
+        run.status = status
+        if outcome is not None:
+            run.outcome = outcome
+        if error_json is not None:
+            run.error_json = error_json
+        if status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
+            run.completed_at = datetime.now(UTC)
+        await session.flush()
+        return run
+
+    @classmethod
+    async def update_status(
+        cls,
+        session: AsyncSession,
+        run_id: str,
+        status: RunStatus,
+        outcome: RunOutcome | None = None,
+        error_json: dict[str, Any] | None = None,
+    ) -> ResearchRun:
+        """Alias for set_status."""
+        return await cls.set_status(session, run_id, status, outcome, error_json)
 
     @staticmethod
     async def update_cost_counters(
