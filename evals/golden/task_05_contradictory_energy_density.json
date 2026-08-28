@@ -1,0 +1,23 @@
+{
+  "id": "task_05_contradictory_energy_density",
+  "objective": "Investigate silicon composite anode energy density benchmarks and limits",
+  "fixture_docs": [
+    "evals/fixtures/density_paper_nature.txt",
+    "evals/fixtures/density_paper_prl.txt"
+  ],
+  "expected": {
+    "must_find_claims": [
+      "420 Wh/kg",
+      "310 Wh/kg"
+    ],
+    "must_cite_domains": [
+      "nature.com",
+      "prl-physics.org"
+    ],
+    "must_not_claim": [],
+    "expected_contradictions": [
+      "420 Wh/kg vs 310 Wh/kg measurement conflict"
+    ],
+    "expected_outcome": "ANSWERED"
+  }
+}

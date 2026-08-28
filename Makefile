@@ -12,6 +12,9 @@ dev:
 test:
 	python -m pytest -v tests/
 
+eval:
+	python -m evals.run
+
 lint:
 	python -m ruff check .
 	python -m ruff format --check .

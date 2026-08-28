@@ -1,0 +1,8 @@
+{
+  "citation_validity_rate": 1.0,
+  "groundedness_rate": 0.9,
+  "contradiction_recall": 0.75,
+  "null_result_correctness": 1.0,
+  "independence_correctness": 1.0,
+  "completion_rate": 1.0
+}

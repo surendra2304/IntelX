@@ -1,0 +1,15 @@
+{
+  "id": "task_06_unsupported_perpetual_motion",
+  "objective": "Determine verified empirical evidence for zero-point perpetual energy harvesting in vacuum",
+  "fixture_docs": [],
+  "expected": {
+    "must_find_claims": [],
+    "must_cite_domains": [],
+    "must_not_claim": [
+      "perpetual energy verified",
+      "over-unity confirmed"
+    ],
+    "expected_contradictions": [],
+    "expected_outcome": "INSUFFICIENT_EVIDENCE"
+  }
+}

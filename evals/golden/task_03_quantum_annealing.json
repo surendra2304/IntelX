@@ -1,0 +1,21 @@
+{
+  "id": "task_03_quantum_annealing",
+  "objective": "Evaluate superconducting quantum annealer benchmarks on optimization graphs",
+  "fixture_docs": [
+    "evals/fixtures/quantum_wire_reuters.txt"
+  ],
+  "expected": {
+    "must_find_claims": [
+      "100x speedup",
+      "5000-qubit"
+    ],
+    "must_cite_domains": [
+      "reuters.com"
+    ],
+    "must_not_claim": [
+      "general artificial intelligence"
+    ],
+    "expected_contradictions": [],
+    "expected_outcome": "ANSWERED"
+  }
+}

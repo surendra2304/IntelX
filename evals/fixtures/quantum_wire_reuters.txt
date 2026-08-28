@@ -1,0 +1,9 @@
+# Reuters Wire: Quantum Annealer Demonstrates Speedup on Logistics Graph
+Published: 2026-04-10
+Domain: reuters.com
+Publisher: Reuters News Agency
+
+Researchers benchmarked a 5000-qubit superconducting quantum annealer against classical heuristic solvers on dense graph partitioning problems.
+The quantum processing unit achieved a 100x speedup in time-to-solution compared to standard simulated annealing algorithms on 1000-node portfolio optimization graphs.
+Power consumption of the cryogenic refrigeration system measured 12.5 kW during peak computation.
+Commercial logistics partners have begun cloud integration pilots.

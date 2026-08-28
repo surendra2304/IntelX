@@ -1,0 +1,8 @@
+# Opinion: The Next Decade in Grid Battery Chemistry
+Published: 2026-06-12
+Domain: energy-pundit.blog
+Publisher: Battery Insights Blog
+
+I believe sodium-ion batteries will easily replace all lithium-ion chemistries by 2030 because sodium is universally abundant.
+While lab numbers vary, market sentiment clearly favors solid-state architectures.
+Investors should expect exponential improvements in cost reductions over the next five years.

@@ -1,0 +1,21 @@
+{
+  "id": "task_02_solid_state_cycling",
+  "objective": "Determine composite sulfide solid-state capacity retention",
+  "fixture_docs": [
+    "evals/fixtures/solid_state_cycling.txt"
+  ],
+  "expected": {
+    "must_find_claims": [
+      "85% capacity retention",
+      "1000 continuous cycles"
+    ],
+    "must_cite_domains": [
+      "advanced-materials.org"
+    ],
+    "must_not_claim": [
+      "unlimited cycle life"
+    ],
+    "expected_contradictions": [],
+    "expected_outcome": "ANSWERED"
+  }
+}

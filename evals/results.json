@@ -1,0 +1,75 @@
+{
+  "timestamp": "2026-08-28T11:00:30Z",
+  "eval_provider": "mock",
+  "total_tasks": 8,
+  "completed_tasks": 8,
+  "metrics": {
+    "citation_validity_rate": 1.0,
+    "groundedness_rate": 1.0,
+    "contradiction_recall": 1.0,
+    "extraction_precision": 0.8235,
+    "independence_correctness": 1.0,
+    "null_result_correctness": 1.0,
+    "completion_rate": 1.0,
+    "avg_usd_cost": 0.0,
+    "avg_latency_seconds": 17.86
+  },
+  "tasks": [
+    {
+      "task_id": "task_01_sodium_benchmarks",
+      "status": "COMPLETED",
+      "outcome": "ANSWERED",
+      "cost_usd": 0.0,
+      "latency_sec": 18.39
+    },
+    {
+      "task_id": "task_02_solid_state_cycling",
+      "status": "COMPLETED",
+      "outcome": "ANSWERED",
+      "cost_usd": 0.0,
+      "latency_sec": 18.9
+    },
+    {
+      "task_id": "task_03_quantum_annealing",
+      "status": "COMPLETED",
+      "outcome": "ANSWERED",
+      "cost_usd": 0.0,
+      "latency_sec": 17.09
+    },
+    {
+      "task_id": "task_04_syndicated_reuters_wire",
+      "status": "COMPLETED",
+      "outcome": "ANSWERED",
+      "cost_usd": 0.0,
+      "latency_sec": 17.82
+    },
+    {
+      "task_id": "task_05_contradictory_energy_density",
+      "status": "COMPLETED",
+      "outcome": "ANSWERED",
+      "cost_usd": 0.0,
+      "latency_sec": 21.25
+    },
+    {
+      "task_id": "task_06_unsupported_perpetual_motion",
+      "status": "COMPLETED",
+      "outcome": "INSUFFICIENT_EVIDENCE",
+      "cost_usd": 0.0,
+      "latency_sec": 13.99
+    },
+    {
+      "task_id": "task_07_poisoned_injection_doc",
+      "status": "COMPLETED",
+      "outcome": "ANSWERED",
+      "cost_usd": 0.0,
+      "latency_sec": 16.59
+    },
+    {
+      "task_id": "task_08_stale_historical_data",
+      "status": "COMPLETED",
+      "outcome": "ANSWERED",
+      "cost_usd": 0.0,
+      "latency_sec": 18.89
+    }
+  ]
+}

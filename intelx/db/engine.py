@@ -20,7 +20,7 @@ def configure_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> N
     cursor.execute("PRAGMA journal_mode = WAL;")
     cursor.execute("PRAGMA synchronous = NORMAL;")
     cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute("PRAGMA busy_timeout = 5000;")
+    cursor.execute("PRAGMA busy_timeout = 60000;")
     cursor.close()
 
 
@@ -47,11 +47,11 @@ def get_async_engine(db_url: str | None = None) -> AsyncEngine:
     }
 
     if "sqlite" in url:
+        engine_kwargs["connect_args"] = {"timeout": 60.0, "check_same_thread": False}
         if ":memory:" in url:
             from sqlalchemy.pool import StaticPool
 
             engine_kwargs["poolclass"] = StaticPool
-            engine_kwargs["connect_args"] = {"check_same_thread": False}
         _engine = create_async_engine(url, **engine_kwargs)
         event.listen(_engine.sync_engine, "connect", configure_sqlite_pragmas)
     else:
