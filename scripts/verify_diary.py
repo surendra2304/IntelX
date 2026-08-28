@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
-"""
-IntelX Diary Validator
+"""IntelX Diary Validator.
+
 Enforces strict structural and line count rules for IntelX Engineering Diaries:
-- Total lines in diary/YYYY-MM-DD.md must be strictly between 51 and 99 lines (50 < total_lines < 100).
-- Daily summary lines must be strictly between 16 and 29 lines (15 < summary_lines < 30).
+- Total lines in diary/YYYY-MM-DD.md must be strictly between 51 and 99 lines.
+- Daily summary lines must be strictly between 16 and 29 lines.
 - Voice must be active first-person ("I ...").
 """
 
 import sys
 from pathlib import Path
 
+
 def verify_diary_file(filepath: Path) -> bool:
+    """Verify line count and voice invariants of a daily diary file."""
     print(f"Checking diary: {filepath}")
-    with open(filepath, "r", encoding="utf-8") as f:
-        lines = [l.rstrip("\r\n") for l in f.readlines()]
-    
+    with open(filepath, encoding="utf-8") as file_handle:
+        lines = [line.rstrip("\r\n") for line in file_handle.readlines()]
+
     total_lines = len(lines)
     print(f"  Total lines: {total_lines}")
-    assert 50 < total_lines < 100, f"Total lines {total_lines} must be between 51 and 99 in {filepath.name}"
+    assert 50 < total_lines < 100, (
+        f"Total lines {total_lines} must be between 51 and 99 in {filepath.name}"
+    )
 
     # Extract Daily Summary bullet points
     in_summary = False
@@ -34,15 +38,21 @@ def verify_diary_file(filepath: Path) -> bool:
 
     summary_count = len(summary_bullets)
     print(f"  Summary bullets: {summary_count}")
-    assert 15 < summary_count < 30, f"Daily summary bullets ({summary_count}) must be between 16 and 29 in {filepath.name}"
+    assert 15 < summary_count < 30, (
+        f"Daily summary bullets ({summary_count}) must be between 16 and 29 in {filepath.name}"
+    )
 
-    for b in summary_bullets:
-        assert b.startswith("- I "), f"Bullet must start with first-person voice '- I ': '{b}'"
+    for bullet in summary_bullets:
+        assert bullet.startswith("- I "), (
+            f"Bullet must start with first-person voice '- I ': '{bullet}'"
+        )
 
     print(f"  [PASS] {filepath.name} conforms to all diary rules.")
     return True
 
+
 def main():
+    """Run verification across all diary files."""
     diary_dir = Path("diary")
     if not diary_dir.exists():
         print("No diary directory found.")
@@ -54,16 +64,17 @@ def main():
         sys.exit(1)
 
     all_passed = True
-    for f in diary_files:
+    for diary_file in diary_files:
         try:
-            verify_diary_file(f)
-        except AssertionError as e:
-            print(f"  [FAIL] {e}")
+            verify_diary_file(diary_file)
+        except AssertionError as err:
+            print(f"  [FAIL] {err}")
             all_passed = False
 
     if not all_passed:
         sys.exit(1)
     print("\nAll diary files passed validation successfully.")
+
 
 if __name__ == "__main__":
     main()
