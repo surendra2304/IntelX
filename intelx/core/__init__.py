@@ -3,12 +3,18 @@
 from intelx.core.errors import (
     BudgetExceededError,
     ConfigError,
+    ContentSizeExceededError,
     DatabaseError,
+    DomainPolicyError,
     IntegrityError,
     IntelXError,
     NotFoundError,
     ProviderError,
+    RobotsDisallowedError,
+    SecurityError,
+    SSRFBlockedError,
     StructuredOutputError,
+    UnsupportedContentTypeError,
     ValidationError,
 )
 from intelx.core.logging import setup_logging
@@ -30,4 +36,10 @@ __all__ = [
     "ProviderError",
     "BudgetExceededError",
     "StructuredOutputError",
+    "SecurityError",
+    "SSRFBlockedError",
+    "RobotsDisallowedError",
+    "ContentSizeExceededError",
+    "UnsupportedContentTypeError",
+    "DomainPolicyError",
 ]

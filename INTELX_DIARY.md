@@ -6,8 +6,8 @@ Welcome to the engineering diary of **IntelX**. This document tracks daily progr
 
 ## 📅 Daily Logs
 
-### 📈 [Day 1 — 2026-08-28: Steps 1, 2 & 3 Architecture, Evidence Model & Model Gateway](diary/2026-08-28.md)
-- **🎯 Focus**: Repository genesis, Step 1 architectural setup, async database engine with SQLite WAL, Alembic baseline, FastAPI app factory, request-ID middleware, structured JSON logging, Step 2 relational evidence data model (18 tables), typed repositories, span integrity enforcement, cryptographic AuditChain, FTS5 search, Step 3 central Model Gateway, role-based routing, deterministic MockProvider, OpenAI/Anthropic providers, and structured output self-correction.
+### 📈 [Day 1 — 2026-08-28: Steps 1, 2, 3 & 4 Architecture, Models, Gateway & Connectors](diary/2026-08-28.md)
+- **🎯 Focus**: Repository genesis, Step 1 architectural setup, async database engine with SQLite WAL, Alembic baseline, FastAPI app factory, request-ID middleware, structured JSON logging, Step 2 relational evidence data model (18 tables), typed repositories, span integrity enforcement, cryptographic AuditChain, FTS5 search, Step 3 central Model Gateway with role-based routing and structured output self-correction, Step 4 security-hardened connectors (`HttpFetchConnector` with SSRF/robots/size guards, `WebSearchConnector`, `FileConnector`), normalization with absolute character offsets, and non-mutating prompt injection scanner.
 - **💡 What I Accomplished**:
   - I created the official IntelX repository and pushed the baseline to GitHub.
   - I established the engineering diary framework (`diary/YYYY-MM-DD.md` and `INTELX_DIARY.md`) and automated validation script `scripts/verify_diary.py`.
@@ -16,12 +16,14 @@ Welcome to the engineering diary of **IntelX**. This document tracks daily progr
   - I implemented all 18 typed SQLAlchemy 2.0 models covering runs, tasks, sources, documents, chunks, entities, claims, evidence, findings, artifacts, and audit events.
   - I authored typed repository layer in `intelx/db/repos.py` (`RunRepo`, `SourceRepo`, `ClaimRepo`, `EvidenceRepo`, `AuditChain`).
   - I built the central `ModelGateway` in `intelx/models/gateway.py` with role-based routing (`planner`, `extractor`, `verifier`, `analyst`, `synthesizer`, `critic`).
-  - I created `MockProvider` delivering deterministic canned outputs and dynamic Pydantic mock instances.
-  - I implemented structured output validation with single-attempt self-healing retry logic and `StructuredOutputError`.
-  - I added OpenAI-compatible and Anthropic provider adapters with 3-attempt exponential backoff.
-  - I developed comprehensive test suites with 20 passing tests and verified zero ruff lint errors.
-- **🛡️ Fixes & Hardening**: Fixed Pydantic v2 `PydanticUndefined` default handling in mock generator, stripped markdown code fences from JSON output, and standardized audit timestamp formatting.
-- **📊 Test Results**: **20 tests passed** (100% green pass rate).
+  - I implemented `HttpFetchConnector` with mandatory multi-hop SSRF protection, robots.txt caching, streaming size caps, and MIME validation.
+  - I built `WebSearchConnector` supporting Tavily, DuckDuckGo HTML scraping, and offline mock fixtures.
+  - I created `FileConnector` supporting PDF, DOCX, HTML, Markdown, CSV, and JSON parsing.
+  - I built the text normalization and chunking pipeline in `intelx/memory/normalize.py` ensuring `document.text[start:end] == chunk.text`.
+  - I created `IngestionSanitizer` scanning for prompt injection signatures and storing sidecar JSON files without mutating content bytes.
+  - I developed comprehensive test suites with 30 passing tests and verified zero ruff lint errors.
+- **🛡️ Fixes & Hardening**: Fixed document resolution by `source_id` on deduplication, dynamically bound connector settings in policy guards, and verified zero-mutation injection scanning.
+- **📊 Test Results**: **30 tests passed** (100% green pass rate).
 
 ---
 

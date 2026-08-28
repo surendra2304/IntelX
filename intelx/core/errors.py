@@ -50,6 +50,30 @@ class StructuredOutputError(IntelXError):
     """Raised when model response fails schema validation after retry."""
 
 
+class SecurityError(IntelXError):
+    """Base exception for security boundary violations."""
+
+
+class SSRFBlockedError(SecurityError):
+    """Raised when an HTTP request targets a private, loopback, or cloud-metadata IP."""
+
+
+class RobotsDisallowedError(SecurityError):
+    """Raised when robots.txt disallows web crawling."""
+
+
+class ContentSizeExceededError(SecurityError):
+    """Raised when downloaded body exceeds MAX_PAGE_BYTES limit."""
+
+
+class UnsupportedContentTypeError(SecurityError):
+    """Raised when downloaded response has an unpermitted MIME content type."""
+
+
+class DomainPolicyError(SecurityError):
+    """Raised when domain violates allowlist or denylist policy."""
+
+
 async def intelx_exception_handler(request: Request, exc: IntelXError) -> JSONResponse:
     """Handle custom IntelX errors gracefully."""
     logger.error(

@@ -214,6 +214,23 @@ class SourceRepo:
         return new_source, True
 
     @staticmethod
+    async def get_source(session: AsyncSession, source_id: str) -> Source | None:
+        """Fetch source by ID."""
+        stmt = select(Source).where(Source.id == source_id)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def set_trust(session: AsyncSession, source_id: str, trust_tier: TrustTier) -> Source:
+        """Update the trust tier for a source."""
+        source = await SourceRepo.get_source(session, source_id)
+        if not source:
+            raise NotFoundError(f"Source {source_id} not found")
+        source.trust_tier = trust_tier
+        await session.flush()
+        return source
+
+    @staticmethod
     async def get_sources_by_tier(session: AsyncSession, trust_tier: TrustTier) -> list[Source]:
         """Fetch all sources belonging to a specific trust tier."""
         stmt = select(Source).where(Source.trust_tier == trust_tier)
@@ -243,6 +260,17 @@ class SourceRepo:
     async def get_document(session: AsyncSession, document_id: str) -> Document | None:
         """Fetch document by primary key."""
         stmt = select(Document).where(Document.id == document_id)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_document_by_source_id(session: AsyncSession, source_id: str) -> Document | None:
+        """Fetch primary document associated with a source."""
+        stmt = (
+            select(Document)
+            .where(Document.source_id == source_id)
+            .order_by(Document.version.desc())
+        )
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
 
