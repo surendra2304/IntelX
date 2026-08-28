@@ -389,10 +389,12 @@ class OrchestrationEngine:
 
             # 8. SYNTHESIZING STAGE
             run = await self.transition_state(session, run, RunStatus.SYNTHESIZING)
-            await self.synthesizer.execute(
+            synthesis_res = await self.synthesizer.execute(
                 objective=run.objective,
                 claims=claims,
                 analysis=analysis,
+                critique=critique,
+                degradations=degradations,
                 session=session,
                 run_id=run_id,
             )
@@ -414,7 +416,11 @@ class OrchestrationEngine:
                 )
                 return run
 
-            if not claims or len(claims) == 0:
+            if (
+                not claims
+                or len(claims) == 0
+                or synthesis_res.overall_confidence_label == "Very low"
+            ):
                 outcome = RunOutcome.INSUFFICIENT_EVIDENCE
             else:
                 outcome = RunOutcome.ANSWERED

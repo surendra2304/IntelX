@@ -6,8 +6,8 @@ Welcome to the engineering diary of **IntelX**. This document tracks daily progr
 
 ## 📅 Daily Logs
 
-### 📈 [Day 1 — 2026-08-28: Steps 1 through 7 (Core Monolith, Evidence Model, Gateway, Connectors, First 4 Agents, Trust Layer & Orchestration Engine)](diary/2026-08-28.md)
-- **🎯 Focus**: Repository genesis, Step 1 architectural setup, async database engine with SQLite WAL, Alembic migrations, FastAPI app factory, structured logging, Step 2 relational evidence data model (18 tables), typed repositories, span integrity enforcement, cryptographic AuditChain, FTS5 search, Step 3 central Model Gateway with role-based routing and structured output self-correction, Step 4 security-hardened connectors (`HttpFetchConnector`, `WebSearchConnector`, `FileConnector`), normalization with absolute character offsets, Step 5 first four typed agents (`PlannerAgent`, `ScoutAgent`, `RetrieverAgent`, `ExtractorAgent`), Step 6 trust layer (`VerifierAgent`, deterministic v1 composite confidence formula, contradiction handling, `EntityResolver`, `AnalystAgent`, `CriticAgent`), and Step 7 orchestration engine (`OrchestrationEngine` state machine, `OrchestrationWorker`, `EventStreamManager` SSE broadcasting, `SynthesizerAgent`, budget/cancellation gates, and review gates).
+### 📈 [Day 1 — 2026-08-28: Steps 1 through 8 (Core Monolith, Evidence Model, Gateway, Connectors, Agents, Trust Layer, Orchestration & Synthesis Artifacts)](diary/2026-08-28.md)
+- **🎯 Focus**: Repository genesis, Step 1 architectural setup, async database engine with SQLite WAL, Alembic migrations, FastAPI app factory, structured logging, Step 2 relational evidence data model (18 tables), typed repositories, span integrity enforcement, cryptographic AuditChain, FTS5 search, Step 3 central Model Gateway with role-based routing, Step 4 security-hardened connectors (`HttpFetchConnector`, `WebSearchConnector`, `FileConnector`), normalization with character offsets, Step 5 first four typed agents (`PlannerAgent`, `ScoutAgent`, `RetrieverAgent`, `ExtractorAgent`), Step 6 trust layer (`VerifierAgent`, deterministic v1 composite confidence formula, contradiction handling, `EntityResolver`, `AnalystAgent`, `CriticAgent`), Step 7 orchestration engine (`OrchestrationEngine` state machine, `OrchestrationWorker`, `EventStreamManager` SSE broadcasting), and Step 8 synthesis & artifacts (`SynthesizerAgent`, `render_report_markdown` with all 9 required sections, machine-enforced citation integrity, groundedness partitioning, atomic multi-format artifact manager producing `report.md`, `report.json`, `evidence_pack.json`, `sources.csv`).
 - **💡 What I Accomplished**:
   - I created the official IntelX repository and pushed the baseline to GitHub.
   - I established the engineering diary framework (`diary/YYYY-MM-DD.md` and `INTELX_DIARY.md`) and automated validation script `scripts/verify_diary.py`.
@@ -18,20 +18,20 @@ Welcome to the engineering diary of **IntelX**. This document tracks daily progr
   - I built the central `ModelGateway` in `intelx/models/gateway.py` with role-based routing (`planner`, `extractor`, `verifier`, `analyst`, `synthesizer`, `critic`).
   - I implemented `HttpFetchConnector`, `WebSearchConnector`, and `FileConnector` with strict SSRF and MIME guards.
   - I built `BaseAgent` and `AgentRegistry` in `intelx/agents/base.py` enforcing `<<<EXTERNAL_DOCUMENT>>>` user-message delimiters.
-  - I authored `PlannerAgent` in `intelx/agents/planner.py` with 5-subquestion capping and budget allocation.
-  - I created `ScoutAgent` in `intelx/agents/scout.py` querying web search and existing internal FTS5 knowledge.
-  - I built `RetrieverAgent` in `intelx/agents/retriever.py` with transient retry tolerance and logical error capture.
-  - I developed `ExtractorAgent` in `intelx/agents/extractor.py` enforcing verbatim substring matching, absolute span recalculation, and opinion attribution rules.
-  - I engineered `VerifierAgent` in `intelx/agents/verifier.py` with 3-gram Jaccard independence checking, two-sided contradiction handling, and quarantine bounds.
+  - I authored `PlannerAgent`, `ScoutAgent`, `RetrieverAgent`, and `ExtractorAgent` with verbatim substring matching.
+  - I engineered `VerifierAgent` with 3-gram Jaccard independence checking, two-sided contradiction handling, and quarantine bounds.
   - I built the deterministic v1 composite confidence formula in `intelx/core/confidence.py` with penalty tracking and human-auditable documentation.
   - I implemented `EntityResolver` in `intelx/memory/entities.py` with company alias normalization, automated merge thresholds, and proposal lifecycle.
-  - I authored `AnalystAgent` and `CriticAgent` in `intelx/agents/` deriving structured timelines, knowledge graph edges, and draft critiques.
-  - I developed `SynthesizerAgent` in `intelx/agents/synthesizer.py` formulating executive conclusions, backing claims, and explicit gap identification for null outcomes.
-  - I engineered `OrchestrationEngine` in `intelx/orchestration/engine.py` managing the complete research DAG state machine with concurrency semaphores, budget gates, and human review gates.
+  - I authored `AnalystAgent` and `CriticAgent` structuring timelines, knowledge graphs, and draft critiques.
+  - I engineered `OrchestrationEngine` managing DAG state machine transitions, concurrency semaphores, budget ceilings, and review gates.
   - I built `OrchestrationWorker` in `intelx/orchestration/worker.py` and `EventStreamManager` in `intelx/orchestration/events.py` for live SSE pub/sub telemetry.
-  - I authored comprehensive test suites achieving 100% green pass rate across 47 automated tests.
-- **🛡️ Fixes & Hardening**: Fixed session flush concurrency collisions, eliminated candidate retrieval uniqueness violations via deduplication, properly handled `REVIEW_REQUIRED` stage resumptions, and maintained strict typing and formatting standards across all 83 files.
-- **📊 Test Results**: **47 tests passed** (100% green pass rate).
+  - I developed the official Markdown report renderer with all 9 standard sections and strict citation formatting `[S:id]` / `[C:id]`.
+  - I built machine-enforced citation integrity checking raising `IntegrityError` on any unresolvable citation tokens.
+  - I created groundedness validation moving unbacked findings into an Unverified Observations appendix.
+  - I implemented versioned atomic artifact exporters generating `report.md`, `report.json`, `evidence_pack.json`, and `sources.csv` with recorded SHA256 checksums.
+  - I authored comprehensive test suites achieving 100% green pass rate across 52 automated tests.
+- **🛡️ Fixes & Hardening**: Fixed model attribute access on dictionary vs instance lookups, expanded source querying scope to all claim references, and validated atomic file replacement.
+- **📊 Test Results**: **52 tests passed** (100% green pass rate).
 
 ---
 

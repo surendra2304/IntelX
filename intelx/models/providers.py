@@ -152,9 +152,23 @@ class MockProvider(BaseLLMProvider):
             }
         elif normalized_role == "synthesizer":
             return {
+                "executive_answer": "Comprehensive evidence supports positive scaling trajectory.",
                 "executive_summary": "Comprehensive evidence supports positive scaling trajectory.",
+                "key_findings": [
+                    {
+                        "statement": "High confidence in core architectural scalability.",
+                        "conclusion": "High confidence in core architectural scalability.",
+                        "confidence": 0.90,
+                        "confidence_label": "High",
+                        "claim_ids": ["c1"],
+                        "gaps": [],
+                        "contradictions": [],
+                        "unverified": [],
+                    }
+                ],
                 "findings": [
                     {
+                        "statement": "High confidence in core architectural scalability.",
                         "conclusion": "High confidence in core architectural scalability.",
                         "confidence": 0.90,
                         "confidence_label": "High",
