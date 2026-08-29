@@ -265,6 +265,8 @@ async def get_research_job(
 
 # 4. Cancel Job
 @router.post("/research/jobs/{job_id}/cancel", summary="Cancel an active research job")
+@router.delete("/research/jobs/{job_id}", summary="Cancel an active research job (DELETE)")
+@router.delete("/runs/{job_id}", summary="Cancel an active research job via /runs/{id}")
 async def cancel_research_job(
     job_id: str,
     api_key: ApiKey = Depends(get_current_api_key),

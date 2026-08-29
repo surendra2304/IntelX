@@ -55,8 +55,14 @@ make eval    # Run deterministic golden evaluation suite
 | **Contradiction Recall** | **100.0%** | $\ge 75.0\%$ | `PASS` | Opposing measurement and factual conflicts flagged into Disputed status. |
 | **Null Result Correctness** | **100.0%** | $\ge 100.0\%$ | `PASS` | Impossible/zero-evidence objectives yield `INSUFFICIENT_EVIDENCE`. |
 | **Independence Correctness** | **100.0%** | $\ge 100.0\%$ | `PASS` | Syndicated wire copies rejected from independent corroboration counts. |
-| **Extraction Precision** | **82.3%** | — | `PASS` | Primary assertions matching expected benchmark propositions. |
+| **Extraction Precision** | **58.3%** | — | `PASS` | Primary assertions matching expected benchmark propositions. |
 | **Completion Rate** | **100.0%** | $\ge 100.0\%$ | `PASS` | All golden benchmark investigations run successfully to completion. |
+
+### 🎯 What Mock Mode Evals Prove
+Mock Mode evals verify **pipeline mechanical integrity and architectural invariants**: citation validity, exact verbatim character spans (`doc.text[start:end] == quote`), state machine DAG transitions, null results on unprovable queries, and syndicated wire independence deduplication. They do **NOT** measure real-world LLM research quality; contradiction recall and groundedness metrics only become true quality indicators when executed against live LLM backends (`openai_compatible` or `anthropic`).
+
+### ⚡ Run Latency Drop Explained
+Average run latency in the eval suite dropped from ~19.2s to ~0.41s because the earlier mock implementation emitted synthetic public web URLs (`https://en.wikipedia.org/...`) that triggered live socket calls in `HttpFetchConnector` and stalled on TCP connection timeouts. Local fixture routing (`file://...`) resolves immediately from disk in <1ms without network I/O.
 
 ---
 
@@ -94,6 +100,8 @@ intelx seed-demo           # Seed local fixture data and queue a demo run
 intelx eval                # Run deterministic golden evaluation benchmark suite
 intelx purge --days 30     # Run retention purge for stale raw cached files
 intelx verify-audit        # Cryptographically verify tamper-evident audit ledger
+intelx smoke-llm           # Smoke test live LLM providers across all 6 agent roles
+intelx smoke-live          # Execute complete live research investigation against real providers
 ```
 
 ---
@@ -117,6 +125,7 @@ intelx verify-audit        # Cryptographically verify tamper-evident audit ledge
 
 - [x] **Step 1–12**: Monolith foundations, evidence schema, role routing, agent fleet, trust layer, orchestration, artifacts, API, Web UI, security hardening, and eval harness.
 - [x] **Step 13**: Architecture documentation, ADRs, Dockerization, console CLI, and release polish.
+- [x] **Phase 2, Step F**: Real-Provider bring-up (`OpenAICompatibleProvider`, `AnthropicProvider`), quote alignment fuzzy snapping, snippet fallback retrieval, and live smoke CLI (`smoke-llm`, `smoke-live`).
 - [ ] **Multi-Tenant Partitioning**: Indexed `tenant_id` namespaces and PostgreSQL Row-Level Security (RLS) policies.
 - [ ] **Production Search Scale**: Distributed search connectors (Brave Search, Bing Search, Google Serper) with token bucket rate limiters.
 - [ ] **Dense Vector Embeddings**: Hybrid sparse (FTS5 BM25) + dense vector (HNSW / pgvector) hybrid reranking.
@@ -127,8 +136,10 @@ intelx verify-audit        # Cryptographically verify tamper-evident audit ledge
 ## 🧪 Testing & Linting
 
 ```bash
-make test          # Run full pytest test battery (84 tests)
+make test          # Run full pytest test battery
 make eval          # Run golden evaluation benchmark harness
 make lint          # Verify formatting and lint rules via ruff
 make verify-audit  # Verify cryptographic audit chain integrity
+make smoke-llm     # Diagnostic LLM gateway role checks
+make smoke-live    # Full live pipeline execution with real keys
 ```

@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, text, update
+from sqlalchemy import case, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.core.enums import (
@@ -19,6 +19,7 @@ from intelx.core.enums import (
     TrustTier,
 )
 from intelx.core.errors import IntegrityError, NotFoundError
+from intelx.core.settings import get_settings
 from intelx.db.models import (
     AuditEvent,
     Chunk,
@@ -72,12 +73,41 @@ class RunRepo:
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def get_or_claim_next_queued_job(session: AsyncSession) -> ResearchRun | None:
-        """Atomically claim the next queued research job and transition status to PLANNING."""
+    async def get_or_claim_next_queued_job(
+        session: AsyncSession, max_concurrent: int | None = None
+    ) -> ResearchRun | None:
+        """Atomically claim the next queued research job with priority handling and concurrency bounds."""
+        settings = get_settings()
+        limit = max_concurrent if max_concurrent is not None else settings.MAX_CONCURRENT_RUNS
+
+        active_statuses = [
+            RunStatus.PLANNING,
+            RunStatus.DISCOVERING,
+            RunStatus.RETRIEVING,
+            RunStatus.EXTRACTING,
+            RunStatus.VERIFYING,
+            RunStatus.ANALYZING,
+            RunStatus.SYNTHESIZING,
+            RunStatus.REVIEW_REQUIRED,
+        ]
+        stmt_active = select(func.count(ResearchRun.id)).where(
+            ResearchRun.status.in_(active_statuses)
+        )
+        active_count = (await session.execute(stmt_active)).scalar_one() or 0
+        if active_count >= limit:
+            return None
+
+        priority_order = case(
+            (func.json_extract(ResearchRun.scope_json, "$.priority") == "urgent", 0),
+            (func.json_extract(ResearchRun.scope_json, "$.context.priority") == "urgent", 0),
+            (func.json_extract(ResearchRun.scope_json, "$.priority") == "high", 1),
+            (func.json_extract(ResearchRun.scope_json, "$.context.priority") == "high", 1),
+            else_=2,
+        )
         stmt = (
             select(ResearchRun)
             .where(ResearchRun.status == RunStatus.QUEUED)
-            .order_by(ResearchRun.created_at.asc())
+            .order_by(priority_order.asc(), ResearchRun.created_at.asc())
             .limit(1)
         )
         result = await session.execute(stmt)

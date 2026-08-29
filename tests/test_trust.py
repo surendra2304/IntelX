@@ -362,3 +362,57 @@ async def test_critic_and_analyst_agents():
     )
     assert critique.severity in ("LOW", "MEDIUM", "HIGH")
     assert hasattr(critique, "unsupported_conclusions")
+
+
+@pytest.mark.asyncio
+async def test_mock_dispute_precision_different_vs_same_subject():
+    """Verify mock verifier requires same entity, same metric family, and conflicting values for dispute."""
+    from intelx.models.providers import MockProvider
+
+    provider = MockProvider()
+
+    # 1. Different subjects, different values -> NOT disputed (VERIFIED)
+    msg_diff = [
+        {
+            "role": "user",
+            "content": (
+                "ORIGINAL CLAIM: Chemistry X shows an active gravimetric energy density of 160 Wh/kg.\n"
+                "ORIGINAL QUOTE: Chemistry X shows an active gravimetric energy density of 160 Wh/kg.\n\n"
+                "CANDIDATE CLAIM: Chemistry Y shows an active gravimetric energy density of 310 Wh/kg.\n"
+                "CANDIDATE QUOTE: Chemistry Y shows an active gravimetric energy density of 310 Wh/kg.\n\n"
+                "Evaluate relationship."
+            ),
+        }
+    ]
+    text_diff, _ = await provider.complete(
+        messages=msg_diff,
+        model="mock-gpt-4o",
+        role="verifier",
+        schema_model=VerificationVerdict,
+    )
+    verdict_diff = VerificationVerdict.model_validate_json(text_diff)
+    assert verdict_diff.verdict == "VERIFIED"
+    assert verdict_diff.support_type == EvidenceSupportType.SUPPORTS
+
+    # 2. Same subject, same metric, conflicting values -> DISPUTED (CONTRADICTED)
+    msg_same = [
+        {
+            "role": "user",
+            "content": (
+                "ORIGINAL CLAIM: Chemistry X shows an active gravimetric energy density of 160 Wh/kg.\n"
+                "ORIGINAL QUOTE: Chemistry X shows an active gravimetric energy density of 160 Wh/kg.\n\n"
+                "CANDIDATE CLAIM: Chemistry X shows an active gravimetric energy density of 120 Wh/kg.\n"
+                "CANDIDATE QUOTE: Chemistry X shows an active gravimetric energy density of 120 Wh/kg.\n\n"
+                "Evaluate relationship."
+            ),
+        }
+    ]
+    text_same, _ = await provider.complete(
+        messages=msg_same,
+        model="mock-gpt-4o",
+        role="verifier",
+        schema_model=VerificationVerdict,
+    )
+    verdict_same = VerificationVerdict.model_validate_json(text_same)
+    assert verdict_same.verdict == "CONTRADICTED"
+    assert verdict_same.support_type == EvidenceSupportType.CONTRADICTS

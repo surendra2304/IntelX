@@ -1,7 +1,9 @@
 """INTELX Extractor Agent: Verifiable Structured Claim Extraction and Offset Hardening."""
 
+import difflib
 import logging
 import re
+import unicodedata
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -24,6 +26,69 @@ logger = logging.getLogger(__name__)
 ATTRIBUTION_REGEX = re.compile(
     r"(?i)\b(?:according to|reported by|stated by|forecast by|projected by|estimated by|per)\b"
 )
+
+
+def normalize_for_alignment(s: str) -> str:
+    """Normalize unicode punctuation, quotes, dashes, ellipsis, and whitespace for fuzzy alignment."""
+    s = unicodedata.normalize("NFKC", s)
+    s = s.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+    s = s.replace("—", "-").replace("–", "-").replace("…", "...")
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def align_quote_to_document(
+    quote: str,
+    document_text: str,
+    min_similarity: float = 0.90,
+) -> tuple[str, int, int, float] | None:
+    """
+    Fuzzy align an LLM extracted quote to the document text.
+    If similarity >= min_similarity (default 0.90), returns (snapped_verbatim_quote, start, end, ratio).
+    Otherwise returns None.
+    """
+    if not quote or not document_text:
+        return None
+
+    # 1. Exact match fast-path
+    idx = document_text.find(quote)
+    if idx != -1:
+        return quote, idx, idx + len(quote), 1.0
+
+    # 2. Normalized search
+    norm_q = normalize_for_alignment(quote).lower()
+    if not norm_q:
+        return None
+
+    words = [w for w in re.findall(r"\b\w+\b", norm_q) if len(w) > 3]
+    anchor = words[0] if words else norm_q[:10]
+
+    doc_low = document_text.lower()
+    anchor_indices = [m.start() for m in re.finditer(re.escape(anchor), doc_low)]
+    if not anchor_indices:
+        step = max(1, len(quote) // 4)
+        anchor_indices = list(range(0, max(1, len(document_text) - len(quote)), step))
+
+    best_match = None
+    best_ratio = 0.0
+    target_len = len(quote)
+
+    for start_idx in anchor_indices:
+        for delta_len in range(-30, 31, 3):
+            end_idx = min(len(document_text), max(0, start_idx + target_len + delta_len))
+            if end_idx <= start_idx:
+                continue
+            cand_slice = document_text[start_idx:end_idx]
+            cand_norm = normalize_for_alignment(cand_slice).lower()
+            ratio = difflib.SequenceMatcher(None, norm_q, cand_norm).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_match = (cand_slice, start_idx, end_idx, ratio)
+
+    if best_match and best_ratio >= min_similarity:
+        return best_match
+
+    return None
 
 
 class RelativeSpan(BaseModel):
@@ -73,7 +138,7 @@ class ExtractionResult(BaseModel):
 
 
 class ExtractorAgent(BaseAgent):
-    """Agent executing structured extraction with strict span and attribution validation."""
+    """Agent executing structured extraction with strict span alignment and attribution validation."""
 
     SYSTEM_PROMPT = (
         "You are the INTELX Evidence Extraction Specialist.\n"
@@ -100,10 +165,13 @@ class ExtractorAgent(BaseAgent):
         publisher: str | None = None,
         **kwargs: Any,
     ) -> ExtractionResult:
-        """Extract claims from chunks and enforce strict offset and attribution invariants."""
+        """Extract claims from chunks and enforce strict offset alignment and attribution invariants."""
         all_saved_claims = []
         all_entities = []
         all_events = []
+
+        total_attempted = 0
+        total_accepted = 0
 
         for chunk in chunks:
             # Place untrusted external text ONLY in user message with delimiters
@@ -130,50 +198,43 @@ class ExtractorAgent(BaseAgent):
             all_entities.extend(extraction.entities)
             all_events.extend(extraction.events)
 
-            # HARD RULES VALIDATION AND HARDENING
+            # HARD RULES VALIDATION AND ALIGNMENT
             for claim_data in extraction.claims:
-                quote = claim_data.quote
-                rel_start = claim_data.relative_span.start
-                rel_end = claim_data.relative_span.end
+                total_attempted += 1
 
-                # Rule a: Verify verbatim substring in chunk. If mismatch, search exact match
-                if chunk.text[rel_start:rel_end] != quote:
-                    idx = chunk.text.find(quote)
-                    if idx != -1:
-                        rel_start = idx
-                        rel_end = idx + len(quote)
-                    else:
-                        # Quote cannot be found verbatim in chunk -> Drop claim and log event
-                        logger.warning(
-                            f"Dropping unverifiable claim: quote '{quote}' not in chunk {chunk.id}"
-                        )
-                        await RunRepo.add_event(
-                            session=session,
-                            run_id=run_id,
-                            event_type="claim.rejected_unverifiable",
-                            payload_json={
-                                "chunk_id": chunk.id,
-                                "unverifiable_quote": quote,
-                                "claim_text": claim_data.text,
-                            },
-                        )
-                        continue
-
-                # Rule b: Calculate absolute offsets into document.text and verify slice
-                abs_start = chunk.start_char + rel_start
-                abs_end = chunk.start_char + rel_end
-
-                if document.text[abs_start:abs_end] != quote:
+                # Rule a: Fuzzy align quote to chunk text with 0.90 similarity threshold
+                alignment = align_quote_to_document(
+                    claim_data.quote, chunk.text, min_similarity=0.90
+                )
+                if alignment is None:
+                    # Quote cannot be aligned with >= 0.90 similarity -> Drop claim and log event
                     logger.warning(
-                        f"Absolute span verification failed for quote '{quote}'. Dropping claim."
+                        f"Dropping unverifiable claim: quote '{claim_data.quote[:40]}...' cannot be aligned to chunk {chunk.id}"
                     )
                     await RunRepo.add_event(
                         session=session,
                         run_id=run_id,
                         event_type="claim.rejected_unverifiable",
-                        payload_json={"chunk_id": chunk.id, "reason": "absolute_offset_mismatch"},
+                        payload_json={
+                            "chunk_id": chunk.id,
+                            "unverifiable_quote": claim_data.quote,
+                            "claim_text": claim_data.text,
+                            "reason": "quote_similarity_below_threshold",
+                        },
                     )
                     continue
+
+                snapped_quote, rel_start, rel_end, sim_ratio = alignment
+                total_accepted += 1
+
+                # Snap quote and spans to exact verbatim chunk text
+                abs_start = chunk.start_char + rel_start
+                abs_end = chunk.start_char + rel_end
+
+                # Verbatim slice is exact by construction
+                exact_quote = document.text[abs_start:abs_end]
+                claim_data.quote = exact_quote
+                claim_data.relative_span = RelativeSpan(start=rel_start, end=rel_end)
 
                 # Rule d: STATEMENT_OF_OPINION and FORECAST must have explicit attribution
                 if claim_data.claim_type in (ClaimType.STATEMENT_OF_OPINION, ClaimType.FORECAST):
@@ -201,7 +262,7 @@ class ExtractorAgent(BaseAgent):
                     document_id=document.id,
                     chunk_id=chunk.id,
                     text_content=claim_data.text,
-                    quote=quote,
+                    quote=exact_quote,
                     span_start=abs_start,
                     span_end=abs_end,
                     claim_type=claim_data.claim_type,
@@ -225,13 +286,25 @@ class ExtractorAgent(BaseAgent):
                     chunk_id=chunk.id,
                     span_start=abs_start,
                     span_end=abs_end,
-                    quote=quote,
+                    quote=exact_quote,
                     support_type=EvidenceSupportType.SUPPORTS,
                     created_by_run_id=run_id,
                     created_by_agent="extractor",
                 )
 
                 all_saved_claims.append(claim_data)
+
+        alignment_rate = (total_accepted / total_attempted) if total_attempted > 0 else 1.0
+        await RunRepo.add_event(
+            session=session,
+            run_id=run_id,
+            event_type="claim.alignment_stats",
+            payload_json={
+                "attempted": total_attempted,
+                "accepted": total_accepted,
+                "span_alignment_rate": round(alignment_rate, 4),
+            },
+        )
 
         return ExtractionResult(
             claims=all_saved_claims,

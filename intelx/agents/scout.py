@@ -25,6 +25,7 @@ class SourceCandidate(BaseModel):
     title: str
     reason: str
     expected_relevance: float = Field(default=0.8, ge=0.0, le=1.0)
+    snippet: str | None = None
 
 
 class ScoutOutput(BaseModel):
@@ -78,7 +79,8 @@ class ScoutAgent(BaseAgent):
                 logger.debug(f"Internal knowledge FTS lookup skipped: {e}")
 
         # 2. External Web Search
-        search_results = await self.search_connector.fetch(subquestion, max_results=8)
+        search_query = f"{subquestion} {plan.objective}" if plan and plan.objective else subquestion
+        search_results = await self.search_connector.fetch(search_query, max_results=8)
         for res in search_results:
             loc = res.url.strip()
             if not loc or loc in seen_set:
@@ -97,6 +99,7 @@ class ScoutAgent(BaseAgent):
                     location=loc,
                     title=res.title or domain,
                     reason=res.snippet[:120] if res.snippet else "Web search match",
+                    snippet=res.snippet if res.snippet else None,
                     expected_relevance=0.90,
                 )
             )

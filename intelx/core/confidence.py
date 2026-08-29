@@ -66,6 +66,8 @@ def compute_confidence_score(
     claim_type: ClaimType | str = ClaimType.FACT,
     llm_adjustment: float = 0.0,
     rationale: str = "",
+    credibility_score: float | None = None,
+    ai_universe_confidence: float | None = None,
 ) -> tuple[float, str, dict[str, Any]]:
     """Compute deterministic v1-composite confidence score and qualitative label."""
     # 1. Base tier score
@@ -86,13 +88,30 @@ def compute_confidence_score(
     )
     opinion_penalty = 0.25 if is_opinion_or_forecast else 0.0
 
-    # 4. Bounded LLM adjustment (-0.10 to +0.10)
+    # 4. Domain Source Credibility Adjustment (-0.10 to +0.10)
+    credibility_bonus = 0.0
+    if credibility_score is not None:
+        credibility_bonus = max(-0.10, min(0.10, (credibility_score - 0.70) * 0.20))
+
+    # 5. Bounded LLM adjustment (-0.10 to +0.10)
     clamped_llm_adj = max(-0.10, min(0.10, llm_adjustment))
 
     # Raw score computation
-    raw_score = base + corrob_bonus - staleness_penalty - opinion_penalty + clamped_llm_adj
+    raw_score = (
+        base
+        + corrob_bonus
+        - staleness_penalty
+        - opinion_penalty
+        + credibility_bonus
+        + clamped_llm_adj
+    )
 
-    # 5. Clamp to [0.05, 0.95]
+    # 6. AI-Universe Multi-Agent Debate Confidence Multiplier
+    if ai_universe_confidence is not None:
+        clamped_ai_conf = max(0.10, min(1.00, float(ai_universe_confidence)))
+        raw_score = raw_score * clamped_ai_conf
+
+    # 7. Clamp to [0.05, 0.95]
     final_score = round(max(0.05, min(0.95, raw_score)), 4)
     label = get_confidence_label(final_score)
 
@@ -102,6 +121,9 @@ def compute_confidence_score(
         "base_score": base,
         "corroborations_count": independent_corroborations,
         "corroborations_bonus": round(corrob_bonus, 4),
+        "credibility_score": credibility_score,
+        "credibility_bonus": round(credibility_bonus, 4),
+        "ai_universe_confidence": ai_universe_confidence,
         "staleness_penalty": staleness_penalty,
         "opinion_penalty": opinion_penalty,
         "llm_adjustment": round(clamped_llm_adj, 4),

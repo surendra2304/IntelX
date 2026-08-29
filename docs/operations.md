@@ -79,3 +79,25 @@ intelx purge --days 30
 curl -X POST "http://localhost:8000/api/v1/admin/retention/purge?days=30" \
      -H "Authorization: Bearer <ADMIN_KEY>"
 ```
+
+---
+
+## 5. Live Provider Diagnostics & Smoke Testing
+
+### Diagnostic LLM Role Gateway Smoke (`intelx smoke-llm`)
+Validates connectivity, schema generation, latency, token usage, and cost calculation across all 6 agent roles (`planner`, `extractor`, `verifier`, `analyst`, `synthesizer`, `critic`):
+```bash
+# In Mock Mode (outputs instant mock confirmation and exits 0)
+intelx smoke-llm
+
+# With live keys (e.g. OpenAI or Anthropic)
+INTELX_MOCK_MODE=false INTELX_LLM_PROVIDER=openai_compatible OPENAI_API_KEY="sk-..." intelx smoke-llm
+```
+
+### Full Live Research Run (`intelx smoke-live`)
+Executes an end-to-end live research investigation with live web search (Tavily), HTTP retrieval with snippet fallbacks, verbatim-quote alignment, contradiction detection, and citation validation:
+```bash
+INTELX_MOCK_MODE=false INTELX_LLM_PROVIDER=openai_compatible OPENAI_API_KEY="sk-..." TAVILY_API_KEY="tvly-..." \
+  intelx smoke-live --objective "Assess sodium-ion cathode benchmarks" --max-sources 5 --max-usd 1.50
+```
+Execution metrics and validation verdicts are written directly to `evals/results-live.json`.

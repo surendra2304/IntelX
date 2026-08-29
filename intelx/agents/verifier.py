@@ -12,6 +12,7 @@ from intelx.agents.extractor import ExtractorAgent
 from intelx.agents.retriever import RetrieverAgent
 from intelx.agents.scout import ScoutAgent
 from intelx.core.confidence import compute_confidence_score
+from intelx.core.credibility import SourceCredibilityScorer
 from intelx.core.enums import (
     ClaimStatus,
     ClaimType,
@@ -270,12 +271,28 @@ class VerifierAgent(BaseAgent):
 
             # 10. Recompute and persist final confidence score
             if not is_contradicted:
+                cred_score = None
+                if orig_source and orig_source.location:
+                    domain_hint = scope.get("domain_hint") if scope else None
+                    cred_score, _ = SourceCredibilityScorer.score_source(
+                        orig_source.location, domain_hint
+                    )
+
+                ai_conf = None
+                if (
+                    hasattr(self.gateway, "_ai_universe_provider")
+                    and self.gateway._ai_universe_provider
+                ):
+                    ai_conf = self.gateway._ai_universe_provider.last_metadata.get("confidence")
+
                 score, label, _ = compute_confidence_score(
                     strongest_tier=strongest_tier,
                     independent_corroborations=independent_supports,
                     claim_type=claim.claim_type,
                     llm_adjustment=0.0,
                     rationale="Post-verification composite evaluation",
+                    credibility_score=cred_score,
+                    ai_universe_confidence=ai_conf,
                 )
                 claim.confidence = score
                 claim.confidence_method = "v1-composite"

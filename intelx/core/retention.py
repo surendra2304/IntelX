@@ -71,6 +71,24 @@ async def purge_raw_files(
     }
 
 
+async def execute_retention_purge(
+    older_than_days: int | None = None,
+    reports_days: int | None = None,
+) -> dict[str, Any]:
+    """Unified entrypoint executing both file and database retention cleanup."""
+    from intelx.db.retention import purge_expired_retention
+
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        file_res = await purge_raw_files(session, retention_days=older_than_days)
+        db_res = await purge_expired_retention(
+            session=session,
+            raw_docs_retention_days=older_than_days,
+            reports_retention_days=reports_days,
+        )
+        return {**file_res, **db_res}
+
+
 def main():
     """CLI Entrypoint for running retention purge command."""
     args = sys.argv[1:]

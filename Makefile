@@ -1,7 +1,7 @@
-.PHONY: setup dev test eval lint format migrate seed-demo worker verify-audit run-diary-check clean
+.PHONY: setup dev test eval lint format migrate seed-demo worker verify-audit smoke-llm smoke-live run-diary-check clean
 
 setup:
-	python -m pip install -e ".[dev]"
+	python -m pip install -e ".[dev,llm]"
 
 migrate:
 	python -m alembic upgrade head
@@ -14,6 +14,12 @@ worker:
 
 verify-audit:
 	intelx verify-audit
+
+smoke-llm:
+	intelx smoke-llm
+
+smoke-live:
+	intelx smoke-live
 
 dev:
 	python -m uvicorn intelx.app.main:app --host 0.0.0.0 --port 8000 --reload

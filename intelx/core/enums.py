@@ -59,6 +59,39 @@ class TaskErrorClass(StrEnum):
     LOGICAL = "LOGICAL"
 
 
+class ResearchMode(StrEnum):
+    """Specialized research mode pre-configuring pipeline templates and credibility."""
+
+    GENERAL = "GENERAL"
+    SECURITY_RESEARCH = "SECURITY_RESEARCH"
+    MARKET_RESEARCH = "MARKET_RESEARCH"
+    COMPETITIVE_RESEARCH = "COMPETITIVE_RESEARCH"
+    TECHNICAL_RESEARCH = "TECHNICAL_RESEARCH"
+
+
+def normalize_research_mode(hint: str | None) -> ResearchMode:
+    """Map domain hint, subsystem name, or mode string to standard ResearchMode."""
+    if not hint:
+        return ResearchMode.GENERAL
+    val = str(hint).strip().lower()
+    if val in ("security", "sentinel", "security_research", "cve", "threat", "vulnerability"):
+        return ResearchMode.SECURITY_RESEARCH
+    elif val in ("market", "trading_bot", "trading", "market_research", "financial", "finance"):
+        return ResearchMode.MARKET_RESEARCH
+    elif val in ("competitive", "nexus", "competitive_research", "competitor", "pricing"):
+        return ResearchMode.COMPETITIVE_RESEARCH
+    elif val in (
+        "technical",
+        "forge",
+        "technical_research",
+        "engineering",
+        "library",
+        "architecture",
+    ):
+        return ResearchMode.TECHNICAL_RESEARCH
+    return ResearchMode.GENERAL
+
+
 class SourceKind(StrEnum):
     """Source origin type."""
 

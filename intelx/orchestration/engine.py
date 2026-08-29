@@ -85,14 +85,19 @@ class OrchestrationEngine:
         synthesizer_agent: SynthesizerAgent | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self.planner = planner_agent or PlannerAgent()
-        self.scout = scout_agent or ScoutAgent()
-        self.retriever = retriever_agent or RetrieverAgent(settings=self.settings)
-        self.extractor = extractor_agent or ExtractorAgent()
-        self.verifier = verifier_agent or VerifierAgent()
-        self.analyst = analyst_agent or AnalystAgent()
-        self.critic = critic_agent or CriticAgent()
-        self.synthesizer = synthesizer_agent or SynthesizerAgent()
+        from intelx.models.gateway import get_model_gateway
+
+        self.gateway = get_model_gateway()
+        self.planner = planner_agent or PlannerAgent(gateway=self.gateway)
+        self.scout = scout_agent or ScoutAgent(gateway=self.gateway)
+        self.retriever = retriever_agent or RetrieverAgent(
+            gateway=self.gateway, settings=self.settings
+        )
+        self.extractor = extractor_agent or ExtractorAgent(gateway=self.gateway)
+        self.verifier = verifier_agent or VerifierAgent(gateway=self.gateway)
+        self.analyst = analyst_agent or AnalystAgent(gateway=self.gateway)
+        self.critic = critic_agent or CriticAgent(gateway=self.gateway)
+        self.synthesizer = synthesizer_agent or SynthesizerAgent(gateway=self.gateway)
 
     async def transition_state(
         self, session: AsyncSession, run: ResearchRun, new_status: RunStatus
@@ -127,6 +132,14 @@ class OrchestrationEngine:
                 run = await RunRepo.set_status(session, run_id, RunStatus.CANCELLED)
                 await emit_stage_changed(session, run_id, run.status, RunStatus.CANCELLED)
             raise asyncio.CancelledError(f"Run {run_id} was cancelled by user request")
+
+        # 0. Sync usage from Gateway
+        usage = self.gateway.get_usage(run_id)
+        if usage.input_tokens > 0 or usage.output_tokens > 0 or usage.usd_cost > 0:
+            run.input_tokens = max(run.input_tokens, usage.input_tokens)
+            run.output_tokens = max(run.output_tokens, usage.output_tokens)
+            run.usd_cost = max(run.usd_cost, usage.usd_cost)
+            await session.flush()
 
         # 2. Budget Ceiling Check
         max_usd = self.settings.MAX_RUN_USD
@@ -209,6 +222,7 @@ class OrchestrationEngine:
             return run
 
         try:
+            run = await self._check_gates(session, run_id)
             # 1. PLANNING STAGE
             run = await self.transition_state(session, run, RunStatus.PLANNING)
             plan = await self.planner.execute(
@@ -416,9 +430,11 @@ class OrchestrationEngine:
                 )
                 return run
 
+            active_claims = [c for c in claims if c.status == ClaimStatus.ACTIVE]
             if (
                 not claims
                 or len(claims) == 0
+                or len(active_claims) == 0
                 or synthesis_res.overall_confidence_label == "Very low"
             ):
                 outcome = RunOutcome.INSUFFICIENT_EVIDENCE
@@ -434,6 +450,11 @@ class OrchestrationEngine:
                 )
 
             # 10. COMPLETED STAGE
+            usage = self.gateway.get_usage(run_id)
+            run.input_tokens = usage.input_tokens
+            run.output_tokens = usage.output_tokens
+            run.usd_cost = usage.usd_cost
+
             run = await self.transition_state(session, run, RunStatus.COMPLETED)
             run.outcome = outcome
             run.completed_at = datetime.now(UTC)

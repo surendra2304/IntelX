@@ -24,6 +24,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     sqlite3 \
+    tini \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/venv /opt/venv
@@ -48,5 +49,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/healthz || exit 1
 
-ENTRYPOINT ["python", "-m", "intelx.cli.main"]
+ENTRYPOINT ["tini", "--", "python", "-m", "intelx.cli.main"]
 CMD ["serve"]

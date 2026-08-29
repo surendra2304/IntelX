@@ -273,3 +273,154 @@ async def test_end_to_end_micro_run(db_session_factory):
         # Strict span-verbatim verification
         for c in saved_claims:
             assert doc.text[c.span_start : c.span_end] == c.quote
+
+
+@pytest.mark.asyncio
+async def test_extractor_quote_alignment_paraphrase_accepted_and_snapped(db_session_factory):
+    """Verify ~0.95 paraphrased quote is accepted and snapped to exact verbatim document text."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(session, objective="Quote alignment test")
+        doc_text = "In this work, silicon-graphite composite anodes paired with nickel-rich cathodes demonstrated a gravimetric cell energy density of 420 Wh/kg."
+        source, doc, chunks, _ = await ingest_and_normalize(
+            session=session,
+            raw_bytes=doc_text.encode("utf-8"),
+            location="memory://test_alignment.txt",
+            kind=SourceKind.WEB,
+            content_type="text/plain",
+        )
+
+        # Paraphrased quote with minor differences (missing punctuation / slightly altered whitespace)
+        paraphrased_quote = "silicon-graphite composite anodes paired with nickel-rich cathodes demonstrated a gravimetric cell energy density of 420 Wh/kg"
+
+        class ParaphrasedMockGateway(ModelGateway):
+            async def complete(self, messages, **kwargs):
+                extraction = ExtractionResult(
+                    claims=[
+                        ExtractedClaim(
+                            text="Silicon composite anodes achieve 420 Wh/kg energy density.",
+                            quote=paraphrased_quote,
+                            relative_span=RelativeSpan(start=0, end=len(paraphrased_quote)),
+                            claim_type=ClaimType.FACT,
+                        )
+                    ],
+                    entities=[],
+                    events=[],
+                )
+                return type(
+                    "Res",
+                    (),
+                    {
+                        "parsed": extraction,
+                        "text": extraction.model_dump_json(),
+                        "usage": Usage(),
+                    },
+                )()
+
+        extractor = ExtractorAgent(gateway=ParaphrasedMockGateway())
+        res = await extractor.execute(
+            document=doc,
+            chunks=chunks,
+            run_id=run.id,
+            source_id=source.id,
+            session=session,
+        )
+
+        # Claim must be accepted and snapped to exact verbatim substring
+        assert len(res.claims) == 1
+        stmt_claims = select(Claim).where(Claim.run_id == run.id)
+        saved = (await session.execute(stmt_claims)).scalars().first()
+        assert saved is not None
+        assert doc.text[saved.span_start : saved.span_end] == saved.quote
+        assert saved.quote in doc_text
+
+
+@pytest.mark.asyncio
+async def test_extractor_quote_alignment_low_similarity_dropped(db_session_factory):
+    """Verify ~0.50 heavily paraphrased/hallucinated quote is dropped with event."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(session, objective="Low similarity drop test")
+        doc_text = "In this work, silicon-graphite composite anodes paired with nickel-rich cathodes demonstrated a gravimetric cell energy density of 420 Wh/kg."
+        source, doc, chunks, _ = await ingest_and_normalize(
+            session=session,
+            raw_bytes=doc_text.encode("utf-8"),
+            location="memory://test_drop.txt",
+            kind=SourceKind.WEB,
+            content_type="text/plain",
+        )
+
+        # Heavily paraphrased / hallucinated quote
+        hallucinated_quote = (
+            "The researchers showed that silicon batteries can reach 420 Wh per kg."
+        )
+
+        class HallucinatedMockGateway(ModelGateway):
+            async def complete(self, messages, **kwargs):
+                extraction = ExtractionResult(
+                    claims=[
+                        ExtractedClaim(
+                            text="Silicon batteries reach 420 Wh/kg.",
+                            quote=hallucinated_quote,
+                            relative_span=RelativeSpan(start=0, end=len(hallucinated_quote)),
+                            claim_type=ClaimType.FACT,
+                        )
+                    ],
+                    entities=[],
+                    events=[],
+                )
+                return type(
+                    "Res",
+                    (),
+                    {
+                        "parsed": extraction,
+                        "text": extraction.model_dump_json(),
+                        "usage": Usage(),
+                    },
+                )()
+
+        extractor = ExtractorAgent(gateway=HallucinatedMockGateway())
+        res = await extractor.execute(
+            document=doc,
+            chunks=chunks,
+            run_id=run.id,
+            source_id=source.id,
+            session=session,
+        )
+
+        # Claim must be dropped
+        assert len(res.claims) == 0
+        stmt = select(Event).where(
+            Event.run_id == run.id, Event.type == "claim.rejected_unverifiable"
+        )
+        ev = (await session.execute(stmt)).scalar_one_or_none()
+        assert ev is not None
+
+
+@pytest.mark.asyncio
+async def test_retriever_snippet_fallback_on_fetch_failure(db_session_factory):
+    """Verify RetrieverAgent ingests search snippet when HTTP fetch fails."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(session, objective="Snippet fallback test")
+
+        candidates = [
+            SourceCandidate(
+                location="http://192.168.1.1/blocked_private",
+                title="Blocked Enterprise Battery Report",
+                snippet="Solid-state composite electrolyte maintains 95% efficiency under 2 MPa pressure.",
+                reason="Search result with snippet",
+            )
+        ]
+
+        retriever = RetrieverAgent()
+        out = await retriever.execute(candidates, session=session, run_id=run.id)
+
+        assert len(out.retrieved) == 1
+        ret_doc = out.retrieved[0]
+        assert ret_doc.chunks_count >= 1
+
+        doc = await SourceRepo.get_document(session, ret_doc.document_id)
+        assert doc is not None
+        assert "95% efficiency" in doc.text
+
+        source = await SourceRepo.get_source(session, ret_doc.source_id)
+        assert source is not None
+        assert source.license_note == "search-engine-snippet"

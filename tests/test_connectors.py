@@ -246,6 +246,6 @@ async def test_web_search_connector_mock_routing():
     results = await searcher.fetch("quantum computing logical qubits")
 
     assert len(results) >= 2
-    assert results[0].url.startswith("http")
+    assert results[0].url.startswith(("http", "file://"))
     assert len(results[0].title) > 0
     assert len(results[0].snippet) > 0

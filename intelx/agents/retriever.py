@@ -155,8 +155,37 @@ class RetrieverAgent(BaseAgent):
                 SecurityError,
                 FileNotFoundError,
             ) as e:
-                # Logical security/format failure - non-transient, never crash run
+                # Logical security/format failure - check snippet fallback
                 logger.info(f"Logical fetch rejection for {location}: {e}")
+                if candidate.snippet and len(candidate.snippet.strip()) >= 15:
+                    try:
+                        snip_text = candidate.snippet.strip()[:1000]
+                        source, doc, chunks, _ = await ingest_and_normalize(
+                            session=session,
+                            raw_bytes=snip_text.encode("utf-8"),
+                            location=location,
+                            kind=SourceKind.WEB,
+                            content_type="text/plain; format=snippet",
+                            title=f"{candidate.title} (Snippet)"
+                            if candidate.title
+                            else "Web Search Snippet",
+                            domain=parsed.hostname,
+                            license_note="search-engine-snippet",
+                            created_by_run_id=run_id,
+                            settings=self.settings,
+                        )
+                        retrieved_item = RetrievedDoc(
+                            source_id=source.id,
+                            document_id=doc.id,
+                            location=location,
+                            chunks_count=len(chunks),
+                            source_title=source.title,
+                        )
+                        logger.info(f"Retrieved snippet fallback for {location}")
+                        return retrieved_item, None, source, doc, chunks
+                    except Exception as snip_err:
+                        logger.warning(f"Snippet fallback failed for {location}: {snip_err}")
+
                 failure = FetchFailure(
                     location=location,
                     error_class=TaskErrorClass.LOGICAL,
@@ -168,6 +197,36 @@ class RetrieverAgent(BaseAgent):
                 last_error = e
                 if attempt < max_attempts:
                     await asyncio.sleep(0.5)
+
+        # After transient retry exhaustion, check snippet fallback
+        if candidate.snippet and len(candidate.snippet.strip()) >= 15:
+            try:
+                snip_text = candidate.snippet.strip()[:1000]
+                source, doc, chunks, _ = await ingest_and_normalize(
+                    session=session,
+                    raw_bytes=snip_text.encode("utf-8"),
+                    location=location,
+                    kind=SourceKind.WEB,
+                    content_type="text/plain; format=snippet",
+                    title=f"{candidate.title} (Snippet)"
+                    if candidate.title
+                    else "Web Search Snippet",
+                    domain=parsed.hostname,
+                    license_note="search-engine-snippet",
+                    created_by_run_id=run_id,
+                    settings=self.settings,
+                )
+                retrieved_item = RetrievedDoc(
+                    source_id=source.id,
+                    document_id=doc.id,
+                    location=location,
+                    chunks_count=len(chunks),
+                    source_title=source.title,
+                )
+                logger.info(f"Retrieved snippet fallback for {location}")
+                return retrieved_item, None, source, doc, chunks
+            except Exception as snip_err:
+                logger.warning(f"Snippet fallback failed for {location}: {snip_err}")
 
         failure = FetchFailure(
             location=location,
@@ -183,15 +242,9 @@ class RetrieverAgent(BaseAgent):
         run_id: str | None = None,
         **kwargs: Any,
     ) -> RetrieverOutput:
-        """Fetch candidates concurrently, returning ingested documents and structured failures."""
-        tasks = []
-        for candidate in candidates:
-            tasks.append(self._fetch_single(candidate, session, run_id))
-
-        results = await asyncio.gather(*tasks, return_exceptions=False)
         output = RetrieverOutput()
-
-        for ret, fail, _, _, _ in results:
+        for candidate in candidates:
+            ret, fail, _, _, _ = await self._fetch_single(candidate, session, run_id)
             if ret:
                 output.retrieved.append(ret)
             elif fail:

@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,54 +39,99 @@ class Settings(BaseSettings):
     # Mock & Provider Controls
     MOCK_MODE: bool = Field(
         default=True,
+        validation_alias=AliasChoices("INTELX_MOCK_MODE", "MOCK_MODE"),
         description="When true, all LLM & search calls use local synthetic mock data",
     )
-    LLM_PROVIDER: Literal["mock", "openai_compatible", "anthropic"] = Field(
+    LLM_PROVIDER: Literal["mock", "openai_compatible", "anthropic", "ai_universe"] = Field(
         default="mock",
+        validation_alias=AliasChoices(
+            "INTELX_LLM_PROVIDER", "LLM_PROVIDER", "INTELX_MODEL_PROVIDER", "MODEL_PROVIDER"
+        ),
         description="Active LLM provider backend",
     )
     LLM_BASE_URL: str | None = Field(
         default=None,
+        validation_alias=AliasChoices("INTELX_LLM_BASE_URL", "OPENAI_BASE_URL", "LLM_BASE_URL"),
         description="Custom base URL for OpenAI-compatible endpoints",
     )
     LLM_API_KEY: str | None = Field(
         default=None,
+        validation_alias=AliasChoices(
+            "INTELX_LLM_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "LLM_API_KEY"
+        ),
         description="API key for LLM provider",
     )
     LLM_MODEL: str = Field(
         default="mock-gpt-4o",
+        validation_alias=AliasChoices("INTELX_LLM_MODEL", "LLM_MODEL"),
         description="Default LLM model name",
+    )
+
+    # AI-Universe Multi-Agent Provider
+    AI_UNIVERSE_BASE_URL: str = Field(
+        default="http://localhost:9000",
+        validation_alias=AliasChoices("INTELX_AI_UNIVERSE_BASE_URL", "AI_UNIVERSE_BASE_URL"),
+        description="Base URL for AI-Universe multi-agent intelligence server",
+    )
+    AI_UNIVERSE_API_KEY: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_AI_UNIVERSE_API_KEY", "AI_UNIVERSE_API_KEY"),
+        description="API key for AI-Universe service",
+    )
+
+    # Futuris Forecasting Integration
+    FUTURIS_BASE_URL: str = Field(
+        default="http://localhost:8050",
+        validation_alias=AliasChoices("INTELX_FUTURIS_BASE_URL", "FUTURIS_BASE_URL"),
+        description="Base URL for Futuris predictive forecasting engine",
+    )
+    FUTURIS_API_KEY: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_FUTURIS_API_KEY", "FUTURIS_API_KEY"),
+        description="API key for Futuris integration",
+    )
+    FUTURIS_WEBHOOK_URL: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_FUTURIS_WEBHOOK_URL", "FUTURIS_WEBHOOK_URL"),
+        description="Webhook URL on Futuris for research-triggered notifications",
     )
 
     # Per-Role LLM Model Overrides
     LLM_MODEL_PLANNER: str | None = Field(
         default=None,
+        validation_alias=AliasChoices("INTELX_LLM_MODEL_PLANNER", "LLM_MODEL_PLANNER"),
         description="Model override for Planner agent",
     )
     LLM_MODEL_EXTRACTOR: str | None = Field(
         default=None,
+        validation_alias=AliasChoices("INTELX_LLM_MODEL_EXTRACTOR", "LLM_MODEL_EXTRACTOR"),
         description="Model override for Extractor agent",
     )
     LLM_MODEL_VERIFIER: str | None = Field(
         default=None,
+        validation_alias=AliasChoices("INTELX_LLM_MODEL_VERIFIER", "LLM_MODEL_VERIFIER"),
         description="Model override for Verifier agent",
     )
     LLM_MODEL_ANALYST: str | None = Field(
         default=None,
+        validation_alias=AliasChoices("INTELX_LLM_MODEL_ANALYST", "LLM_MODEL_ANALYST"),
         description="Model override for Analyst agent",
     )
     LLM_MODEL_SYNTHESIZER: str | None = Field(
         default=None,
+        validation_alias=AliasChoices("INTELX_LLM_MODEL_SYNTHESIZER", "LLM_MODEL_SYNTHESIZER"),
         description="Model override for Synthesizer agent",
     )
     LLM_MODEL_CRITIC: str | None = Field(
         default=None,
+        validation_alias=AliasChoices("INTELX_LLM_MODEL_CRITIC", "LLM_MODEL_CRITIC"),
         description="Model override for Critic agent",
     )
 
     # Search Provider
     TAVILY_API_KEY: str | None = Field(
         default=None,
+        validation_alias=AliasChoices("INTELX_TAVILY_API_KEY", "TAVILY_API_KEY", "SEARCH_API_KEY"),
         description="Tavily Search API key (optional)",
     )
 
@@ -147,6 +192,32 @@ class Settings(BaseSettings):
         default_factory=list,
         description="Comma-separated API keys allowed for client access",
     )
+    FRIDAY_API_KEY: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_FRIDAY_API_KEY", "FRIDAY_API_KEY"),
+        description="Delegation API key for FRIDAY autonomous system integration",
+    )
+    # Concurrency & Production Infrastructure
+    MAX_CONCURRENT_RUNS: int = Field(
+        default=5,
+        validation_alias=AliasChoices("INTELX_MAX_CONCURRENT_RUNS", "MAX_CONCURRENT_RUNS"),
+        description="Maximum concurrent active research investigations in flight",
+    )
+    REDIS_URL: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_REDIS_URL", "REDIS_URL"),
+        description="Redis connection URL for queue orchestration and pub/sub events",
+    )
+    RETENTION_DAYS_RAW_DOCS: int = Field(
+        default=30,
+        validation_alias=AliasChoices("INTELX_RETENTION_DAYS_RAW_DOCS", "RETENTION_DAYS_RAW_DOCS"),
+        description="Retention period in days for raw ingested document bodies",
+    )
+    RETENTION_DAYS_REPORTS: int = Field(
+        default=365,
+        validation_alias=AliasChoices("INTELX_RETENTION_DAYS_REPORTS", "RETENTION_DAYS_REPORTS"),
+        description="Retention period in days for completed intelligence reports and findings",
+    )
     RAW_RETENTION_DAYS: int = Field(
         default=90,
         description="Retention window for raw scraped data in days",
@@ -180,7 +251,14 @@ class Settings(BaseSettings):
     def get_redacted_dict(self) -> dict[str, Any]:
         """Return a dictionary of settings with sensitive credentials redacted."""
         data = self.model_dump()
-        sensitive_keys = {"SECRET_KEY", "LLM_API_KEY", "TAVILY_API_KEY", "API_KEYS"}
+        sensitive_keys = {
+            "SECRET_KEY",
+            "LLM_API_KEY",
+            "TAVILY_API_KEY",
+            "API_KEYS",
+            "FRIDAY_API_KEY",
+            "AI_UNIVERSE_API_KEY",
+        }
         for k in sensitive_keys:
             if k in data and data[k]:
                 data[k] = "[REDACTED]"

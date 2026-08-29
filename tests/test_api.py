@@ -337,3 +337,61 @@ async def test_openapi_schema_generation(app_client):
     assert "/api/v1/policies" in paths
     assert "/api/v1/audit" in paths
     assert "/api/v1/audit/verify" in paths
+
+
+@pytest.mark.asyncio
+async def test_mock_job_api_and_worker_completion(app_client):
+    """Verify POST /api/v1/research/jobs in Mock Mode executes via worker to COMPLETED with claims > 0."""
+    # 1. Submit research job via API
+    res = await app_client.post(
+        "/api/v1/research/jobs",
+        json={
+            "objective": "Assess next-generation layered oxide sodium-ion cathode benchmarks, energy density limits, and thermal runaway thresholds",
+            "depth": "standard",
+            "max_sources": 5,
+            "budget_usd": 5.0,
+            "budget_minutes": 10,
+        },
+        headers=app_client.member_headers,
+    )
+    assert res.status_code == 202
+    job_data = res.json()
+    job_id = job_data["id"]
+    assert job_data["status"] == "QUEUED"
+
+    # 2. Process job through OrchestrationWorker loop
+    sessionmaker = get_sessionmaker()
+    worker = OrchestrationWorker()
+    await worker.run_once(sessionmaker)
+
+    # 3. Verify job status, outcome, and nonzero cost via API
+    res_job = await app_client.get(
+        f"/api/v1/research/jobs/{job_id}",
+        headers=app_client.member_headers,
+    )
+    assert res_job.status_code == 200
+    finished_data = res_job.json()
+    assert finished_data["status"] == "COMPLETED"
+    assert finished_data["outcome"] == "ANSWERED"
+    assert finished_data["usd_cost"] > 0.0
+    assert finished_data["input_tokens"] > 0
+    assert finished_data["output_tokens"] > 0
+
+    # 4. Verify claims and artifacts exist
+    from sqlalchemy import select
+
+    from intelx.db.models import Artifact, Claim
+
+    async with sessionmaker() as session:
+        claims = list(
+            (await session.execute(select(Claim).where(Claim.run_id == job_id))).scalars().all()
+        )
+        assert len(claims) >= 3
+        assert any(c.status == ClaimStatus.ACTIVE for c in claims)
+
+        arts = list(
+            (await session.execute(select(Artifact).where(Artifact.run_id == job_id)))
+            .scalars()
+            .all()
+        )
+        assert len(arts) >= 1

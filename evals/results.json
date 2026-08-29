@@ -1,5 +1,7 @@
 {
-  "timestamp": "2026-08-28T11:16:53Z",
+  "timestamp": "2026-08-28T18:19:18Z",
+  "mode": "mock",
+  "provider": "mock",
   "eval_provider": "mock",
   "total_tasks": 8,
   "completed_tasks": 8,
@@ -7,69 +9,69 @@
     "citation_validity_rate": 1.0,
     "groundedness_rate": 1.0,
     "contradiction_recall": 1.0,
-    "extraction_precision": 0.8235,
+    "extraction_precision": 0.75,
     "independence_correctness": 1.0,
     "null_result_correctness": 1.0,
     "completion_rate": 1.0,
-    "avg_usd_cost": 0.0,
-    "avg_latency_seconds": 19.23
+    "avg_usd_cost": 0.03063,
+    "avg_latency_seconds": 0.71
   },
   "tasks": [
     {
       "task_id": "task_01_sodium_benchmarks",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
-      "cost_usd": 0.0,
-      "latency_sec": 20.07
+      "cost_usd": 0.040179,
+      "latency_sec": 1.07
     },
     {
       "task_id": "task_02_solid_state_cycling",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
-      "cost_usd": 0.0,
-      "latency_sec": 18.95
+      "cost_usd": 0.036525,
+      "latency_sec": 0.68
     },
     {
       "task_id": "task_03_quantum_annealing",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
-      "cost_usd": 0.0,
-      "latency_sec": 19.6
+      "cost_usd": 0.033868,
+      "latency_sec": 0.79
     },
     {
       "task_id": "task_04_syndicated_reuters_wire",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
-      "cost_usd": 0.0,
-      "latency_sec": 20.46
+      "cost_usd": 0.035606,
+      "latency_sec": 0.83
     },
     {
       "task_id": "task_05_contradictory_energy_density",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
-      "cost_usd": 0.0,
-      "latency_sec": 24.11
+      "cost_usd": 0.032028,
+      "latency_sec": 0.72
     },
     {
       "task_id": "task_06_unsupported_perpetual_motion",
       "status": "COMPLETED",
       "outcome": "INSUFFICIENT_EVIDENCE",
-      "cost_usd": 0.0,
-      "latency_sec": 14.44
+      "cost_usd": 0.000933,
+      "latency_sec": 0.09
     },
     {
       "task_id": "task_07_poisoned_injection_doc",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
-      "cost_usd": 0.0,
-      "latency_sec": 17.71
+      "cost_usd": 0.030012,
+      "latency_sec": 0.68
     },
     {
       "task_id": "task_08_stale_historical_data",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
-      "cost_usd": 0.0,
-      "latency_sec": 18.53
+      "cost_usd": 0.035891,
+      "latency_sec": 0.85
     }
   ]
 }

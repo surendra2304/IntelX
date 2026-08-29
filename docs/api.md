@@ -131,3 +131,74 @@ curl -X GET "http://localhost:8000/api/v1/audit/verify" \
 curl -X POST "http://localhost:8000/api/v1/admin/retention/purge?days=30" \
      -H "Authorization: Bearer dev-admin-key"
 ```
+
+---
+
+## 5. FRIDAY Autonomous Delegation & Consumer Endpoints
+
+All FRIDAY endpoints authenticate via `INTELX_FRIDAY_API_KEY` (supplied via `X-API-Key` or `Authorization: Bearer <key>` header) with a sliding window rate limit of **50 req/hour**. Research runs submitted with `priority: "urgent"` automatically skip ahead of queued jobs.
+
+### 1. Delegate Research Job
+```bash
+curl -X POST "http://localhost:8000/api/v1/friday/research" \
+     -H "X-API-Key: <INTELX_FRIDAY_API_KEY>" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "friday_request_id": "friday-req-94a2b1",
+       "question": "Assess sodium-ion cathode energy density limits and thermal stability",
+       "context": {
+         "requesting_system": "sentinel",
+         "priority": "urgent",
+         "related_incident_id": "inc-sec-2026-08",
+         "domain_hint": "security"
+       },
+       "depth": "standard",
+       "budget": {
+         "max_sources": 10,
+         "max_time_minutes": 15
+       },
+       "webhook_url": "https://friday.internal/webhook/intelx"
+     }'
+```
+
+**Response (201 Created)**:
+```json
+{
+  "intelx_run_id": "f53d3000e1844bf2afe6a9da51d40b0e",
+  "friday_request_id": "friday-req-94a2b1",
+  "status": "QUEUED",
+  "estimated_completion": "2026-08-28T23:45:00Z",
+  "subquestion_count": 4
+}
+```
+
+### 2. Poll Run Status, Phase & Progress
+```bash
+curl -X GET "http://localhost:8000/api/v1/friday/research/f53d3000e1844bf2afe6a9da51d40b0e" \
+     -H "X-API-Key: <INTELX_FRIDAY_API_KEY>"
+```
+
+### 3. Fetch Structured Findings with Grounded Citations
+```bash
+curl -X GET "http://localhost:8000/api/v1/friday/research/f53d3000e1844bf2afe6a9da51d40b0e/findings" \
+     -H "X-API-Key: <INTELX_FRIDAY_API_KEY>"
+```
+
+### 4. Fetch Full Intelligence Report (Markdown + JSON)
+```bash
+curl -X GET "http://localhost:8000/api/v1/friday/research/f53d3000e1844bf2afe6a9da51d40b0e/report" \
+     -H "X-API-Key: <INTELX_FRIDAY_API_KEY>"
+```
+
+### 5. Stream Real-Time Events (Server-Sent Events)
+```bash
+curl -N -X GET "http://localhost:8000/api/v1/friday/research/f53d3000e1844bf2afe6a9da51d40b0e/events" \
+     -H "X-API-Key: <INTELX_FRIDAY_API_KEY>" \
+     -H "Accept: text/event-stream"
+```
+
+### 6. Inspect Disputed Claims & Opposing Evidence
+```bash
+curl -X GET "http://localhost:8000/api/v1/friday/research/f53d3000e1844bf2afe6a9da51d40b0e/contradictions" \
+     -H "X-API-Key: <INTELX_FRIDAY_API_KEY>"
+```

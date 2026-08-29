@@ -66,7 +66,7 @@
             <span style="color: var(--text-light);">&mdash;</span>
             {% endif %}
           </td>
-          <td>${{ "%.4f"|format(run.usd_cost) }}</td>
+          <td>{% if run.usd_cost > 0 and run.usd_cost < 0.01 %}${{ "%.6f"|format(run.usd_cost) }}{% else %}${{ "%.4f"|format(run.usd_cost) }}{% endif %}</td>
           <td style="color: var(--text-muted); font-size: 12px;">{{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
           <td>
             {% if run.status.value == 'COMPLETED' %}

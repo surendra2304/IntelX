@@ -1,5 +1,4 @@
-"""INTELX Model Gateway Package."""
-
+from intelx.models.ai_universe_provider import AIUniverseProvider
 from intelx.models.gateway import ModelGateway, get_model_gateway
 from intelx.models.providers import (
     AnthropicProvider,
@@ -16,6 +15,7 @@ __all__ = [
     "MockProvider",
     "OpenAICompatibleProvider",
     "AnthropicProvider",
+    "AIUniverseProvider",
     "ModelResult",
     "Usage",
 ]

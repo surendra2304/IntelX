@@ -148,6 +148,7 @@ async def ingest_and_normalize(
     domain: str | None = None,
     publisher: str | None = None,
     robots_ok: bool = True,
+    license_note: str | None = None,
     created_by_run_id: str | None = None,
     settings: Settings | None = None,
 ) -> tuple[Source, Document, list[Chunk], bool]:
@@ -177,6 +178,15 @@ async def ingest_and_normalize(
         sidecar_path.parent.mkdir(parents=True, exist_ok=True)
         sidecar_path.write_text(json.dumps(redactions, indent=2), encoding="utf-8")
 
+    # 2.8 Parse metadata headers (e.g. Domain:, Publisher:) if present in text
+    if not domain or not publisher:
+        for line in processed_text.splitlines()[:10]:
+            l_strip = line.strip()
+            if l_strip.lower().startswith("domain:") and not domain:
+                domain = l_strip.split(":", 1)[1].strip()
+            elif l_strip.lower().startswith("publisher:") and not publisher:
+                publisher = l_strip.split(":", 1)[1].strip()
+
     # 3. Prompt injection scan
     sanitizer = IngestionSanitizer()
     scan_res = sanitizer.scan(processed_text, fingerprint=fingerprint)
@@ -193,6 +203,37 @@ async def ingest_and_normalize(
             trust_tier = TrustTier.STANDARD
         else:
             trust_tier = TrustTier.QUARANTINE
+
+    # 4.5 Check for existing source with same content fingerprint
+    existing_source = await SourceRepo.get_source_by_fingerprint(session, fingerprint)
+    if existing_source:
+        from sqlalchemy import select
+
+        stmt_d = (
+            select(Document)
+            .where(Document.source_id == existing_source.id)
+            .order_by(Document.created_at.desc())
+        )
+        existing_doc = (await session.execute(stmt_d)).scalars().first()
+        if existing_doc:
+            stmt_c = (
+                select(Chunk).where(Chunk.document_id == existing_doc.id).order_by(Chunk.idx.asc())
+            )
+            existing_chunks = list((await session.execute(stmt_c)).scalars().all())
+            if not existing_chunks:
+                chunks_spec = chunk_text_with_offsets(existing_doc.text)
+                for spec in chunks_spec:
+                    chunk = await SourceRepo.create_chunk(
+                        session=session,
+                        document_id=existing_doc.id,
+                        idx=spec.idx,
+                        start_char=spec.start_char,
+                        end_char=spec.end_char,
+                        text_content=spec.text,
+                    )
+                    existing_chunks.append(chunk)
+                await session.flush()
+            return existing_source, existing_doc, existing_chunks, False
 
     # 5. Persist raw bytes on disk
     ext = Path(location).suffix if Path(location).suffix else ".bin"
@@ -213,6 +254,7 @@ async def ingest_and_normalize(
         fingerprint=fingerprint,
         trust_tier=trust_tier,
         robots_ok=robots_ok,
+        license_note=license_note,
         injection_risk=scan_res.injection_risk,
         raw_path=str(raw_path),
         created_by_run_id=created_by_run_id,

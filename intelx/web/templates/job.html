@@ -26,7 +26,7 @@
     <div class="card-header"><h3 style="font-size: 14px; font-weight: 600;">Execution Telemetry</h3></div>
     <div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px;">
       <div><strong>Tokens In/Out:</strong> {{ run.input_tokens }} / {{ run.output_tokens }}</div>
-      <div><strong>Running Cost:</strong> ${{ "%.4f"|format(run.usd_cost) }}</div>
+      <div><strong>Running Cost:</strong> {% if run.usd_cost > 0 and run.usd_cost < 0.01 %}${{ "%.6f"|format(run.usd_cost) }}{% else %}${{ "%.4f"|format(run.usd_cost) }}{% endif %}</div>
       <div><strong>Tool Invocations:</strong> {{ run.tool_calls }}</div>
       <div><strong>Started:</strong> {{ run.started_at.strftime('%H:%M:%S UTC') if run.started_at else 'Queued' }}</div>
     </div>

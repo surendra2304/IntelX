@@ -8,6 +8,7 @@ from pydantic import BaseModel, ValidationError
 
 from intelx.core.errors import StructuredOutputError
 from intelx.core.settings import Settings, get_settings
+from intelx.models.ai_universe_provider import AIUniverseProvider
 from intelx.models.providers import (
     AnthropicProvider,
     BaseLLMProvider,
@@ -20,13 +21,21 @@ logger = logging.getLogger(__name__)
 
 
 class ModelGateway:
-    """Central gateway routing all agent LLM requests with schema validation and retry."""
+    """Central gateway routing all agent LLM requests with schema validation, AI-Universe support, and fallback."""
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self._mock_provider = MockProvider()
         self._openai_provider: OpenAICompatibleProvider | None = None
         self._anthropic_provider: AnthropicProvider | None = None
+        self._ai_universe_provider: AIUniverseProvider | None = None
+        self._run_usage: dict[str, Usage] = {}
+
+    def get_usage(self, run_id: str | None) -> Usage:
+        """Retrieve aggregated token and cost usage for a run."""
+        if not run_id:
+            return Usage(input_tokens=0, output_tokens=0, usd_cost=0.0)
+        return self._run_usage.get(run_id, Usage(input_tokens=0, output_tokens=0, usd_cost=0.0))
 
     def _get_provider(self) -> tuple[str, BaseLLMProvider]:
         """Resolve active LLM provider backend based on settings."""
@@ -34,7 +43,11 @@ class ModelGateway:
             return "mock", self._mock_provider
 
         provider_name = (self.settings.LLM_PROVIDER or "mock").lower()
-        if provider_name in (
+        if provider_name in ("ai_universe", "aiuniverse"):
+            if self._ai_universe_provider is None:
+                self._ai_universe_provider = AIUniverseProvider()
+            return "ai_universe", self._ai_universe_provider
+        elif provider_name in (
             "openai_compatible",
             "openai",
             "groq",
@@ -52,6 +65,69 @@ class ModelGateway:
 
         return "mock", self._mock_provider
 
+    async def _execute_with_fallback(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model_name: str,
+        role: str,
+        schema_model: type[BaseModel] | None,
+        temperature: float,
+        max_tokens: int,
+    ) -> tuple[str, Usage, str]:
+        """Attempt primary provider with automated fallback chain: AI-Universe -> OpenAI/Anthropic -> Mock."""
+        primary_name, primary_provider = self._get_provider()
+
+        # Attempt 1: Primary provider
+        try:
+            text_out, usage = await primary_provider.complete(
+                messages=messages,
+                model=model_name,
+                role=role,
+                schema_model=schema_model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return text_out, usage, primary_name
+        except Exception as e:
+            logger.warning(
+                f"Primary provider [{primary_name}] failed for role [{role}]: {e}. "
+                "Executing fallback chain..."
+            )
+
+        # Attempt 2: Secondary direct LLM provider (if primary was AI-Universe and LLM keys exist)
+        if primary_name == "ai_universe":
+            if self.settings.LLM_API_KEY:
+                try:
+                    if self._openai_provider is None:
+                        self._openai_provider = OpenAICompatibleProvider()
+                    logger.info(
+                        "Falling back from AI-Universe to secondary OpenAI-Compatible provider"
+                    )
+                    text_out, usage = await self._openai_provider.complete(
+                        messages=messages,
+                        model=model_name,
+                        role=role,
+                        schema_model=schema_model,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
+                    return text_out, usage, "openai_compatible"
+                except Exception as e2:
+                    logger.warning(f"Secondary LLM provider fallback failed: {e2}")
+
+        # Attempt 3: Tertiary Mock provider fallback
+        logger.info(f"Falling back to Mock provider for role [{role}]")
+        text_out, usage = await self._mock_provider.complete(
+            messages=messages,
+            model="mock-gpt-4o",
+            role=role,
+            schema_model=schema_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return text_out, usage, "mock"
+
     async def complete(
         self,
         messages: list[dict[str, str]],
@@ -62,19 +138,15 @@ class ModelGateway:
         max_tokens: int = 2000,
         run_id: str | None = None,
     ) -> ModelResult:
-        """Execute role-routed LLM completion with schema validation and self-healing retry."""
-        provider_name, provider = self._get_provider()
+        """Execute role-routed LLM completion with fallback chain, schema validation, and retry."""
         model_name = self.settings.get_model_for_role(role)
-
         log_suffix = f" (run={run_id})" if run_id else ""
-        logger.info(
-            f"LLM role=[{role}] model=[{model_name}] provider=[{provider_name}]{log_suffix}"
-        )
+        logger.info(f"LLM request role=[{role}] model=[{model_name}]{log_suffix}")
 
-        # 1. Primary completion attempt
-        text_output, usage = await provider.complete(
+        # 1. Completion attempt with fallback chain
+        text_output, usage, active_provider = await self._execute_with_fallback(
             messages=messages,
-            model=model_name,
+            model_name=model_name,
             role=role,
             schema_model=schema_model,
             temperature=temperature,
@@ -101,14 +173,15 @@ class ModelGateway:
                     {"role": "user", "content": correction_prompt},
                 ]
 
-                retry_text, retry_usage = await provider.complete(
+                retry_text, retry_usage, retry_provider = await self._execute_with_fallback(
                     messages=correction_messages,
-                    model=model_name,
+                    model_name=model_name,
                     role=role,
                     schema_model=schema_model,
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
+                active_provider = retry_provider
 
                 # Accumulate usage from retry
                 usage = Usage(
@@ -129,17 +202,25 @@ class ModelGateway:
                         details={
                             "role": role,
                             "model": model_name,
-                            "provider": provider_name,
+                            "provider": active_provider,
                             "raw_text": retry_text,
                             "error": str(retry_err),
                         },
                     )
 
+        if run_id:
+            cur = self._run_usage.get(run_id, Usage(input_tokens=0, output_tokens=0, usd_cost=0.0))
+            self._run_usage[run_id] = Usage(
+                input_tokens=cur.input_tokens + usage.input_tokens,
+                output_tokens=cur.output_tokens + usage.output_tokens,
+                usd_cost=round(cur.usd_cost + usage.usd_cost, 6),
+            )
+
         return ModelResult(
             text=text_output,
             parsed=parsed_instance,
             usage=usage,
-            provider=provider_name,
+            provider=active_provider,
             model=model_name,
         )
 

@@ -13,7 +13,7 @@ from intelx.agents.extractor import (
     RelativeSpan,
 )
 from intelx.agents.scout import ScoutAgent, ScoutOutput, SourceCandidate
-from intelx.core.enums import ClaimStatus, ClaimType, RunOutcome, RunStatus
+from intelx.core.enums import ClaimStatus, ClaimType, RunOutcome, RunStatus, SourceKind
 from intelx.core.errors import ValidationError
 from intelx.core.settings import Settings
 from intelx.db.models import Event, Finding
@@ -261,3 +261,43 @@ async def test_orchestration_insufficient_evidence_outcome(db_session_factory):
         findings = list((await session.execute(stmt_f)).scalars().all())
         assert len(findings) >= 1
         assert len(findings[0].gaps_json) >= 1
+
+
+@pytest.mark.asyncio
+async def test_orchestration_all_disputed_claims_yields_insufficient_evidence(db_session_factory):
+    """Verify a run where all claims end DISPUTED yields outcome INSUFFICIENT_EVIDENCE."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(session, objective="All disputed claims test")
+
+        fixture_path = Path("./tests/fixtures/docs/sample_battery.txt").resolve()
+        text_content = fixture_path.read_text(encoding="utf-8")
+        source, doc, chunks, _ = await ingest_and_normalize(
+            session=session,
+            raw_bytes=text_content.encode("utf-8"),
+            location=str(fixture_path),
+            kind=SourceKind.FILE,
+            created_by_run_id=run.id,
+        )
+
+        class DisputedExtractor(ExtractorAgent):
+            async def execute(self, document, chunks, run_id, source_id, session, **kwargs):
+                await ClaimRepo.create_claim(
+                    session=session,
+                    run_id=run_id,
+                    source_id=source_id,
+                    document_id=document.id,
+                    chunk_id=chunks[0].id,
+                    text_content="Unverified conflicting claim.",
+                    quote=chunks[0].text[:30],
+                    span_start=chunks[0].start_char,
+                    span_end=chunks[0].start_char + 30,
+                    claim_type=ClaimType.FACT,
+                    status=ClaimStatus.DISPUTED,
+                )
+                return ExtractionResult(claims=[], entities=[], events=[])
+
+        engine = OrchestrationEngine(extractor_agent=DisputedExtractor())
+        final_run = await engine.execute_run(session=session, run_id=run.id)
+
+        assert final_run.status == RunStatus.COMPLETED
+        assert final_run.outcome == RunOutcome.INSUFFICIENT_EVIDENCE

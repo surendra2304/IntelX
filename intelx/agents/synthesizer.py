@@ -196,6 +196,7 @@ class SynthesizerAgent(BaseAgent):
 
         # Render official report markdown
         critique_dict = critique.model_dump() if isinstance(critique, CritiqueReport) else critique
+        mode = kwargs.get("research_mode") or kwargs.get("domain_hint")
         report_md = render_report_markdown(
             objective=objective,
             executive_answer=draft.executive_answer,
@@ -207,6 +208,7 @@ class SynthesizerAgent(BaseAgent):
             critique=critique_dict,
             degradations=degradations,
             overall_confidence_label=overall_conf_label,
+            research_mode=mode,
         )
 
         # CITATION INTEGRITY CHECK: Machine-enforced

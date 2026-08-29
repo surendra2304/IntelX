@@ -305,3 +305,38 @@ async def test_full_text_search(db_session_factory):
         matching_claims = await ClaimRepo.search_claims_fts(session, "transformer")
         assert len(matching_claims) >= 1
         assert any(c.id == claim.id for c in matching_claims)
+
+
+@pytest.mark.filterwarnings("error::sqlalchemy.exc.SAWarning")
+@pytest.mark.asyncio
+async def test_audit_chain_interleaved_operations_no_sawarnings(db_session_factory):
+    """Verify >= 20 interleaved audit events produce strictly increasing IDs, valid hashes, and NO SAWarning."""
+    async with db_session_factory() as session:
+        created_events = []
+        for i in range(25):
+            # Interleave with other DB operations
+            run = await RunRepo.create_run(session, objective=f"Audit benchmark test {i}")
+            ev = await AuditChain.append_event(
+                session=session,
+                actor=f"user_{i % 3}",
+                action=f"action_{i % 5}",
+                object_type="ResearchRun",
+                object_id=run.id,
+                detail_json={"iteration": i, "status": "OK"},
+            )
+            created_events.append(ev)
+            if i % 5 == 0:
+                await session.flush()
+
+        await session.commit()
+
+        # 1. Assert strictly increasing IDs
+        event_ids = [e.id for e in created_events]
+        assert len(event_ids) == 25
+        assert event_ids == sorted(event_ids)
+        assert len(set(event_ids)) == 25
+
+        # 2. Assert cryptographic chain verification passes
+        is_valid, errors = await AuditChain.verify(session)
+        assert is_valid is True
+        assert len(errors) == 0
