@@ -42,8 +42,8 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("INTELX_MOCK_MODE", "MOCK_MODE"),
         description="When true, all LLM & search calls use local synthetic mock data",
     )
-    LLM_PROVIDER: Literal["mock", "openai_compatible", "anthropic", "ai_universe"] = Field(
-        default="mock",
+    LLM_PROVIDER: Literal["mock", "openai_compatible", "anthropic", "inference", "ai_universe"] = Field(
+        default="inference",
         validation_alias=AliasChoices(
             "INTELX_LLM_PROVIDER", "LLM_PROVIDER", "INTELX_MODEL_PROVIDER", "MODEL_PROVIDER"
         ),
@@ -67,21 +67,31 @@ class Settings(BaseSettings):
         description="Default LLM model name",
     )
 
-    # AI-Universe Multi-Agent Provider
+    # Inference Multi-Agent Gateway Provider
+    INFERENCE_URL: str = Field(
+        default="https://inference-3i2b.onrender.com",
+        validation_alias=AliasChoices("INTELX_INFERENCE_URL", "INFERENCE_URL", "INTELX_AI_UNIVERSE_BASE_URL", "AI_UNIVERSE_BASE_URL", "AI_UNIVERSE_URL"),
+        description="Base URL for Inference multi-agent intelligence server",
+    )
+    INFERENCE_API_KEY: str | None = Field(
+        default="inference_api",
+        validation_alias=AliasChoices("INTELX_INFERENCE_API_KEY", "INFERENCE_API_KEY", "INTELX_AI_UNIVERSE_API_KEY", "AI_UNIVERSE_API_KEY"),
+        description="API key for Inference service",
+    )
     AI_UNIVERSE_BASE_URL: str = Field(
-        default="https://ai-universe-lu6p.onrender.com",
-        validation_alias=AliasChoices("INTELX_AI_UNIVERSE_BASE_URL", "AI_UNIVERSE_BASE_URL", "AI_UNIVERSE_URL", "INTELX_AI_UNIVERSE_URL"),
-        description="Base URL for AI-Universe multi-agent intelligence server",
+        default="https://inference-3i2b.onrender.com",
+        validation_alias=AliasChoices("INTELX_AI_UNIVERSE_BASE_URL", "AI_UNIVERSE_BASE_URL", "AI_UNIVERSE_URL", "INFERENCE_URL"),
+        description="Base URL alias",
     )
     AI_UNIVERSE_API_KEY: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("INTELX_AI_UNIVERSE_API_KEY", "AI_UNIVERSE_API_KEY"),
-        description="API key for AI-Universe service",
+        default="inference_api",
+        validation_alias=AliasChoices("INTELX_AI_UNIVERSE_API_KEY", "AI_UNIVERSE_API_KEY", "INFERENCE_API_KEY"),
+        description="API key alias",
     )
 
     # Memora Cloud Memory Integration
     MEMORA_URL: str = Field(
-        default="https://memora-dt51.onrender.com",
+        default="https://memora-9zr9.onrender.com",
         validation_alias=AliasChoices("INTELX_MEMORA_URL", "MEMORA_URL", "MEMORA_BASE_URL"),
         description="Base URL for Memora persistent memory server",
     )

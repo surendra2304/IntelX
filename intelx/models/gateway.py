@@ -43,10 +43,10 @@ class ModelGateway:
             return "mock", self._mock_provider
 
         provider_name = (self.settings.LLM_PROVIDER or "mock").lower()
-        if provider_name in ("ai_universe", "aiuniverse"):
+        if provider_name in ("inference", "ai_universe", "aiuniverse"):
             if self._ai_universe_provider is None:
                 self._ai_universe_provider = AIUniverseProvider()
-            return "ai_universe", self._ai_universe_provider
+            return "inference", self._ai_universe_provider
         elif provider_name in (
             "openai_compatible",
             "openai",
