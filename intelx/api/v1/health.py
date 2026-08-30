@@ -15,6 +15,9 @@ router = APIRouter(tags=["Health & Telemetry"])
 
 
 @router.get("/healthz", summary="System Liveness Probe")
+@router.head("/healthz", summary="System Liveness Probe")
+@router.get("/health", summary="System Liveness Probe Alias")
+@router.head("/health", summary="System Liveness Probe Alias")
 async def healthz() -> dict[str, Any]:
     """Liveness probe: verifies process is running and accepting HTTP requests."""
     settings = get_settings()
@@ -30,6 +33,7 @@ async def healthz() -> dict[str, Any]:
 
 
 @router.get("/readyz", summary="Service Readiness Probe")
+@router.head("/readyz", summary="Service Readiness Probe")
 async def readyz() -> dict[str, Any]:
     """Readiness probe: verifies database connectivity, storage writeability, and provider readiness."""
     settings = get_settings()

@@ -17,7 +17,7 @@ def run_serve(args: argparse.Namespace) -> None:
 
     setup_logging()
     host = args.host or "0.0.0.0"
-    port = args.port or 8000
+    port = args.port or int(os.getenv("PORT", "8000"))
     print(f"[INTELX] Starting server on http://{host}:{port}")
     uvicorn.run(
         "intelx.app.main:app",

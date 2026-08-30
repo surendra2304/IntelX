@@ -69,14 +69,26 @@ class Settings(BaseSettings):
 
     # AI-Universe Multi-Agent Provider
     AI_UNIVERSE_BASE_URL: str = Field(
-        default="http://localhost:9000",
-        validation_alias=AliasChoices("INTELX_AI_UNIVERSE_BASE_URL", "AI_UNIVERSE_BASE_URL"),
+        default="https://ai-universe-lu6p.onrender.com",
+        validation_alias=AliasChoices("INTELX_AI_UNIVERSE_BASE_URL", "AI_UNIVERSE_BASE_URL", "AI_UNIVERSE_URL", "INTELX_AI_UNIVERSE_URL"),
         description="Base URL for AI-Universe multi-agent intelligence server",
     )
     AI_UNIVERSE_API_KEY: str | None = Field(
         default=None,
         validation_alias=AliasChoices("INTELX_AI_UNIVERSE_API_KEY", "AI_UNIVERSE_API_KEY"),
         description="API key for AI-Universe service",
+    )
+
+    # Memora Cloud Memory Integration
+    MEMORA_URL: str = Field(
+        default="https://memora-dt51.onrender.com",
+        validation_alias=AliasChoices("INTELX_MEMORA_URL", "MEMORA_URL", "MEMORA_BASE_URL"),
+        description="Base URL for Memora persistent memory server",
+    )
+    MEMORA_API_KEY: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_MEMORA_API_KEY", "MEMORA_API_KEY"),
+        description="API key for Memora service",
     )
 
     # Futuris Forecasting Integration
