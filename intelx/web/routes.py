@@ -115,7 +115,7 @@ async def logout(response: Response):
 
 
 # 2. Dashboard
-@web_router.get("/", response_class=HTMLResponse)
+@web_router.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def dashboard_page(
     request: Request,
     user: dict[str, Any] = Depends(require_web_user),
