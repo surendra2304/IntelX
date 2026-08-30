@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     # Mock & Provider Controls
     MOCK_MODE: bool = Field(
-        default=True,
+        default=False,
         validation_alias=AliasChoices("INTELX_MOCK_MODE", "MOCK_MODE"),
         description="When true, all LLM & search calls use local synthetic mock data",
     )
