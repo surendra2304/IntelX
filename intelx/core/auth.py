@@ -88,6 +88,8 @@ friday_rate_limiter = RateLimiter(default_limit=50, window_seconds=3600)
 async def seed_api_keys_from_settings(session: AsyncSession, settings: Settings) -> None:
     """Seed configured API keys from settings into database on startup."""
     keys = list(settings.API_KEYS) if settings.API_KEYS else []
+    if getattr(settings, "INTELX_API_KEY", None) and settings.INTELX_API_KEY not in keys:
+        keys.append(settings.INTELX_API_KEY)
     for default_k in ["dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin"]:
         if default_k not in keys:
             keys.append(default_k)

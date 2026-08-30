@@ -210,8 +210,13 @@ class Settings(BaseSettings):
     )
 
     # Auth & Storage
+    INTELX_API_KEY: str = Field(
+        default="intelx_api",
+        validation_alias=AliasChoices("INTELX_API_KEY", "API_KEY"),
+        description="Master API authentication key for IntelX service",
+    )
     API_KEYS: list[str] = Field(
-        default_factory=list,
+        default_factory=lambda: ["intelx_api"],
         description="Comma-separated API keys allowed for client access",
     )
     FRIDAY_API_KEY: str | None = Field(
