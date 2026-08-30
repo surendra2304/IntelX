@@ -54,7 +54,7 @@ async def get_db_session() -> AsyncSession:
 
 
 # 1. Login & Logout
-@web_router.get("/login", response_class=HTMLResponse)
+@web_router.api_route("/login", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def login_page(request: Request):
     user = await get_web_user(request)
     if user:
