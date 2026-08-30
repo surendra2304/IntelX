@@ -78,16 +78,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("INTELX_INFERENCE_API_KEY", "INFERENCE_API_KEY", "INTELX_AI_UNIVERSE_API_KEY", "AI_UNIVERSE_API_KEY"),
         description="API key for Inference service",
     )
-    AI_UNIVERSE_BASE_URL: str = Field(
-        default="https://inference-3i2b.onrender.com",
-        validation_alias=AliasChoices("INTELX_AI_UNIVERSE_BASE_URL", "AI_UNIVERSE_BASE_URL", "AI_UNIVERSE_URL", "INFERENCE_URL"),
-        description="Base URL alias",
-    )
-    AI_UNIVERSE_API_KEY: str | None = Field(
-        default="inference_api",
-        validation_alias=AliasChoices("INTELX_AI_UNIVERSE_API_KEY", "AI_UNIVERSE_API_KEY", "INFERENCE_API_KEY"),
-        description="API key alias",
-    )
+
+    @property
+    def AI_UNIVERSE_BASE_URL(self) -> str:
+        return self.INFERENCE_URL
+
+    @property
+    def AI_UNIVERSE_API_KEY(self) -> str | None:
+        return self.INFERENCE_API_KEY
 
     # Memora Cloud Memory Integration
     MEMORA_URL: str = Field(
