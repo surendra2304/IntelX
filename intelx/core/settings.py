@@ -101,12 +101,12 @@ class Settings(BaseSettings):
 
     # Futuris Forecasting Integration
     FUTURIS_BASE_URL: str = Field(
-        default="http://localhost:8050",
-        validation_alias=AliasChoices("INTELX_FUTURIS_BASE_URL", "FUTURIS_BASE_URL"),
+        default="https://futuris-x4f4.onrender.com",
+        validation_alias=AliasChoices("INTELX_FUTURIS_BASE_URL", "FUTURIS_BASE_URL", "FUTURIS_URL"),
         description="Base URL for Futuris predictive forecasting engine",
     )
     FUTURIS_API_KEY: str | None = Field(
-        default=None,
+        default="futuris_api",
         validation_alias=AliasChoices("INTELX_FUTURIS_API_KEY", "FUTURIS_API_KEY"),
         description="API key for Futuris integration",
     )
