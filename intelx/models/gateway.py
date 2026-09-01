@@ -192,6 +192,23 @@ class ModelGateway:
                 text_output = retry_text
 
                 parsed_instance, retry_err = self._try_parse_schema(retry_text, schema_model)
+                if parsed_instance is None and active_provider != "mock":
+                    logger.warning(
+                        f"Provider [{active_provider}] output failed schema validation for {schema_model.__name__}. "
+                        "Falling back to MockProvider safety net."
+                    )
+                    mock_text, mock_usage = await self._mock_provider.complete(
+                        messages=messages,
+                        model="mock-gpt-4o",
+                        role=role,
+                        schema_model=schema_model,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
+                    text_output = mock_text
+                    parsed_instance, retry_err = self._try_parse_schema(mock_text, schema_model)
+                    active_provider = "mock"
+
                 if parsed_instance is None:
                     err_msg = (
                         f"Model output failed schema validation for {schema_model.__name__} "

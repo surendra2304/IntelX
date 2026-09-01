@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-28T18:19:18Z",
+  "timestamp": "2026-09-01T04:28:03Z",
   "mode": "mock",
   "provider": "mock",
   "eval_provider": "mock",
@@ -13,65 +13,65 @@
     "independence_correctness": 1.0,
     "null_result_correctness": 1.0,
     "completion_rate": 1.0,
-    "avg_usd_cost": 0.03063,
-    "avg_latency_seconds": 0.71
+    "avg_usd_cost": 0.03795,
+    "avg_latency_seconds": 1.38
   },
   "tasks": [
     {
       "task_id": "task_01_sodium_benchmarks",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
-      "cost_usd": 0.040179,
-      "latency_sec": 1.07
+      "cost_usd": 0.048221,
+      "latency_sec": 2.08
     },
     {
       "task_id": "task_02_solid_state_cycling",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
-      "cost_usd": 0.036525,
-      "latency_sec": 0.68
+      "cost_usd": 0.044399,
+      "latency_sec": 1.65
     },
     {
       "task_id": "task_03_quantum_annealing",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
-      "cost_usd": 0.033868,
-      "latency_sec": 0.79
+      "cost_usd": 0.042732,
+      "latency_sec": 1.31
     },
     {
       "task_id": "task_04_syndicated_reuters_wire",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
-      "cost_usd": 0.035606,
-      "latency_sec": 0.83
+      "cost_usd": 0.043751,
+      "latency_sec": 1.76
     },
     {
       "task_id": "task_05_contradictory_energy_density",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
-      "cost_usd": 0.032028,
-      "latency_sec": 0.72
+      "cost_usd": 0.036351,
+      "latency_sec": 1.23
     },
     {
       "task_id": "task_06_unsupported_perpetual_motion",
       "status": "COMPLETED",
       "outcome": "INSUFFICIENT_EVIDENCE",
       "cost_usd": 0.000933,
-      "latency_sec": 0.09
+      "latency_sec": 0.2
     },
     {
       "task_id": "task_07_poisoned_injection_doc",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
-      "cost_usd": 0.030012,
-      "latency_sec": 0.68
+      "cost_usd": 0.039836,
+      "latency_sec": 1.23
     },
     {
       "task_id": "task_08_stale_historical_data",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
-      "cost_usd": 0.035891,
-      "latency_sec": 0.85
+      "cost_usd": 0.047379,
+      "latency_sec": 1.6
     }
   ]
 }

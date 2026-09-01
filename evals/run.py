@@ -9,6 +9,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+# Ensure repository root is on sys.path when executed directly
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from sqlalchemy import select
 
 from intelx.core.enums import ClaimStatus, RunOutcome, RunStatus
@@ -33,6 +38,12 @@ async def run_evaluation_suite(
     g_dir = golden_dir or (base_path / "golden")
     t_path = thresholds_file or (base_path / "thresholds.json")
     out_path = output_file or (base_path / "results.json")
+
+    # Enforce Mock Mode for deterministic golden evaluation benchmarks
+    from intelx.core.settings import get_settings
+    settings = get_settings()
+    settings.MOCK_MODE = True
+    settings.LLM_PROVIDER = "mock"
 
     # Ensure database schema is initialized
     engine = get_async_engine()

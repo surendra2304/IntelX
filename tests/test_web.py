@@ -68,12 +68,12 @@ async def test_web_auth_flow_and_protection(web_client):
     assert "intelx_session" in res_login.cookies
 
     # 4. Authenticated access succeeds
-    res_dash = await web_client.get(
-        "/", cookies={"intelx_session": res_login.cookies["intelx_session"]}
-    )
+    web_client.cookies.set("intelx_session", res_login.cookies["intelx_session"])
+    res_dash = await web_client.get("/")
     assert res_dash.status_code == 200
     assert "Research Operations" in res_dash.text
     assert "web-admin" in res_dash.text
+    web_client.cookies.clear()
 
 
 @pytest.mark.asyncio
@@ -94,14 +94,15 @@ async def test_role_based_navigation_and_action_guards(web_client):
     """Verify admin endpoints return 403 for member sessions."""
     # Login as Member
     res_login = await web_client.post("/login", data={"api_key": web_client.member_key})
-    member_cookie = {"intelx_session": res_login.cookies["intelx_session"]}
+    web_client.cookies.set("intelx_session", res_login.cookies["intelx_session"])
 
     # Member cannot access review or audit page
-    res_review = await web_client.get("/review", cookies=member_cookie)
+    res_review = await web_client.get("/review")
     assert res_review.status_code == 403
 
-    res_audit = await web_client.get("/admin/audit", cookies=member_cookie)
+    res_audit = await web_client.get("/admin/audit")
     assert res_audit.status_code == 403
+    web_client.cookies.clear()
 
 
 @pytest.mark.asyncio
@@ -111,7 +112,7 @@ async def test_full_web_lifecycle_and_citation_drawer(web_client):
 
     # 1. Login as Admin
     res_login = await web_client.post("/login", data={"api_key": web_client.admin_key})
-    session_cookie = {"intelx_session": res_login.cookies["intelx_session"]}
+    web_client.cookies.set("intelx_session", res_login.cookies["intelx_session"])
 
     # 2. Submit Research via Web Form
     form_data = {
@@ -123,7 +124,7 @@ async def test_full_web_lifecycle_and_citation_drawer(web_client):
         "allowed_domains": "local",
         "blocked_domains": "",
     }
-    res_submit = await web_client.post("/research/new", data=form_data, cookies=session_cookie)
+    res_submit = await web_client.post("/research/new", data=form_data)
     assert res_submit.status_code == 303
     job_url = res_submit.headers["Location"]
     job_id = job_url.split("/")[-1]
@@ -165,7 +166,7 @@ async def test_full_web_lifecycle_and_citation_drawer(web_client):
     await worker.run_once(sessionmaker)
 
     # 4. View Report Page
-    res_report = await web_client.get(f"/research/{job_id}/report", cookies=session_cookie)
+    res_report = await web_client.get(f"/research/{job_id}/report")
     assert res_report.status_code == 200
 
     # Assert 9 core report sections are present in rendered HTML
@@ -186,15 +187,16 @@ async def test_full_web_lifecycle_and_citation_drawer(web_client):
     assert "Sources" in res_report.text
 
     # 5. Citation Details Endpoint Verification
-    res_claim_cite = await web_client.get(f"/api/citation/C/{claim_id[:8]}", cookies=session_cookie)
+    res_claim_cite = await web_client.get(f"/api/citation/C/{claim_id[:8]}")
     assert res_claim_cite.status_code == 200
     claim_data = res_claim_cite.json()
     assert claim_data["id"] == claim_id
     assert "thermal stability" in claim_data["text"]
 
     res_source_cite = await web_client.get(
-        f"/api/citation/S/{source_id[:8]}", cookies=session_cookie
+        f"/api/citation/S/{source_id[:8]}"
     )
     assert res_source_cite.status_code == 200
     source_data = res_source_cite.json()
     assert source_data["id"] == source_id
+    web_client.cookies.clear()
