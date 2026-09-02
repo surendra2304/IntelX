@@ -135,9 +135,20 @@ class HttpFetchConnector(BaseConnector):
     def _check_ip_safety(cls, ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> None:
         """Verify individual IP address against security blacklist rules."""
         ip_str = str(ip)
+        if ip_str in BLOCKED_EXPLICIT_IPS:
+            raise SSRFBlockedError(
+                f"SSRF violation: target resolved to prohibited IP '{ip_str}'",
+                details={"ip": ip_str},
+            )
+
+        # Handle NAT64 / DNS64 Well-Known Prefix (RFC 6052: 64:ff9b::/96)
+        if isinstance(ip, ipaddress.IPv6Address) and ip in ipaddress.IPv6Network("64:ff9b::/96"):
+            embedded_ipv4 = ipaddress.IPv4Address(ip.packed[-4:])
+            cls._check_ip_safety(embedded_ipv4)
+            return
+
         if (
-            ip_str in BLOCKED_EXPLICIT_IPS
-            or ip.is_private
+            ip.is_private
             or ip.is_loopback
             or ip.is_link_local
             or ip.is_multicast

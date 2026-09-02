@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import case, func, select, text, update
+from sqlalchemy import case, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.core.enums import (
@@ -306,6 +306,62 @@ class SourceRepo:
         stmt = select(Source).where(Source.trust_tier == trust_tier)
         result = await session.execute(stmt)
         return list(result.scalars().all())
+
+    @staticmethod
+    async def search_full_text(
+        session: AsyncSession,
+        query: str,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Search sources and documents by keyword or title/domain, returning formatted snippets."""
+        pattern = f"%{query}%"
+        stmt = (
+            select(Source, Document)
+            .outerjoin(Document, Document.source_id == Source.id)
+            .where(
+                or_(
+                    Source.title.ilike(pattern),
+                    Source.location.ilike(pattern),
+                    Source.domain.ilike(pattern),
+                    Document.text.ilike(pattern),
+                )
+            )
+            .order_by(Source.created_at.desc())
+            .limit(limit)
+        )
+        result = await session.execute(stmt)
+        rows = result.all()
+
+        matches: list[dict[str, Any]] = []
+        for src, doc in rows:
+            text_body = doc.text if doc and doc.text else (src.title or src.location or "")
+            pos = text_body.lower().find(query.lower())
+            if pos != -1:
+                start = max(0, pos - 60)
+                end = min(len(text_body), pos + len(query) + 60)
+                snippet = (
+                    ("..." if start > 0 else "")
+                    + text_body[start:end].replace("\n", " ")
+                    + ("..." if end < len(text_body) else "")
+                )
+            else:
+                snippet = (
+                    text_body[:140].replace("\n", " ")
+                    + ("..." if len(text_body) > 140 else "")
+                )
+
+            matches.append({
+                "id": src.id,
+                "title": src.title or src.domain or "Indexed Source Document",
+                "location": src.location,
+                "trust_tier": (
+                    src.trust_tier.value
+                    if hasattr(src.trust_tier, "value")
+                    else str(src.trust_tier)
+                ),
+                "snippet": snippet,
+            })
+        return matches
 
     @staticmethod
     async def create_document(
