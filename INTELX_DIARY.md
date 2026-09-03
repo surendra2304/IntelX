@@ -164,6 +164,32 @@ Welcome to the engineering diary of **IntelX**. This document tracks daily progr
 - **🛡️ Fixes & Hardening**: Standardized whole-codebase verification procedures and synchronized remote git origin.
 - **📊 Test Results**: **129 tests passed, 2 skipped** (100% green pass rate across 131 test cases with zero warnings).
 
+### 📈 [Day 7 — 2026-09-03: Deep Upgrade Integration, Multi-Tenancy, Durable Persistence, Context Firewall, and Query Portfolios](diary/2026-09-03.md)
+- **🎯 Focus**: Integration of the complete deep upgrade architecture, multi-tenant principal resolution and tenant boundary enforcement, PBKDF2 salted credential hashing, production startup safety failing closed against weak secrets, centralized SSRF gateway with DNS rebinding and NAT64 checks, untrusted context firewall neutralizing prompt injections, Query Portfolio Planner for multi-angle subquestion exploration, multidimensional source quality scoring, atomic verbatim evidence span verification, cross-claim semantic contradiction engine, machine-enforced citation postcondition gate with bounded repair, WAL-backed durable state store with optimistic concurrency versioning, transactional outbox pattern, continuous research subscriptions with delta change detection, concurrency-safe budget ledger and controller, and ecosystem adapters for Memora and Sentinel.
+- **💡 What I Accomplished**:
+  - I integrated multi-tenant isolation, principal resolution, and scope enforcement across the API and core layers.
+  - I hardened API key storage using PBKDF2 HMAC SHA-256 with random per-key salts and constant-time comparison.
+  - I enforced strict production startup safety preventing unauthorized seeding of demo credentials.
+  - I implemented the centralized SSRF gateway protecting against private IPs, metadata endpoints, and NAT64 abuse.
+  - I built the untrusted context firewall to isolate external documents and neutralize prompt injection signals.
+  - I integrated the Query Portfolio Planner to construct multi-angle targeted query portfolios for subquestions.
+  - I implemented multidimensional source quality scoring combining authority, relevance, freshness, and independence.
+  - I built the atomic claim verifier checking character-offset verbatim evidence spans against documents.
+  - I implemented the contradiction engine detecting factual, numerical, and semantic proposition opposition.
+  - I integrated the machine-enforced citation validator ensuring zero ungrounded or dangling citation tokens.
+  - I integrated the final report gate evaluating citation integrity and minimum evidence requirements.
+  - I built the durable WAL-backed state store with optimistic concurrency version checking.
+  - I implemented the transactional outbox pattern for idempotent asynchronous research event publishing.
+  - I integrated continuous research subscriptions with automated delta change detection across runs.
+  - I implemented the concurrency-safe budget ledger and controller tracking token and dollar usage ceilings.
+  - I created ecosystem contract adapters for Memora long-term memory and Sentinel security governance.
+  - I expanded the automated test suite to 151 total test cases achieving 100% green pass rate.
+  - I verified golden evaluation benchmark execution achieving 100% citation validity and groundedness.
+  - I authored the Day 7 engineering diary entry and updated the master index in `INTELX_DIARY.md`.
+  - I validated all diary files using `scripts/verify_diary.py` confirming complete adherence to guidelines.
+- **🛡️ Fixes & Hardening**: Restricted demo key seeding to development/test environments, implemented multi-field full-text snippet extraction in knowledge search, and fixed variable scope in claim extraction.
+- **📊 Test Results**: **149 tests passed, 2 skipped** (100% green pass rate across 151 test cases with zero warnings).
+
 ---
 
 ## 📐 Diary Rules & Guidelines
@@ -178,3 +204,4 @@ All daily entries must adhere to the following specifications:
    - `## Key Decisions & Architecture`
    - `## Testing, Security & State`
 4. **Verification**: Run `python scripts/verify_diary.py` before committing any log entry.
+

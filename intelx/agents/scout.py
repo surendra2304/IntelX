@@ -1,4 +1,4 @@
-"""INTELX Scout Agent: Web and Internal Knowledge Discovery."""
+"""INTELX Scout Agent: Multi-Angle Query Portfolio Discovery and Source Quality Ranking."""
 
 import logging
 import urllib.parse
@@ -9,8 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.agents.base import BaseAgent
 from intelx.agents.planner import Plan
+from intelx.agents.query_planner import QueryPortfolioPlanner
 from intelx.connectors.base import default_policy_guard
 from intelx.connectors.search import WebSearchConnector
+from intelx.connectors.source_quality import SourceQuality
 from intelx.core.settings import get_settings
 from intelx.db.repos import ClaimRepo
 from intelx.models.gateway import ModelGateway
@@ -35,7 +37,7 @@ class ScoutOutput(BaseModel):
 
 
 class ScoutAgent(BaseAgent):
-    """Agent discovering external web sources and reusable internal knowledge."""
+    """Agent discovering external web sources and reusable internal knowledge via query portfolios."""
 
     def __init__(
         self,
@@ -44,6 +46,8 @@ class ScoutAgent(BaseAgent):
     ) -> None:
         super().__init__(role="scout", name="ScoutAgent", gateway=gateway)
         self.search_connector = search_connector or WebSearchConnector()
+        self.portfolio_planner = QueryPortfolioPlanner()
+        self.source_quality = SourceQuality()
 
     async def execute(
         self,
@@ -78,32 +82,42 @@ class ScoutAgent(BaseAgent):
             except Exception as e:
                 logger.debug(f"Internal knowledge FTS lookup skipped: {e}")
 
-        # 2. External Web Search
-        search_query = f"{subquestion} {plan.objective}" if plan and plan.objective else subquestion
-        search_results = await self.search_connector.fetch(search_query, max_results=8)
-        for res in search_results:
-            loc = res.url.strip()
-            if not loc or loc in seen_set:
-                continue
+        # 2. Generate multi-angle query portfolio (direct, primary, counterevidence)
+        queries = self.portfolio_planner.build(plan_item_id=subquestion[:24], question=subquestion)
+        query_terms = set(self.portfolio_planner.keywords(subquestion))
 
-            # Check connector domain security policy
-            parsed = urllib.parse.urlparse(loc)
-            domain = parsed.hostname or ""
-            if domain and not default_policy_guard(domain, settings):
-                logger.debug(f"Scout filtering out policy-blocked domain '{domain}'")
-                continue
+        for q in queries[:3]:  # Execute top 3 prioritized portfolio queries
+            search_results = await self.search_connector.fetch(q.text, max_results=6)
+            for res in search_results:
+                loc = res.url.strip()
+                if not loc or loc in seen_set:
+                    continue
 
-            seen_set.add(loc)
-            candidates.append(
-                SourceCandidate(
-                    location=loc,
+                # Check connector domain security policy
+                parsed = urllib.parse.urlparse(loc)
+                domain = parsed.hostname or ""
+                if domain and not default_policy_guard(domain, settings):
+                    logger.debug(f"Scout filtering out policy-blocked domain '{domain}'")
+                    continue
+
+                seen_set.add(loc)
+                q_score = self.source_quality.score(
+                    url=loc,
                     title=res.title or domain,
-                    reason=res.snippet[:120] if res.snippet else "Web search match",
-                    snippet=res.snippet if res.snippet else None,
-                    expected_relevance=0.90,
+                    snippet=res.snippet or "",
+                    query_terms=query_terms,
                 )
-            )
 
-        # 3. Sort by relevance and cap at 8 candidates
+                candidates.append(
+                    SourceCandidate(
+                        location=loc,
+                        title=res.title or domain,
+                        reason=f"[{q.source_angle}] {res.snippet[:100] if res.snippet else 'Web search match'}",
+                        snippet=res.snippet if res.snippet else None,
+                        expected_relevance=q_score.total,
+                    )
+                )
+
+        # 3. Sort by computed quality score and cap at 8 candidates
         candidates.sort(key=lambda c: c.expected_relevance, reverse=True)
         return ScoutOutput(candidates=candidates[:8])

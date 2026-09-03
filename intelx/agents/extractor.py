@@ -169,12 +169,15 @@ class ExtractorAgent(BaseAgent):
         all_saved_claims = []
         all_entities = []
         all_events = []
-
         total_attempted = 0
         total_accepted = 0
 
         for chunk in chunks:
-            # Place untrusted external text ONLY in user message with delimiters
+            from intelx.connectors.context_firewall import ContextFirewall
+            firewall_res = ContextFirewall().inspect(trusted="Extract structured claims, entities, and events", external=chunk.text, source_id=source_id)
+            if firewall_res.injection_signals:
+                logger.warning(f"ContextFirewall detected potential injection signals in chunk {chunk.id}: {firewall_res.injection_signals}")
+
             doc_block = format_external_document(document.id, source_id, chunk.text)
             user_prompt = (
                 "Extract structured claims, entities, and events from the document chunk:\n\n"

@@ -247,6 +247,29 @@ class Settings(BaseSettings):
         default=90,
         description="Retention window for raw scraped data in days",
     )
+    # Redis for distributed rate limiting and caching
+    REDIS_URL: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_REDIS_URL", "REDIS_URL"),
+        description="Redis connection URL for distributed rate limiting",
+    )
+
+    def is_production(self) -> bool:
+        """Check if running in production mode."""
+        return self.ENV.strip().lower() in ("production", "prod")
+
+    def is_dev_or_test(self) -> bool:
+        """Check if running in development or testing mode."""
+        return self.ENV.strip().lower() in ("development", "dev", "test", "testing")
+
+    def validate_production_security(self) -> None:
+        """Enforce strict production security rules: no weak secrets, no demo keys."""
+        if not self.is_production():
+            return
+        if self.SECRET_KEY in ("intelx-super-secret-key-change-in-production", "change-me", "secret"):
+            raise ValueError("Insecure default SECRET_KEY detected in production environment")
+        if any(k in ("dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin") for k in (self.API_KEYS or [])):
+            raise ValueError("Insecure development API keys cannot be configured in production")
 
     @field_validator("DOMAIN_ALLOWLIST", "DOMAIN_DENYLIST", "API_KEYS", mode="before")
     @classmethod
@@ -294,3 +317,4 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Singleton getter for application settings."""
     return Settings()
+
