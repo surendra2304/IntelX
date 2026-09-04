@@ -190,6 +190,33 @@ Welcome to the engineering diary of **IntelX**. This document tracks daily progr
 - **🛡️ Fixes & Hardening**: Restricted demo key seeding to development/test environments, implemented multi-field full-text snippet extraction in knowledge search, and fixed variable scope in claim extraction.
 - **📊 Test Results**: **149 tests passed, 2 skipped** (100% green pass rate across 151 test cases with zero warnings).
 
+### 📈 [Day 8 — 2026-09-04: Comprehensive End-to-End System Test, Deduplication Hardening, and Ecosystem Certification](diary/2026-09-04.md)
+- **🎯 Focus**: Execution of a complete 14-stage end-to-end system test verifying application initialization, authentication, health/telemetry probes, web workspace, research run submission, grounded document indexing, autonomous worker DAG execution, multi-format artifact generation, report citation validation, FRIDAY autonomous delegation, Futuris forecasting context exchange, continuous research subscriptions, SSRF/context firewalls, and cryptographic audit continuity.
+- **💡 What I Accomplished**:
+  - I executed a comprehensive 14-stage end-to-end system test verifying all subsystems across IntelX.
+  - I verified application factory initialization and async database schema creation with SQLite WAL mode.
+  - I validated administrative and service API key hashing and authentication using PBKDF2 HMAC SHA-256.
+  - I confirmed liveness, readiness, and Prometheus telemetry probes on `/healthz`, `/readyz`, and `/metrics`.
+  - I tested web operator login establishing authenticated HMAC signed session cookies.
+  - I verified operator dashboard loading and full-text knowledge repository search via `/knowledge`.
+  - I submitted production research investigation jobs through the REST API verifying queue ingestion.
+  - I indexed grounded source documents and verified exact character-offset claim spans.
+  - I executed autonomous orchestration worker pipelines driving research DAGs from queue to completion.
+  - I verified automatic generation and SHA-256 integrity of all four versioned intelligence artifacts.
+  - I validated the final intelligence brief against machine-enforced citation postconditions.
+  - I confirmed interactive citation drawer inspection resolving source metadata and verbatim quotes.
+  - I tested autonomous delegation from the FRIDAY ecosystem via `POST /api/v1/friday/research`.
+  - I tested Futuris exogenous forecasting context exchange exporting calibrated predictive features.
+  - I validated continuous research subscriptions testing creation, pausing, and resumption workflows.
+  - I verified SSRF gateway protections blocking loopback addresses and cloud metadata endpoints.
+  - I tested the untrusted context firewall successfully detecting and neutralizing prompt injection attacks.
+  - I verified cryptographic audit chain ledger integrity confirming zero block tamper violations.
+  - I authored the automated end-to-end test suite in `scripts/system_test_e2e.py` covering all 14 stages.
+  - I validated all diary files using `scripts/verify_diary.py` confirming complete adherence to guidelines.
+  - I updated the master diary index in `INTELX_DIARY.md` with Day 8 system test deliverables.
+- **🛡️ Fixes & Hardening**: Fixed `Source.retrieved_at` timestamp in full-text search, restored existing chunk returns during document deduplication in `ingest_and_normalize`, and added missing `PolicyViolationError` definition.
+- **📊 Test Results**: **149 passed, 2 skipped** in unit/integration test suite + **14/14 stages passed** in end-to-end system test.
+
 ---
 
 ## 📐 Diary Rules & Guidelines
@@ -204,4 +231,5 @@ All daily entries must adhere to the following specifications:
    - `## Key Decisions & Architecture`
    - `## Testing, Security & State`
 4. **Verification**: Run `python scripts/verify_diary.py` before committing any log entry.
+
 

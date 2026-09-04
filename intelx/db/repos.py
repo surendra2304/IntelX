@@ -326,7 +326,7 @@ class SourceRepo:
                     Document.text.ilike(pattern),
                 )
             )
-            .order_by(Source.created_at.desc())
+            .order_by(Source.retrieved_at.desc())
             .limit(limit)
         )
         result = await session.execute(stmt)

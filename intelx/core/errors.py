@@ -54,6 +54,10 @@ class SecurityError(IntelXError):
     """Base exception for security boundary violations."""
 
 
+class PolicyViolationError(SecurityError):
+    """Raised when an operation violates defined domain, file, or resource policy."""
+
+
 class SSRFBlockedError(SecurityError):
     """Raised when an HTTP request targets a private, loopback, or cloud-metadata IP."""
 
