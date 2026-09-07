@@ -184,22 +184,33 @@ async def get_current_api_key(
     authorization: str | None = Header(None, description="Bearer <api_key>"),
 ) -> ApiKey:
     """Validate Bearer API key header and enforce sliding window rate limit."""
-    if not authorization or not authorization.startswith("Bearer "):
+    key_hash: str | None = None
+
+    if authorization and authorization.startswith("Bearer "):
+        raw_token = authorization.replace("Bearer ", "").strip()
+        if not raw_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Empty API key token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        key_hash = hash_api_key(raw_token)
+    else:
+        # Fallback to web session cookie for browser requests (artifacts download, live event polling)
+        from intelx.web.auth import COOKIE_NAME, verify_session_token
+
+        token = request.cookies.get(COOKIE_NAME)
+        if token:
+            session_data = verify_session_token(token)
+            if session_data and "key_hash" in session_data:
+                key_hash = session_data["key_hash"]
+
+    if not key_hash:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing or malformed Authorization header. Expected 'Bearer <key>'",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    raw_token = authorization.replace("Bearer ", "").strip()
-    if not raw_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Empty API key token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    key_hash = hash_api_key(raw_token)
 
     # 1. Rate Limit Check (120 req/min)
     allowed, retry_after = rate_limiter.check_rate_limit(key_hash)

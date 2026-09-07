@@ -92,7 +92,7 @@ async def login_submit(
     session_payload = {
         "key_hash": key_hash,
         "name": key_obj.name,
-        "role": str(key_obj.role.value if hasattr(key_obj.role, "value") else key_obj.role),
+        "role": str(key_obj.role.value if hasattr(key_obj.role, "value") else key_obj.role).upper(),
     }
     token = sign_session_data(session_payload)
 
@@ -376,7 +376,7 @@ async def review_queue_page(
     user: dict[str, Any] = Depends(require_web_user),
     session: AsyncSession = Depends(get_db_session),
 ):
-    if user.get("role") != "ADMIN":
+    if user.get("role", "").upper() != "ADMIN":
         raise HTTPException(status_code=403, detail="Admin role required")
 
     stmt_runs = select(ResearchRun).where(ResearchRun.status == RunStatus.REVIEW_REQUIRED)
@@ -405,7 +405,7 @@ async def review_job_decision(
     user: dict[str, Any] = Depends(require_web_user),
     session: AsyncSession = Depends(get_db_session),
 ):
-    if user.get("role") != "ADMIN":
+    if user.get("role", "").upper() != "ADMIN":
         raise HTTPException(status_code=403, detail="Admin role required")
 
     run = await RunRepo.get_run(session, job_id)
@@ -440,7 +440,7 @@ async def review_source_decision(
     user: dict[str, Any] = Depends(require_web_user),
     session: AsyncSession = Depends(get_db_session),
 ):
-    if user.get("role") != "ADMIN":
+    if user.get("role", "").upper() != "ADMIN":
         raise HTTPException(status_code=403, detail="Admin role required")
 
     await SourceRepo.set_trust(session, source_id, TrustTier(tier))
@@ -487,7 +487,7 @@ async def admin_audit_page(
     user: dict[str, Any] = Depends(require_web_user),
     session: AsyncSession = Depends(get_db_session),
 ):
-    if user.get("role") != "ADMIN":
+    if user.get("role", "").upper() != "ADMIN":
         raise HTTPException(status_code=403, detail="Admin role required")
 
     stmt = select(AuditEvent).order_by(AuditEvent.id.desc()).limit(100)

@@ -219,6 +219,34 @@ Welcome to the engineering diary of **IntelX**. This document tracks daily progr
 
 ---
 
+### 📈 [Day 9 — 2026-09-07: Demonstration Seeding, Embedded Orchestration Worker, and Web Session Cookie Authentication](diary/2026-09-07.md)
+- **🎯 Focus**: Automated demonstration seeder for cold-start production containers, canonical multi-domain research runs (Sodium-Ion Cathode Benchmarks, Solid-State Electrolytes, Multi-Agent Consensus, Superconducting Qubit Interconnect), realistic evidence graphs, physical artifact generation with SHA-256 verification, embedded in-process `OrchestrationWorker` execution loop, web session cookie authentication fallback for API artifact downloads and SSE event streams, case-insensitive role mapping for operator review gates, and live cloud production deployment synchronization.
+- **💡 What I Accomplished**:
+  - I resolved the empty production dashboard by engineering an idempotent demonstration seeder in `intelx/db/demo_seeder.py`.
+  - I seeded four canonical research investigations with complete relational evidence graphs and physical artifact exports.
+  - I populated realistic research findings for Sodium-Ion Cathode Benchmarks, Solid-State Electrolytes, and Multi-Agent Consensus.
+  - I seeded a quarantined source with detected prompt injection signals to activate the operator review queue (`/review`).
+  - I generated physical intelligence artifacts (`report.md`, `report.json`, `evidence_pack.json`, `sources.csv`) with SHA-256 validation.
+  - I recorded cryptographic genesis and seeding blocks in `AuditChain` ensuring zero tamper violations across the ledger.
+  - I replaced the no-op worker hook in `intelx/app/lifespan.py` with an embedded background `OrchestrationWorker` task.
+  - I enabled autonomous processing of newly submitted research runs directly within the FastAPI web process.
+  - I enhanced `intelx/core/auth.py` adding session cookie fallback to `get_current_api_key` for authenticated browser sessions.
+  - I eliminated 401 Unauthorized failures on browser artifact downloads and live Server-Sent Events streams.
+  - I normalized role casing during login and authorization checks, resolving 403 Forbidden errors on review and audit routes.
+  - I integrated SQLite FTS5 table and trigger creation directly into the lifespan startup sequence.
+  - I verified operator dashboard loading, interactive report inspection, and slide-out citation drawers.
+  - I verified knowledge repository full-text search indexing and query results across demonstration sources.
+  - I tested end-to-end submission and background execution of new research jobs through the embedded worker.
+  - I confirmed complete 100% green pass rate across all 151 unit and integration tests with zero regressions.
+  - I executed the 14-stage end-to-end system test suite confirming full pipeline operational readiness.
+  - I ran golden evaluation benchmarks verifying 100% completion, citation validity, and groundedness metrics.
+  - I authored the Day 9 engineering diary entry and updated the master index in `INTELX_DIARY.md`.
+  - I verified all engineering diary entries with `scripts/verify_diary.py` confirming strict invariant compliance.
+- **🛡️ Fixes & Hardening**: Fixed cold-start empty dashboard with idempotent seeder, eliminated queued run stalling with embedded worker, and enabled session cookie authorization on API artifact endpoints.
+- **📊 Test Results**: **149 passed, 2 skipped** in unit/integration test suite + **14/14 stages passed** in end-to-end system test.
+
+---
+
 ## 📐 Diary Rules & Guidelines
 
 All daily entries must adhere to the following specifications:

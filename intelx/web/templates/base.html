@@ -17,7 +17,7 @@
         <li><a href="/" class="nav-link {% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a></li>
         <li><a href="/research/new" class="nav-link {% if active_page == 'new' %}active{% endif %}">New Research</a></li>
         <li><a href="/knowledge" class="nav-link {% if active_page == 'knowledge' %}active{% endif %}">Knowledge</a></li>
-        {% if user and user.role == 'ADMIN' %}
+        {% if user and (user.role == 'ADMIN' or user.role == 'admin') %}
         <li><a href="/review" class="nav-link {% if active_page == 'review' %}active{% endif %}">Review Queue</a></li>
         <li><a href="/admin/audit" class="nav-link {% if active_page == 'audit' %}active{% endif %}">Audit Trail</a></li>
         {% endif %}
