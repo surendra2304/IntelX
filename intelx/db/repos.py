@@ -98,10 +98,10 @@ class RunRepo:
             return None
 
         priority_order = case(
-            (func.json_extract(ResearchRun.scope_json, "$.priority") == "urgent", 0),
-            (func.json_extract(ResearchRun.scope_json, "$.context.priority") == "urgent", 0),
-            (func.json_extract(ResearchRun.scope_json, "$.priority") == "high", 1),
-            (func.json_extract(ResearchRun.scope_json, "$.context.priority") == "high", 1),
+            (ResearchRun.scope_json["priority"].as_string() == "urgent", 0),
+            (ResearchRun.scope_json["context"]["priority"].as_string() == "urgent", 0),
+            (ResearchRun.scope_json["priority"].as_string() == "high", 1),
+            (ResearchRun.scope_json["context"]["priority"].as_string() == "high", 1),
             else_=2,
         )
         stmt = (

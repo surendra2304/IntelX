@@ -171,7 +171,10 @@ class OrchestrationEngine:
 
         # 4. Max Execution Time Limit
         if run.started_at:
-            elapsed_minutes = (datetime.now(UTC) - run.started_at).total_seconds() / 60.0
+            started = run.started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=UTC)
+            elapsed_minutes = (datetime.now(UTC) - started).total_seconds() / 60.0
             if elapsed_minutes > self.settings.MAX_RUN_MINUTES:
                 await RunRepo.set_status(
                     session,
