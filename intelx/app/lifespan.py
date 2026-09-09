@@ -56,6 +56,23 @@ class EmbeddedWorkerHook:
 worker_hook = EmbeddedWorkerHook()
 
 
+class NewsIngesterHook:
+    """Hook managing the continuous news ingestion background loop."""
+
+    def __init__(self) -> None:
+        from intelx.ingestion.news_ingester import NewsIngester
+        self._ingester = NewsIngester(interval_seconds=300)
+
+    async def start(self) -> None:
+        await self._ingester.start()
+
+    async def stop(self) -> None:
+        await self._ingester.stop()
+
+
+news_hook = NewsIngesterHook()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup, database initialization, and shutdown lifecycle."""
@@ -117,10 +134,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 4. Start background worker hook
     await worker_hook.start()
 
+    # 5. Start continuous news ingestion
+    await news_hook.start()
+    logger.info("Continuous news ingestion started.")
+
     yield
 
     # Shutdown sequence
     logger.info("Initiating INTELX shutdown sequence...")
+    await news_hook.stop()
     await worker_hook.stop()
     await dispose_engine()
     logger.info("INTELX shutdown complete.")

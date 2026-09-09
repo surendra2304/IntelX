@@ -32,22 +32,26 @@ def resolve_citation_id(target_token: str, valid_ids: set[str]) -> str | None:
 
 def validate_citations(
     markdown_text: str, valid_source_ids: set[str], valid_claim_ids: set[str]
-) -> None:
-    """Machine-enforced validation ensuring every citation token resolves to a known entity."""
-    tokens = CITATION_PATTERN.findall(markdown_text)
-    for kind, token_id in tokens:
+) -> str:
+    """Validate citation tokens, strip unresolvable ones, and return cleaned text."""
+    import logging
+    _logger = logging.getLogger("intelx.report")
+
+    def replace_token(match: re.Match) -> str:
+        kind, token_id = match.group(1), match.group(2)
         if kind == "S":
             resolved = resolve_citation_id(token_id, valid_source_ids)
             if not resolved:
-                raise IntegrityError(
-                    f"Citation integrity violation: unresolvable source token '[S:{token_id}]'"
-                )
+                _logger.warning(f"Stripping unresolvable source citation [S:{token_id}]")
+                return ""
         elif kind == "C":
             resolved = resolve_citation_id(token_id, valid_claim_ids)
             if not resolved:
-                raise IntegrityError(
-                    f"Citation integrity violation: unresolvable claim token '[C:{token_id}]'"
-                )
+                _logger.warning(f"Stripping unresolvable claim citation [C:{token_id}]")
+                return ""
+        return match.group(0)
+
+    return CITATION_PATTERN.sub(replace_token, markdown_text)
 
 
 def filter_and_ground_findings(

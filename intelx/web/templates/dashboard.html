@@ -22,9 +22,9 @@
     <div class="stat-sub">{{ completed_runs }} answered runs</div>
   </div>
   <div class="stat-widget">
-    <div class="stat-title">Average Cost</div>
-    <div class="stat-val">${{ "%.4f"|format(avg_cost) }}</div>
-    <div class="stat-sub">USD per research execution</div>
+    <div class="stat-title">Knowledge Base</div>
+    <div class="stat-val">Live</div>
+    <div class="stat-sub">Continuously ingesting news feeds</div>
   </div>
 </div>
 
@@ -41,7 +41,6 @@
           <th>Status</th>
           <th>Objective</th>
           <th>Outcome</th>
-          <th>Cost</th>
           <th>Submitted</th>
           <th>Actions</th>
         </tr>
@@ -66,7 +65,6 @@
             <span style="color: var(--text-light);">&mdash;</span>
             {% endif %}
           </td>
-          <td>{% if run.usd_cost > 0 and run.usd_cost < 0.01 %}${{ "%.6f"|format(run.usd_cost) }}{% else %}${{ "%.4f"|format(run.usd_cost) }}{% endif %}</td>
           <td style="color: var(--text-muted); font-size: 12px;">{{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
           <td>
             {% if run.status.value == 'COMPLETED' %}
@@ -78,7 +76,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 32px;">
+          <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 32px;">
             No research investigations found. Submit your first research run above.
           </td>
         </tr>
