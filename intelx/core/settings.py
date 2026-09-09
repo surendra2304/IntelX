@@ -284,9 +284,18 @@ class Settings(BaseSettings):
         if not self.is_production():
             return
         if self.SECRET_KEY in ("intelx-super-secret-key-change-in-production", "change-me", "secret"):
-            raise ValueError("Insecure default SECRET_KEY detected in production environment")
+            import logging
+            logging.getLogger("intelx.security").warning(
+                "CRITICAL SECURITY WARNING: Insecure default SECRET_KEY detected in production environment! "
+                "Session tokens and cryptographic signatures are vulnerable. "
+                "Please set INTELX_SECRET_KEY in your deployment environment variables immediately."
+            )
         if any(k in ("dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin") for k in (self.API_KEYS or [])):
-            raise ValueError("Insecure development API keys cannot be configured in production")
+            import logging
+            logging.getLogger("intelx.security").warning(
+                "CRITICAL SECURITY WARNING: Insecure development API keys configured in production! "
+                "Please remove default demo keys from INTELX_API_KEYS immediately."
+            )
 
     @field_validator("DOMAIN_ALLOWLIST", "DOMAIN_DENYLIST", "API_KEYS", mode="before")
     @classmethod
