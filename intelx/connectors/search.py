@@ -404,15 +404,18 @@ class WebSearchConnector(BaseConnector):
             if results:
                 return results
 
-        # 2. Google News RSS (high reliability on cloud/Render IPs, real-time unblocked)
+        # 2. Google News RSS (real-time news and announcements) + Wikipedia (encyclopedic past and present context)
+        results: list[SearchResult] = []
         news_results = await self._google_news.fetch(target, **kwargs)
         if news_results:
-            return news_results
+            results.extend(news_results[:10])
 
-        # 3. Wikipedia for general encyclopedic definitions
         wiki_results = await self._wikipedia.fetch(target, **kwargs)
         if wiki_results:
-            return wiki_results
+            results.extend(wiki_results[:5])
+
+        if results:
+            return results
 
         # 4. DuckDuckGo fallback
         return await self._ddg.fetch(target, **kwargs)

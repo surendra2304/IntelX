@@ -227,11 +227,24 @@ class OrchestrationEngine:
             if run.outcome == RunOutcome.ANSWERED:
                 try:
                     from intelx.integrations.futuris_context import FuturisContextProvider
+                    from intelx.integrations.memora_context import MemoraMemoryClient
                     from intelx.integrations.stratex_context import StratexConnector
                     
                     finding_text = f"{run.objective} (Post-Review Resolution)"
                     domain = scope.get("domain", "market")
                     
+                    memora_client = MemoraMemoryClient()
+                    asyncio.create_task(
+                        memora_client.store_research_memory(
+                            run_id=run_id,
+                            objective=run.objective,
+                            summary=finding_text,
+                            evidence_count=1,
+                            claims_count=1,
+                            namespace="memora://intelx/shared",
+                            tags=["intelx", "research", domain, "review-resolved"],
+                        )
+                    )
                     asyncio.create_task(
                         FuturisContextProvider.notify_futuris_research_relevant(
                             finding_text=finding_text, run_id=run_id, domain=domain

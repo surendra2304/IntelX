@@ -433,6 +433,11 @@ class FuturisContextProvider:
             exogenous_signals=exogenous_signals,
         )
 
+    @classmethod
+    async def notify_futuris_research_relevant(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Forwarding helper for ResearchTriggeredForecasting."""
+        return await ResearchTriggeredForecasting.notify_futuris_research_relevant(*args, **kwargs)
+
 
 # ---------------------------------------------------------------------------
 # ResearchTriggeredForecasting Implementation

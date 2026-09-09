@@ -133,11 +133,60 @@ class BudgetAllocation(BaseModel):
 class Plan(BaseModel):
     """Comprehensive research investigation plan."""
 
-    objective: str
-    subquestions: list[str] = Field(..., max_length=5)
+    objective: str = "Primary Research Investigation"
+    subquestions: list[str] = Field(default_factory=list, max_length=5)
     source_strategy: SourceStrategy = Field(default_factory=SourceStrategy)
     completion_criteria: CompletionCriteria = Field(default_factory=CompletionCriteria)
     budget_allocation: BudgetAllocation = Field(default_factory=BudgetAllocation)
+
+    @classmethod
+    def _validate_raw(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            obj = (
+                data.get("objective")
+                or data.get("goal")
+                or data.get("research_objective")
+                or "Primary Research Investigation"
+            )
+            data["objective"] = obj
+
+            meta_prefixes = (
+                "decomposed", "here is", "investigative track", "step 1", "step 2",
+                "phase 1", "phase 2", "i will", "planning to", "let's",
+            )
+            raw_subqs = data.get("subquestions")
+            if not raw_subqs:
+                plan_text = data.get("execution_plan") or ""
+                if isinstance(plan_text, list):
+                    candidates = [str(x) for x in plan_text]
+                elif isinstance(plan_text, str):
+                    candidates = [
+                        line.strip().lstrip("0123456789.- ")
+                        for line in plan_text.splitlines()
+                        if len(line.strip()) > 8
+                    ]
+                else:
+                    candidates = []
+
+                subqs = [
+                    c for c in candidates
+                    if not any(c.lower().startswith(p) for p in meta_prefixes)
+                ]
+                data["subquestions"] = subqs
+
+            if not data.get("subquestions"):
+                data["subquestions"] = [
+                    f"{obj} release date and official announcements",
+                    f"{obj} specifications timeline and verified updates",
+                ]
+            if len(data.get("subquestions", [])) > 5:
+                data["subquestions"] = data["subquestions"][:5]
+        return data
+
+    @classmethod
+    def model_validate(cls, obj: Any, *args: Any, **kwargs: Any) -> "Plan":
+        obj = cls._validate_raw(obj)
+        return super().model_validate(obj, *args, **kwargs)
 
 
 class PlannerAgent(BaseAgent):

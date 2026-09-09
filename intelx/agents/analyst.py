@@ -45,6 +45,24 @@ class AnalysisResult(BaseModel):
     themes: list[ThemeItem] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
 
+    @classmethod
+    def _validate_raw(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "entity_relations" not in data or not data["entity_relations"]:
+                data["entity_relations"] = data.get("relationships") or data.get("relations") or []
+            if "themes" not in data or not data["themes"]:
+                data["themes"] = data.get("key_themes") or data.get("topics") or []
+            if "timeline" not in data:
+                data["timeline"] = data.get("events") or data.get("chronology") or []
+            if "gaps" not in data:
+                data["gaps"] = data.get("knowledge_gaps") or data.get("limitations") or []
+        return data
+
+    @classmethod
+    def model_validate(cls, obj: Any, *args: Any, **kwargs: Any) -> "AnalysisResult":
+        obj = cls._validate_raw(obj)
+        return super().model_validate(obj, *args, **kwargs)
+
 
 class AnalystAgent(BaseAgent):
     """Agent performing pure deductive reasoning and relational synthesis over verified claims."""

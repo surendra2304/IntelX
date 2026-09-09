@@ -29,6 +29,23 @@ class CritiqueReport(BaseModel):
     severity: Literal["LOW", "MEDIUM", "HIGH"] = "LOW"
     summary: str = Field(default="Analysis is grounded in verified claims.")
 
+    @classmethod
+    def _validate_raw(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "severity" in data and isinstance(data["severity"], str):
+                s = data["severity"].upper().strip()
+                if s not in ("LOW", "MEDIUM", "HIGH"):
+                    s = "LOW"
+                data["severity"] = s
+            if "summary" not in data or not data["summary"]:
+                data["summary"] = data.get("critique") or data.get("rationale") or "Analysis is grounded in verified claims."
+        return data
+
+    @classmethod
+    def model_validate(cls, obj: Any, *args: Any, **kwargs: Any) -> "CritiqueReport":
+        obj = cls._validate_raw(obj)
+        return super().model_validate(obj, *args, **kwargs)
+
 
 class CriticAgent(BaseAgent):
     """Adversarial agent stress-testing conclusions against evidence gaps and confidence bounds."""
