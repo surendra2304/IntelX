@@ -222,6 +222,29 @@ class OrchestrationEngine:
             run.completed_at = datetime.now(UTC)
             await session.flush()
             await emit_research_completed(session, run_id, run.outcome)
+
+            # External Integrations (Futuris, StrateX)
+            if run.outcome == RunOutcome.ANSWERED:
+                try:
+                    from intelx.integrations.futuris_context import FuturisContextProvider
+                    from intelx.integrations.stratex_context import StratexConnector
+                    
+                    finding_text = f"{run.objective} (Post-Review Resolution)"
+                    domain = scope.get("domain", "market")
+                    
+                    asyncio.create_task(
+                        FuturisContextProvider.notify_futuris_research_relevant(
+                            finding_text=finding_text, run_id=run_id, domain=domain
+                        )
+                    )
+                    asyncio.create_task(
+                        StratexConnector.notify_stratex_trade_signal(
+                            finding_text=finding_text, run_id=run_id, domain=domain
+                        )
+                    )
+                except Exception as ex:
+                    logger.warning(f"Failed to dispatch external ecosystem webhooks: {ex}")
+
             return run
 
         try:
@@ -471,6 +494,33 @@ class OrchestrationEngine:
                 "outcome": str(outcome),
             }
             await emit_research_completed(session, run_id, outcome, cost_summary)
+
+            # 11. External Integrations (Futuris, StrateX)
+            if outcome == RunOutcome.ANSWERED:
+                try:
+                    from intelx.integrations.futuris_context import FuturisContextProvider
+                    from intelx.integrations.stratex_context import StratexConnector
+                    
+                    finding_text = run.objective
+                    if "synthesis_res" in locals() and synthesis_res:
+                        finding_text = f"{run.objective} | Confidence: {synthesis_res.overall_confidence_label}"
+                        
+                    domain = scope.get("domain", "market")
+                    
+                    # Dispatch to ecosystems asynchronously
+                    asyncio.create_task(
+                        FuturisContextProvider.notify_futuris_research_relevant(
+                            finding_text=finding_text, run_id=run_id, domain=domain
+                        )
+                    )
+                    asyncio.create_task(
+                        StratexConnector.notify_stratex_trade_signal(
+                            finding_text=finding_text, run_id=run_id, domain=domain
+                        )
+                    )
+                except Exception as ex:
+                    logger.warning(f"Failed to dispatch external ecosystem webhooks: {ex}")
+
             return run
 
         except asyncio.CancelledError:

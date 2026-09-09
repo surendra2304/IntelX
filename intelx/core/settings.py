@@ -116,6 +116,23 @@ class Settings(BaseSettings):
         description="Webhook URL on Futuris for research-triggered notifications",
     )
 
+    # StrateX Algorithmic Trading Integration
+    STRATEX_BASE_URL: str = Field(
+        default="https://stratex-trading.onrender.com",
+        validation_alias=AliasChoices("INTELX_STRATEX_BASE_URL", "STRATEX_BASE_URL", "STRATEX_URL"),
+        description="Base URL for StrateX trading engine",
+    )
+    STRATEX_API_KEY: str | None = Field(
+        default="stratex_api",
+        validation_alias=AliasChoices("INTELX_STRATEX_API_KEY", "STRATEX_API_KEY"),
+        description="API key for StrateX integration",
+    )
+    STRATEX_WEBHOOK_URL: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_STRATEX_WEBHOOK_URL", "STRATEX_WEBHOOK_URL"),
+        description="Webhook URL on StrateX for automated trade execution triggers",
+    )
+
     # Per-Role LLM Model Overrides
     LLM_MODEL_PLANNER: str | None = Field(
         default=None,

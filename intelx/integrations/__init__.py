@@ -8,10 +8,13 @@ from intelx.integrations.futuris_context import (
     generate_combined_intelligence_report,
 )
 
+from intelx.integrations.stratex_context import StratexConnector
+
 __all__ = [
     "CombinedIntelligenceReport",
     "ForecastContextResponse",
     "FuturisContextProvider",
     "ResearchTriggeredForecasting",
     "generate_combined_intelligence_report",
+    "StratexConnector",
 ]
