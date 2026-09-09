@@ -174,6 +174,8 @@ CHUNK_OVERLAP = 80
 # ---------------------------------------------------------------------------
 
 def _strip_html(text: str) -> str:
+    # First unwrap CDATA sections so content inside is preserved
+    text = re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"<[^>]+>", " ", text)
     text = html.unescape(text)
     return re.sub(r"\s+", " ", text).strip()
@@ -183,6 +185,8 @@ def _parse_rss_date(date_str: str | None) -> datetime | None:
     if not date_str:
         return None
     try:
+        # Strip CDATA if present
+        date_str = re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", date_str, flags=re.DOTALL).strip()
         dt = parsedate_to_datetime(date_str)
         return dt.astimezone(UTC)
     except Exception:
@@ -193,6 +197,7 @@ def _parse_iso_date(date_str: str | None) -> datetime | None:
     if not date_str:
         return None
     try:
+        date_str = re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", date_str, flags=re.DOTALL).strip()
         dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=UTC)
@@ -228,16 +233,18 @@ def _parse_feed(xml_text: str, feed_config: dict[str, str]) -> list[dict[str, An
     is_atom = "<feed" in xml_text[:500]
 
     if is_atom:
-        entries = re.findall(r"<entry>(.*?)</entry>", xml_text, re.DOTALL)
+        entries = re.findall(r"<entry[^>]*>(.*?)</entry>", xml_text, re.DOTALL)
         for entry in entries[:MAX_ITEMS_PER_FEED]:
             title_m = re.search(r"<title[^>]*>(.*?)</title>", entry, re.DOTALL)
             link_m = re.search(r'<link[^>]+href=["\']([^"\']+)["\']', entry)
             if not link_m:
-                link_m = re.search(r"<link>(.*?)</link>", entry, re.DOTALL)
+                link_m = re.search(r"<link[^>]*>(.*?)</link>", entry, re.DOTALL)
+            if not link_m:
+                link_m = re.search(r"<id[^>]*>(.*?)</id>", entry, re.DOTALL)
             summary_m = re.search(r"<summary[^>]*>(.*?)</summary>", entry, re.DOTALL) or \
                         re.search(r"<content[^>]*>(.*?)</content>", entry, re.DOTALL)
-            date_m = re.search(r"<published>(.*?)</published>", entry) or \
-                     re.search(r"<updated>(.*?)</updated>", entry)
+            date_m = re.search(r"<published[^>]*>(.*?)</published>", entry, re.DOTALL) or \
+                     re.search(r"<updated[^>]*>(.*?)</updated>", entry, re.DOTALL)
 
             url = _strip_html(link_m.group(1) if link_m else "").strip()
             if not url or not url.startswith("http"):
@@ -250,13 +257,15 @@ def _parse_feed(xml_text: str, feed_config: dict[str, str]) -> list[dict[str, An
                 "publisher": publisher, "agent": agent, "category": category,
             })
     else:
-        for item in re.findall(r"<item>(.*?)</item>", xml_text, re.DOTALL)[:MAX_ITEMS_PER_FEED]:
+        for item in re.findall(r"<item[^>]*>(.*?)</item>", xml_text, re.DOTALL)[:MAX_ITEMS_PER_FEED]:
             title_m = re.search(r"<title[^>]*>(.*?)</title>", item, re.DOTALL)
-            link_m = re.search(r"<link>(.*?)</link>", item, re.DOTALL)
+            link_m = re.search(r"<link[^>]*>(.*?)</link>", item, re.DOTALL)
             if not link_m:
                 link_m = re.search(r'<link[^>]+href=["\']([^"\']+)["\']', item)
+            if not link_m:
+                link_m = re.search(r"<guid[^>]*>(.*?)</guid>", item, re.DOTALL)
             desc_m = re.search(r"<description[^>]*>(.*?)</description>", item, re.DOTALL)
-            date_m = re.search(r"<pubDate>(.*?)</pubDate>", item)
+            date_m = re.search(r"<pubDate[^>]*>(.*?)</pubDate>", item, re.DOTALL)
 
             url = _strip_html(link_m.group(1) if link_m else "").strip()
             if not url or not url.startswith("http"):
