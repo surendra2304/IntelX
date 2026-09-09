@@ -14,13 +14,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.core.auth import get_current_api_key
 from intelx.db.models import ApiKey, Chunk, Document, Source
-from intelx.db.session import get_db
+from intelx.db.session import get_sessionmaker
 
 logger = logging.getLogger("intelx.api.friday_universe")
 
 router = APIRouter(prefix="/friday-universe", tags=["FRIDAY Universe Intelligence"])
 
 VALID_AGENTS = {"stratex", "futuris", "sentinel", "friday", "cortex", "forge", "inference", "all"}
+
+
+async def get_db_session() -> AsyncSession:
+    """FastAPI database session dependency."""
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        yield session
 
 
 class IntelligenceItem(BaseModel):
@@ -56,7 +63,7 @@ async def get_agent_intelligence(
         description="Target agent: stratex | futuris | sentinel | friday | cortex | forge | inference | all",
     ),
     limit: int = Query(default=50, le=200, ge=1, description="Number of items to return"),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db_session),
     _: ApiKey = Depends(get_current_api_key),
 ) -> IntelligenceFeed:
     agent = agent.lower().strip()
@@ -118,7 +125,7 @@ async def get_agent_intelligence(
     summary="Check knowledge base ingestion status",
 )
 async def get_ingestion_status(
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db_session),
     _: ApiKey = Depends(get_current_api_key),
 ) -> dict:
     """Returns count of ingested intelligence items per agent."""
