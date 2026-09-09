@@ -495,29 +495,52 @@ class OrchestrationEngine:
             }
             await emit_research_completed(session, run_id, outcome, cost_summary)
 
-            # 11. External Integrations (Futuris, StrateX)
+            # 11. External Integrations (Memora, Futuris, StrateX, FRIDAY Universe)
             if outcome == RunOutcome.ANSWERED:
                 try:
                     from intelx.integrations.futuris_context import FuturisContextProvider
+                    from intelx.integrations.memora_context import MemoraMemoryClient
                     from intelx.integrations.stratex_context import StratexConnector
-                    
-                    finding_text = run.objective
+
+                    # Extract rich synthesized summary
                     if "synthesis_res" in locals() and synthesis_res:
-                        finding_text = f"{run.objective} | Confidence: {synthesis_res.overall_confidence_label}"
-                        
+                        direct_ans = getattr(synthesis_res, "executive_summary", "") or getattr(synthesis_res, "direct_answer", "")
+                        findings_snip = "\n".join(f"• {f.statement}" for f in getattr(synthesis_res, "findings", [])[:5])
+                        finding_text = f"{run.objective}\n\nDIRECT ANSWER:\n{direct_ans}\n\nKEY FINDINGS:\n{findings_snip}"
+                    else:
+                        finding_text = run.objective
+
                     domain = scope.get("domain", "market")
-                    
-                    # Dispatch to ecosystems asynchronously
+                    target_agent = scope.get("agent") or scope.get("target_agent") or "all"
+
+                    # 1. Store directly into Memora Cloud persistent shared memory (accessible by ALL 9 agents)
+                    memora_client = MemoraMemoryClient()
+                    asyncio.create_task(
+                        memora_client.store_research_memory(
+                            run_id=run_id,
+                            objective=run.objective,
+                            summary=finding_text,
+                            evidence_count=len(all_ingested),
+                            claims_count=len(claims),
+                            namespace="memora://intelx/shared",
+                            tags=["intelx", "research", domain, str(target_agent).lower()],
+                        )
+                    )
+
+                    # 2. Dispatch to Futuris Predictive Forecasting
                     asyncio.create_task(
                         FuturisContextProvider.notify_futuris_research_relevant(
                             finding_text=finding_text, run_id=run_id, domain=domain
                         )
                     )
+
+                    # 3. Dispatch to StrateX Binance Futures Algorithmic Trading
                     asyncio.create_task(
                         StratexConnector.notify_stratex_trade_signal(
                             finding_text=finding_text, run_id=run_id, domain=domain
                         )
                     )
+                    logger.info(f"Dispatched completed research for '{run.objective[:50]}' to Memora, Stratex, and Futuris.")
                 except Exception as ex:
                     logger.warning(f"Failed to dispatch external ecosystem webhooks: {ex}")
 

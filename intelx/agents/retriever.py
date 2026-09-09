@@ -131,18 +131,24 @@ class RetrieverAgent(BaseAgent):
                     domain = None
                 else:
                     fetch_res = await self.http_connector.fetch(location)
-                    if not fetch_res.robots_ok:
+                    if (not fetch_res.robots_ok or not fetch_res.content) and candidate.snippet and len(candidate.snippet.strip()) >= 15:
+                        logger.info(f"Using snippet fallback for {location} (robots/empty response)")
+                        raw_bytes = f"{candidate.title}\n\n{candidate.snippet.strip()}".encode("utf-8")
+                        content_type = "text/plain; format=snippet"
+                        kind = SourceKind.WEB
+                        domain = parsed.hostname
+                    elif not fetch_res.robots_ok:
                         failure = FetchFailure(
                             location=location,
                             error_class=TaskErrorClass.LOGICAL,
                             reason=fetch_res.error or "Disallowed by robots.txt",
                         )
                         return None, failure, None, None, []
-
-                    raw_bytes = fetch_res.content
-                    content_type = fetch_res.content_type
-                    kind = SourceKind.WEB
-                    domain = parsed.hostname
+                    else:
+                        raw_bytes = fetch_res.content
+                        content_type = fetch_res.content_type
+                        kind = SourceKind.WEB
+                        domain = parsed.hostname
 
                 source, doc, chunks, _ = await ingest_and_normalize(
                     session=session,

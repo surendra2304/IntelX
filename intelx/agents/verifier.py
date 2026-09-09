@@ -76,15 +76,21 @@ class VerifierAgent(BaseAgent):
         if not session or not run_id:
             return claims
 
-        # Filter important claims based on depth
+        # Filter important claims based on depth (capped to avoid combinatorial search explosion)
         if depth.lower() == "deep":
-            target_claims = claims
+            target_claims = claims[:8]
+        elif depth.lower() == "quick":
+            target_claims = [
+                c
+                for c in claims
+                if c.claim_type in (ClaimType.FACT, ClaimType.MEASUREMENT)
+            ][:2]
         else:
             target_claims = [
                 c
                 for c in claims
                 if c.claim_type in (ClaimType.FACT, ClaimType.MEASUREMENT, ClaimType.EVENT)
-            ]
+            ][:4]
 
         for claim in target_claims:
             # 1. Fetch original source and document

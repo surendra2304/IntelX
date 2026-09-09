@@ -133,8 +133,120 @@ class DuckDuckGoSearchConnector(BaseConnector):
             return []
 
 
+class GoogleNewsSearchConnector(BaseConnector):
+    """High-reliability real-time web news search via Google News RSS (never blocked by cloud IP checks)."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(
+            name="google_news_search",
+            capabilities=["web_search", "unauthenticated", "real_time"],
+            required_credentials=[],
+            classification="EXTERNAL_SEARCH",
+            **kwargs,
+        )
+
+    async def fetch(self, target: str, **kwargs: Any) -> list[SearchResult]:
+        max_results = min(kwargs.get("max_results", 10), 15)
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/rss+xml, application/xml, text/xml, */*",
+        }
+        # Strip noise and portfolio modifier words for clean news search
+        noise_words = {
+            "official", "report", "study", "dataset", "methodology",
+            "measurements", "benchmark", "criticism", "limitations",
+            "contradictory", "evidence", "aspects", "subquestion",
+            "concerning", "regarding", "evaluating", "specifications",
+            "definitions", "baseline", "benchmarks", "empirical",
+            "experimental", "operational", "disputed", "claims",
+        }
+        words = [w for w in target.strip().split() if w.lower() not in noise_words]
+        clean_target = " ".join(words[:6]) if words else target.strip()
+        encoded_query = urllib.parse.quote(clean_target)
+        url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0, headers=headers, follow_redirects=True) as client:
+                resp = await client.get(url)
+                if resp.status_code != 200:
+                    logger.warning(f"Google News RSS returned HTTP {resp.status_code}")
+                    return []
+
+                import html as html_lib
+                import re as re_lib
+
+                items = re_lib.findall(r"<item>(.*?)</item>", resp.text, re_lib.DOTALL)
+                results: list[SearchResult] = []
+
+                for item in items[:max_results]:
+                    t_m = re_lib.search(r"<title[^>]*>(.*?)</title>", item, re_lib.DOTALL)
+                    l_m = re_lib.search(r"<link>(.*?)</link>", item, re_lib.DOTALL)
+                    d_m = re_lib.search(r"<description[^>]*>(.*?)</description>", item, re_lib.DOTALL)
+
+                    title = html_lib.unescape(t_m.group(1).strip()) if t_m else ""
+                    raw_link = l_m.group(1).strip() if l_m else ""
+                    desc = html_lib.unescape(re_lib.sub(r"<[^>]+>", " ", d_m.group(1)).strip()) if d_m else ""
+
+                    if title and raw_link:
+                        results.append(
+                            SearchResult(
+                                url=raw_link,
+                                title=title,
+                                snippet=desc[:260] if desc else title,
+                            )
+                        )
+                return results
+        except Exception as e:
+            logger.warning(f"Google News search failed: {e}")
+            return []
+
+
+class WikipediaSearchConnector(BaseConnector):
+    """Open encyclopedia lookup via Wikipedia opensearch API."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(
+            name="wikipedia_search",
+            capabilities=["encyclopedic_search", "unauthenticated"],
+            required_credentials=[],
+            classification="EXTERNAL_SEARCH",
+            **kwargs,
+        )
+
+    async def fetch(self, target: str, **kwargs: Any) -> list[SearchResult]:
+        max_results = min(kwargs.get("max_results", 5), 5)
+        headers = {"User-Agent": "IntelX-ResearchBot/2.0 (Evidence Engine)"}
+        encoded_query = urllib.parse.quote(target.strip())
+        url = f"https://en.wikipedia.org/w/api.php?action=opensearch&search={encoded_query}&limit={max_results}&namespace=0&format=json"
+
+        try:
+            async with httpx.AsyncClient(timeout=8.0, headers=headers) as client:
+                resp = await client.get(url)
+                if resp.status_code != 200:
+                    return []
+                data = resp.json()
+                if not isinstance(data, list) or len(data) < 4:
+                    return []
+
+                titles = data[1]
+                snippets = data[2]
+                urls = data[3]
+                results: list[SearchResult] = []
+
+                for t, s, u in zip(titles, snippets, urls):
+                    if t and u:
+                        results.append(SearchResult(url=u, title=t, snippet=s or t))
+                return results
+        except Exception as e:
+            logger.debug(f"Wikipedia search failed: {e}")
+            return []
+
+
 class WebSearchConnector(BaseConnector):
-    """Router connector selecting Tavily, DuckDuckGo, or deterministic Mock fixtures."""
+    """Router connector selecting Tavily, Google News RSS, Wikipedia, DuckDuckGo, or Mock fixtures."""
 
     def __init__(
         self,
@@ -151,6 +263,8 @@ class WebSearchConnector(BaseConnector):
         )
         self.settings = settings or get_settings()
         self._tavily = TavilySearchConnector(api_key=self.settings.TAVILY_API_KEY)
+        self._google_news = GoogleNewsSearchConnector()
+        self._wikipedia = WikipediaSearchConnector()
         self._ddg = DuckDuckGoSearchConnector(transport=transport)
         self._fixtures_dir = Path("./tests/fixtures/search_results").resolve()
 
@@ -284,9 +398,21 @@ class WebSearchConnector(BaseConnector):
         if self.settings.MOCK_MODE:
             return self._load_mock_results(target)
 
+        # 1. Tavily if key present
         if self.settings.TAVILY_API_KEY:
             results = await self._tavily.fetch(target, **kwargs)
             if results:
                 return results
 
+        # 2. Google News RSS (high reliability on cloud/Render IPs, real-time unblocked)
+        news_results = await self._google_news.fetch(target, **kwargs)
+        if news_results:
+            return news_results
+
+        # 3. Wikipedia for general encyclopedic definitions
+        wiki_results = await self._wikipedia.fetch(target, **kwargs)
+        if wiki_results:
+            return wiki_results
+
+        # 4. DuckDuckGo fallback
         return await self._ddg.fetch(target, **kwargs)

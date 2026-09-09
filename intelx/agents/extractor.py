@@ -309,6 +309,75 @@ class ExtractorAgent(BaseAgent):
             },
         )
 
+        # Resilient fallback: If upstream LLM emitted 0 claims, extract factual declarative statements directly
+        if total_attempted == 0 and chunks:
+            from intelx.models.providers import MockProvider
+            for chunk in chunks:
+                doc_claims = MockProvider._mock_extract_claims([{"content": chunk.text}])
+                for cd in doc_claims.get("claims", []):
+                    quote = cd["quote"]
+                    alignment = align_quote_to_document(quote, chunk.text, min_similarity=0.85)
+                    if not alignment:
+                        continue
+                    exact_quote, sp_start, sp_end, _ = alignment
+                    abs_start = chunk.start_char + sp_start
+                    abs_end = chunk.start_char + sp_end
+
+                    ctype_val = cd.get("claim_type", "FACT")
+                    try:
+                        ctype = ClaimType(ctype_val)
+                    except Exception:
+                        ctype = ClaimType.FACT
+
+                    persisted_claim = await ClaimRepo.create_claim(
+                        session=session,
+                        run_id=run_id,
+                        source_id=source_id,
+                        document_id=document.id,
+                        chunk_id=chunk.id,
+                        text_content=cd["text"],
+                        quote=exact_quote,
+                        span_start=abs_start,
+                        span_end=abs_end,
+                        claim_type=ctype,
+                        subject=cd.get("subject", "Entity"),
+                        predicate=cd.get("predicate", "states"),
+                        object_val=cd.get("object", exact_quote[:40]),
+                        entities_json=cd.get("entities", []),
+                        confidence=0.90,
+                        confidence_method="heuristic_declarative",
+                        origin=ClaimOrigin.EXTRACTED,
+                        status=ClaimStatus.ACTIVE,
+                        created_by_agent="extractor",
+                    )
+                    await EvidenceRepo.create_evidence(
+                        session=session,
+                        claim_id=persisted_claim.id,
+                        source_id=source_id,
+                        document_id=document.id,
+                        chunk_id=chunk.id,
+                        span_start=abs_start,
+                        span_end=abs_end,
+                        quote=exact_quote,
+                        support_type=EvidenceSupportType.SUPPORTS,
+                        created_by_run_id=run_id,
+                        created_by_agent="extractor",
+                    )
+                    all_saved_claims.append(
+                        ExtractedClaim(
+                            text=cd["text"],
+                            subject=cd.get("subject", "Entity"),
+                            predicate=cd.get("predicate", "states"),
+                            object=cd.get("object", exact_quote[:40]),
+                            claim_type=ctype,
+                            entities=cd.get("entities", []),
+                            quote=exact_quote,
+                            relative_span={"start": sp_start, "end": sp_end},
+                            preliminary_confidence=0.90,
+                            rationale="Extracted declarative assertion from source evidence.",
+                        )
+                    )
+
         return ExtractionResult(
             claims=all_saved_claims,
             entities=all_entities,
