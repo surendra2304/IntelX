@@ -82,6 +82,30 @@ class ScoutAgent(BaseAgent):
             except Exception as e:
                 logger.debug(f"Internal knowledge FTS lookup skipped: {e}")
 
+            # Also discover from ingested FRIDAY Universe sources in database
+            try:
+                from sqlalchemy import or_, select
+                from intelx.db.models import Source
+                words = [w.strip().lower() for w in subquestion.replace("?", " ").replace(",", " ").split() if len(w.strip()) > 3][:5]
+                if words:
+                    conditions = [Source.title.ilike(f"%{w}%") for w in words]
+                    stmt = select(Source).where(or_(*conditions)).order_by(Source.retrieved_at.desc()).limit(4)
+                    res = await session.execute(stmt)
+                    for src in res.scalars().all():
+                        loc = src.location.strip()
+                        if loc and loc not in seen_set:
+                            seen_set.add(loc)
+                            candidates.append(
+                                SourceCandidate(
+                                    location=loc,
+                                    title=src.title or src.publisher or "Ingested Intelligence Source",
+                                    reason=f"Ingested intelligence from {src.publisher or 'feed'}",
+                                    expected_relevance=0.90,
+                                )
+                            )
+            except Exception as ex:
+                logger.debug(f"Source table lookup skipped: {ex}")
+
         # 2. Generate multi-angle query portfolio (direct, primary, counterevidence)
         queries = self.portfolio_planner.build(plan_item_id=subquestion[:24], question=subquestion)
         query_terms = set(self.portfolio_planner.keywords(subquestion))

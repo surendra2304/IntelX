@@ -190,16 +190,18 @@ class PlannerAgent(BaseAgent):
             run_id=run_id,
         )
 
-        plan: Plan = result.parsed
+        plan: Plan | None = result.parsed if result else None
+        mode = normalize_research_mode(domain_hint)
+        if not plan or not getattr(plan, "subquestions", None):
+            plan = Plan(
+                objective=objective,
+                subquestions=ResearchQuestionEnhancer.enhance_question(objective, mode),
+            )
         plan.objective = objective
 
-        # If domain_hint is present and subquestions are generic, enhance with specialized template
-        mode = normalize_research_mode(domain_hint)
-        if mode != ResearchMode.GENERAL and (
-            not plan.subquestions
-            or any(
-                "subquestion" in sq.lower() or "aspect" in sq.lower() for sq in plan.subquestions
-            )
+        # If domain_hint is present and subquestions are generic or empty, enhance with specialized template
+        if not plan.subquestions or any(
+            "subquestion" in sq.lower() or "aspect" in sq.lower() for sq in plan.subquestions
         ):
             plan.subquestions = ResearchQuestionEnhancer.enhance_question(objective, mode)
 

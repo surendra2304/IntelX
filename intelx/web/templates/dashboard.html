@@ -4,9 +4,14 @@
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
   <div>
     <h1 style="font-size: 22px; font-weight: 800; color: var(--text-main);">Research Operations</h1>
-    <p style="color: var(--text-muted); font-size: 13px;">Evidence-backed intelligence synthesis runs</p>
+    <p style="color: var(--text-muted); font-size: 13px;">Autonomous evidence-backed intelligence synthesis for the FRIDAY Universe</p>
   </div>
-  <a href="/research/new" class="btn btn-primary">+ New Research Job</a>
+  <div style="display: flex; gap: 8px;">
+    <form method="post" action="/research/trigger-autonomous" style="display: inline; margin: 0;">
+      <button type="submit" class="btn btn-secondary" style="border: 1px solid var(--accent-primary, #2563eb); font-weight: 600;">⚡ Run Autonomous Research</button>
+    </form>
+    <a href="/research/new" class="btn btn-primary">+ New Research Job</a>
+  </div>
 </div>
 
 <!-- Stat Counters -->

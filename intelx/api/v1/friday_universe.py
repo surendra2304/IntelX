@@ -155,6 +155,46 @@ async def get_ingestion_status(
     }
 
 
+@router.post(
+    "/trigger-research",
+    summary="Trigger an autonomous research investigation immediately",
+)
+async def trigger_autonomous_research(
+    agent: str = Query(default="all", description="Target agent: stratex | sentinel | friday | futuris | all"),
+    session: AsyncSession = Depends(get_db_session),
+    _: ApiKey = Depends(get_current_api_key),
+) -> dict:
+    """Manually dispatch an autonomous intelligence research investigation."""
+    from intelx.orchestration.autonomous_researcher import AUTONOMOUS_RESEARCH_TOPICS
+    from intelx.db.repos import RunRepo
+
+    agent = agent.lower().strip()
+    topic = next((t for t in AUTONOMOUS_RESEARCH_TOPICS if t["agent"] == agent), AUTONOMOUS_RESEARCH_TOPICS[0])
+
+    scope = {
+        "domain": topic["domain"],
+        "depth": "quick",
+        "autonomous": True,
+        "agent": topic["agent"],
+        "target_agent": topic["agent"].upper(),
+    }
+
+    run = await RunRepo.create_run(
+        session=session,
+        objective=topic["objective"],
+        scope_json=scope,
+    )
+    await session.commit()
+
+    return {
+        "status": "queued",
+        "run_id": run.id,
+        "target_agent": topic["agent"],
+        "objective": topic["objective"],
+        "message": "Research investigation spawned. The orchestration worker will execute it immediately.",
+    }
+
+
 def _extract_tag(text: str, tag_name: str) -> str | None:
     """Extract value from [TAG_NAME:VALUE] marker in document text."""
     m = re.search(rf"\[{tag_name}:([^\]]+)\]", text)

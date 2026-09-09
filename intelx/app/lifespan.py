@@ -70,7 +70,22 @@ class NewsIngesterHook:
         await self._ingester.stop()
 
 
+class AutonomousResearchHook:
+    """Hook managing the continuous autonomous research generation loop."""
+
+    def __init__(self) -> None:
+        from intelx.orchestration.autonomous_researcher import AutonomousResearcher
+        self._researcher = AutonomousResearcher(interval_seconds=900)
+
+    async def start(self) -> None:
+        await self._researcher.start()
+
+    async def stop(self) -> None:
+        await self._researcher.stop()
+
+
 news_hook = NewsIngesterHook()
+auto_research_hook = AutonomousResearchHook()
 
 
 @asynccontextmanager
@@ -138,10 +153,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await news_hook.start()
     logger.info("Continuous news ingestion started.")
 
+    # 6. Start autonomous continuous research engine
+    await auto_research_hook.start()
+    logger.info("Autonomous research engine started.")
+
     yield
 
     # Shutdown sequence
     logger.info("Initiating INTELX shutdown sequence...")
+    await auto_research_hook.stop()
     await news_hook.stop()
     await worker_hook.stop()
     await dispose_engine()

@@ -24,6 +24,7 @@ from intelx.core.errors import (
 )
 from intelx.core.settings import Settings, get_settings
 from intelx.db.models import Chunk, Document, Source
+from intelx.db.repos import SourceRepo
 from intelx.memory.normalize import ingest_and_normalize
 from intelx.models.gateway import ModelGateway
 
@@ -90,6 +91,24 @@ class RetrieverAgent(BaseAgent):
         # Internal reference bypass
         if location.startswith("internal://"):
             return None, None, None, None, []
+
+        # Instant cache bypass: check if source was already ingested into database
+        from sqlalchemy import select
+        stmt_s = select(Source).where(Source.location == location)
+        existing_src = (await session.execute(stmt_s)).scalar_one_or_none()
+        if existing_src:
+            doc = await SourceRepo.get_document_by_source_id(session, existing_src.id)
+            if doc:
+                stmt_c = select(Chunk).where(Chunk.document_id == doc.id).order_by(Chunk.idx.asc())
+                chunks = list((await session.execute(stmt_c)).scalars().all())
+                retrieved_item = RetrievedDoc(
+                    source_id=existing_src.id,
+                    document_id=doc.id,
+                    location=location,
+                    chunks_count=len(chunks),
+                    source_title=existing_src.title,
+                )
+                return retrieved_item, None, existing_src, doc, chunks
 
         is_file = (
             parsed.scheme in ("file", "")

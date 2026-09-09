@@ -217,6 +217,34 @@ async def new_research_submit(
     return RedirectResponse(url=f"/research/{run.id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@web_router.post("/research/trigger-autonomous")
+async def trigger_autonomous_web(
+    request: Request,
+    user: dict[str, Any] = Depends(require_web_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Trigger an autonomous investigation on demand from the web dashboard."""
+    import random
+    from intelx.orchestration.autonomous_researcher import AUTONOMOUS_RESEARCH_TOPICS
+
+    topic = random.choice(AUTONOMOUS_RESEARCH_TOPICS)
+    scope = {
+        "domain": topic["domain"],
+        "depth": "quick",
+        "autonomous": True,
+        "agent": topic["agent"],
+        "target_agent": topic["agent"].upper(),
+    }
+    run = await RunRepo.create_run(
+        session=session,
+        objective=topic["objective"],
+        scope_json=scope,
+        created_by="autonomous_engine",
+    )
+    await session.commit()
+    return RedirectResponse(url=f"/research/{run.id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
 # 4. Job Page
 @web_router.get("/research/{job_id}", response_class=HTMLResponse)
 async def job_page(
