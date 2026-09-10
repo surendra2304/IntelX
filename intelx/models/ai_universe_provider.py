@@ -49,11 +49,15 @@ class AIUniverseProvider(BaseLLMProvider):
         """Map INTELX agent role to AI-Universe persona."""
         return AI_UNIVERSE_ROLE_MAP.get(role.lower().strip(), "Strategist")
 
-    def _extract_context(self, messages: list[dict[str, str]]) -> dict[str, Any]:
-        """Extract structured context from message chain."""
+    def _extract_context(
+        self, messages: list[dict[str, str]]
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Extract structured context and evidence claims from message chain."""
+        import re
+
         full_content = "\n\n".join(m.get("content", "") for m in messages)
 
-        # Extract basic elements if detectable
+        # Extract basic question if detectable
         lines = full_content.splitlines()
         question = lines[0] if lines else "Intelligence request"
         for line in lines:
@@ -61,11 +65,34 @@ class AIUniverseProvider(BaseLLMProvider):
                 question = line.split(":", 1)[-1].strip()
                 break
 
-        return {
+        # Extract evidence claims JSON if present in messages
+        evidence_list: list[dict[str, Any]] = []
+        m = re.search(r"VERIFIED EVIDENCE CLAIMS[^\n]*:\s*(\[[\s\S]*?\])", full_content)
+        if m:
+            try:
+                raw_claims = json.loads(m.group(1))
+                for c in raw_claims:
+                    txt = c.get("text") or c.get("claim") or ""
+                    cid = c.get("id") or ""
+                    conf = float(c.get("confidence", 0.85) or 0.85)
+                    if txt:
+                        evidence_list.append({
+                            "claim_id": cid,
+                            "claim": txt,
+                            "verbatim_span": txt,
+                            "document_source": "intelx_verified_source",
+                            "credibility_score": min(max(conf, 0.0), 1.0),
+                        })
+            except Exception as ex:
+                logger.debug(f"Could not parse evidence claims JSON from prompt: {ex}")
+
+        context_dict = {
             "question": question,
             "raw_prompt_length": len(full_content),
             "message_count": len(messages),
+            "extracted_claims": evidence_list,
         }
+        return context_dict, evidence_list
 
     async def complete(
         self,
@@ -90,12 +117,15 @@ class AIUniverseProvider(BaseLLMProvider):
             headers["Authorization"] = f"Bearer {self.api_key}"
             headers["X-API-Key"] = self.api_key
 
+        ctx_dict, ev_list = self._extract_context(messages)
+
         payload = {
             "request_id": req_id,
             "role": role.lower().strip(),
             "ai_universe_persona": persona,
             "model": model,
-            "context": self._extract_context(messages),
+            "context": ctx_dict,
+            "evidence_with_spans": ev_list,
             "messages": messages,
             "constraints": {
                 "max_tokens": max_tokens,
