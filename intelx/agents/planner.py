@@ -146,15 +146,17 @@ class Plan(BaseModel):
                 data.get("objective")
                 or data.get("goal")
                 or data.get("research_objective")
-                or "Primary Research Investigation"
+                or ""
             )
             data["objective"] = obj
 
-            meta_prefixes = (
-                "decomposed", "here is", "investigative track", "step 1", "step 2",
-                "phase 1", "phase 2", "i will", "planning to", "let's",
+            # Accept subquestions from any standard or planned field
+            raw_subqs = (
+                data.get("subquestions")
+                or data.get("subquestions_planned")
+                or data.get("questions")
+                or []
             )
-            raw_subqs = data.get("subquestions")
             if not raw_subqs:
                 plan_text = data.get("execution_plan") or ""
                 if isinstance(plan_text, list):
@@ -168,17 +170,16 @@ class Plan(BaseModel):
                 else:
                     candidates = []
 
-                subqs = [
+                meta_prefixes = (
+                    "decomposed", "here is", "investigative track", "step 1", "step 2",
+                    "phase 1", "phase 2", "i will", "planning to", "let's",
+                )
+                raw_subqs = [
                     c for c in candidates
                     if not any(c.lower().startswith(p) for p in meta_prefixes)
                 ]
-                data["subquestions"] = subqs
 
-            if not data.get("subquestions"):
-                data["subquestions"] = [
-                    f"{obj} release date and official announcements",
-                    f"{obj} specifications timeline and verified updates",
-                ]
+            data["subquestions"] = raw_subqs
             if len(data.get("subquestions", [])) > 5:
                 data["subquestions"] = data["subquestions"][:5]
         return data
@@ -241,18 +242,24 @@ class PlannerAgent(BaseAgent):
 
         plan: Plan | None = result.parsed if result else None
         mode = normalize_research_mode(domain_hint)
-        if not plan or not getattr(plan, "subquestions", None):
+
+        is_invalid_plan = (
+            not plan
+            or not getattr(plan, "subquestions", None)
+            or any(
+                "primary research investigation" in sq.lower()
+                or "subquestion" in sq.lower()
+                or "aspect" in sq.lower()
+                for sq in getattr(plan, "subquestions", [])
+            )
+        )
+
+        if is_invalid_plan:
             plan = Plan(
                 objective=objective,
                 subquestions=ResearchQuestionEnhancer.enhance_question(objective, mode),
             )
         plan.objective = objective
-
-        # If domain_hint is present and subquestions are generic or empty, enhance with specialized template
-        if not plan.subquestions or any(
-            "subquestion" in sq.lower() or "aspect" in sq.lower() for sq in plan.subquestions
-        ):
-            plan.subquestions = ResearchQuestionEnhancer.enhance_question(objective, mode)
 
         # Enforce max 5 subquestions constraint strictly
         if len(plan.subquestions) > 5:

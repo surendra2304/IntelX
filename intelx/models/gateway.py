@@ -246,22 +246,52 @@ class ModelGateway:
         raw_text: str, schema_model: type[BaseModel]
     ) -> tuple[BaseModel | None, str | None]:
         """Attempt to extract JSON and validate against target Pydantic schema."""
-        cleaned_text = raw_text.strip()
-        # Strip markdown code fences if wrapped in ```json ... ```
-        if cleaned_text.startswith("```json"):
-            cleaned_text = cleaned_text[len("```json") :].strip()
-        elif cleaned_text.startswith("```"):
-            cleaned_text = cleaned_text[len("```") :].strip()
-        if cleaned_text.endswith("```"):
-            cleaned_text = cleaned_text[:-3].strip()
+        import re
 
+        cleaned_text = raw_text.strip()
+
+        # Strategy 1: Direct parse
         try:
-            # First try parsing as JSON dict
             data = json.loads(cleaned_text)
-            validated = schema_model.model_validate(data)
-            return validated, None
-        except (json.JSONDecodeError, ValidationError) as e:
-            return None, str(e)
+            return schema_model.model_validate(data), None
+        except Exception:
+            pass
+
+        # Strategy 2: Extract from ```json ... ``` or ``` ... ``` markdown block
+        m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned_text)
+        if m:
+            try:
+                data = json.loads(m.group(1).strip())
+                return schema_model.model_validate(data), None
+            except Exception:
+                pass
+
+        # Strategy 3: Extract first { to last } JSON object
+        first_brace = cleaned_text.find("{")
+        last_brace = cleaned_text.rfind("}")
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            try:
+                candidate = cleaned_text[first_brace : last_brace + 1]
+                data = json.loads(candidate)
+                return schema_model.model_validate(data), None
+            except Exception:
+                pass
+
+        # Strategy 4: Extract first [ to last ] JSON array
+        first_bracket = cleaned_text.find("[")
+        last_bracket = cleaned_text.rfind("]")
+        if first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
+            try:
+                candidate = cleaned_text[first_bracket : last_bracket + 1]
+                data = json.loads(candidate)
+                return schema_model.model_validate(data), None
+            except Exception:
+                pass
+
+        # If all extraction failed, run direct parse to capture the exact validation or decode error
+        try:
+            data = json.loads(cleaned_text)
+            return schema_model.model_validate(data), None
         except Exception as e:
             return None, str(e)
 

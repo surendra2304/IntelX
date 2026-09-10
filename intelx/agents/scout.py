@@ -66,7 +66,9 @@ class ScoutAgent(BaseAgent):
         # 1. Search existing internal knowledge base via FTS5
         if session:
             try:
-                fts_chunks = await ClaimRepo.search_chunks_fts(session, subquestion[:40])
+                core_kw = self.portfolio_planner.keywords(subquestion)
+                fts_query = " ".join(core_kw[:4]) if core_kw else subquestion[:30]
+                fts_chunks = await ClaimRepo.search_chunks_fts(session, fts_query)
                 for chunk in fts_chunks[:3]:
                     loc = f"internal://chunk/{chunk.id}"
                     if loc not in seen_set:
@@ -93,13 +95,16 @@ class ScoutAgent(BaseAgent):
                     "overview", "announcement", "announcements", "status", "schedule",
                     "specifications", "definitions", "baseline", "benchmarks", "empirical",
                     "experimental", "operational", "disputed", "claims", "measured",
+                    "statements", "primary", "investigation", "documentation", "verified",
+                    "updates", "milestones", "features", "facts", "occurred",
                 }
                 words = [
-                    w.strip().lower() for w in subquestion.replace("?", " ").replace(",", " ").split()
-                    if len(w.strip()) > 3 and w.strip().lower() not in db_stop_words
-                ][:4]
-                if words:
-                    conditions = [Source.title.ilike(f"%{w}%") for w in words]
+                    w for w in self.portfolio_planner.keywords(subquestion)
+                    if w not in db_stop_words and len(w) > 2
+                ]
+                # Require at least 2 distinct substantive search tokens to prevent spurious DB matches
+                if len(words) >= 2:
+                    conditions = [Source.title.ilike(f"%{w}%") for w in words[:3]]
                     stmt = select(Source).where(and_(*conditions)).order_by(Source.retrieved_at.desc()).limit(3)
                     res = await session.execute(stmt)
                     for src in res.scalars().all():
