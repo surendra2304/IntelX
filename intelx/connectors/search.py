@@ -174,7 +174,6 @@ class GoogleNewsSearchConnector(BaseConnector):
             ),
             "Accept": "application/rss+xml, application/xml, text/xml, */*",
         }
-        # Strip noise and portfolio modifier words for clean news search
         noise_words = {
             "what", "are", "is", "the", "and", "for", "with", "from", "that", "this",
             "about", "does", "into", "how", "why", "who", "when", "which",
@@ -184,6 +183,8 @@ class GoogleNewsSearchConnector(BaseConnector):
             "contradictory", "evidence", "aspects", "subquestion",
             "specifications", "definitions", "baseline", "benchmarks", "empirical",
             "experimental", "operational", "disputed", "claims", "results", "measured",
+            "recent", "updates", "developments", "confirmed", "milestones", "occurred",
+            "investigation", "primary", "statements", "documentation",
         }
         raw_words = target.strip().replace("?", " ").replace(",", " ").replace('"', " ").split()
         substantive = [w for w in raw_words if w.lower() not in noise_words]

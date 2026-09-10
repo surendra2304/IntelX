@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -209,12 +210,22 @@ class SynthesizerAgent(BaseAgent):
             ]
             overall_conf_label = "Very low"
         else:
-            # LLM Synthesis: Prioritize top 25 highest-confidence claims to preserve focus and token budget
-            sorted_claims = sorted(
-                claims,
-                key=lambda x: getattr(x, "confidence", None) or (x.get("confidence") if isinstance(x, dict) else 0.8) or 0.8,
-                reverse=True,
-            )[:25]
+            # LLM Synthesis: Prioritize claims relevant to the research objective, then by confidence
+            obj_words = set(re.findall(r"\w{3,}", objective.lower())) - {
+                "what", "when", "where", "which", "with", "from", "that", "this", "about"
+            }
+
+            def claim_priority(c: Any) -> tuple[int, float]:
+                txt = (getattr(c, "text", None) or (c.get("text") if isinstance(c, dict) else "") or "").lower()
+                matches = sum(1 for w in obj_words if w in txt)
+                conf = getattr(c, "confidence", None) or (c.get("confidence") if isinstance(c, dict) else 0.8) or 0.8
+                try:
+                    conf_val = float(conf)
+                except (ValueError, TypeError):
+                    conf_val = 0.8
+                return (matches, conf_val)
+
+            sorted_claims = sorted(claims, key=claim_priority, reverse=True)[:25]
             formatted_claims = []
             for c in sorted_claims:
                 cid = getattr(c, "id", None) or (c.get("id") if isinstance(c, dict) else None)
