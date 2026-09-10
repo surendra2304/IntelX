@@ -541,8 +541,8 @@ class ResearchTriggeredForecasting:
             },
         }
 
-        # If in Mock Mode or URL is default unconfigured mock, return simulated success
-        if settings.MOCK_MODE or not settings.FUTURIS_WEBHOOK_URL:
+        # If in Mock Mode or URL is unconfigured, return simulated success
+        if settings.MOCK_MODE or not target_url:
             logger.info(
                 f"[Futuris Webhook Simulated] Dispatched research_finding_relevant for run {run_id}: {category}"
             )

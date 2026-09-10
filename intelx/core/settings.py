@@ -111,14 +111,14 @@ class Settings(BaseSettings):
         description="API key for Futuris integration",
     )
     FUTURIS_WEBHOOK_URL: str | None = Field(
-        default=None,
+        default="https://futuris-x4f4.onrender.com/api/v1/webhooks/research-finding-relevant",
         validation_alias=AliasChoices("INTELX_FUTURIS_WEBHOOK_URL", "FUTURIS_WEBHOOK_URL"),
         description="Webhook URL on Futuris for research-triggered notifications",
     )
 
     # StrateX Algorithmic Trading Integration
     STRATEX_BASE_URL: str = Field(
-        default="https://stratex-trading.onrender.com",
+        default="https://stratex-ucjz.onrender.com",
         validation_alias=AliasChoices("INTELX_STRATEX_BASE_URL", "STRATEX_BASE_URL", "STRATEX_URL"),
         description="Base URL for StrateX trading engine",
     )
@@ -128,7 +128,7 @@ class Settings(BaseSettings):
         description="API key for StrateX integration",
     )
     STRATEX_WEBHOOK_URL: str | None = Field(
-        default=None,
+        default="https://stratex-ucjz.onrender.com/api/v1/webhooks/intelx-signal",
         validation_alias=AliasChoices("INTELX_STRATEX_WEBHOOK_URL", "STRATEX_WEBHOOK_URL"),
         description="Webhook URL on StrateX for automated trade execution triggers",
     )

@@ -78,3 +78,64 @@ async function openCitationDrawer(kind, token) {
     body.innerHTML = '<div style="color: #dc2626; padding: 16px;">Error loading citation details.</div>';
   }
 }
+
+async function syncWithFuturis(runId) {
+  const btn = document.getElementById('btn-sync-futuris');
+  const statusEl = document.getElementById('status-futuris');
+  if (btn) btn.disabled = true;
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--color-blue);">Triggering forecast recalibration on Futuris...</span>';
+
+  try {
+    const res = await fetch('/api/v1/futuris/trigger-forecast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': 'intelx_api' },
+      body: JSON.stringify({
+        finding_text: 'Manual operator catalyst synchronization from IntelX research',
+        run_id: runId,
+        domain: 'market',
+        confidence: 0.90
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      if (statusEl) statusEl.innerHTML = `<span style="color:#16a34a; font-weight:600;">✓ Synced with Futuris (${data.status || 'delivered'})</span>`;
+    } else {
+      if (statusEl) statusEl.innerHTML = `<span style="color:#dc2626;">Failed: ${data.detail || res.statusText}</span>`;
+    }
+  } catch (err) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:#dc2626;">Network error syncing with Futuris: ${err.message}</span>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function syncWithStratex(runId) {
+  const btn = document.getElementById('btn-sync-stratex');
+  const statusEl = document.getElementById('status-stratex');
+  if (btn) btn.disabled = true;
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--color-blue);">Dispatching market trade signal to StrateX...</span>';
+
+  try {
+    const res = await fetch('/api/v1/stratex/trigger-signal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': 'intelx_api' },
+      body: JSON.stringify({
+        finding_text: 'Manual operator trade signal dispatch: Bullish accumulation catalyst verified',
+        run_id: runId,
+        domain: 'market',
+        confidence: 0.90
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      if (statusEl) statusEl.innerHTML = `<span style="color:#16a34a; font-weight:600;">✓ Synced with StrateX (${data.status || 'delivered'})</span>`;
+    } else {
+      if (statusEl) statusEl.innerHTML = `<span style="color:#dc2626;">Failed: ${data.detail || res.statusText}</span>`;
+    }
+  } catch (err) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:#dc2626;">Network error syncing with StrateX: ${err.message}</span>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+

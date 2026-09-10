@@ -13,6 +13,7 @@ def render_markdown_safe(md_text: str) -> str:
 
     # 1. Escape all raw HTML to prevent XSS
     escaped = html.escape(md_text)
+    escaped = escaped.replace("\xa0", " ").replace("&amp;nbsp;", " ")
 
     # 2. Convert Citation Badges to Interactive Buttons
     def _badge_replace(match: re.Match) -> str:

@@ -75,7 +75,7 @@ class StratexConnector:
             },
         }
 
-        if settings.MOCK_MODE or not settings.STRATEX_WEBHOOK_URL:
+        if settings.MOCK_MODE or not target_url:
             logger.info(
                 f"[StrateX Webhook Simulated] Dispatched research_trade_signal for run {run_id}: {category}"
             )

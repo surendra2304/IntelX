@@ -133,6 +133,26 @@ class DuckDuckGoSearchConnector(BaseConnector):
             return []
 
 
+def clean_rss_text(raw_text: str) -> str:
+    """Unescape HTML entities, strip tags and embedded URLs from RSS feed entries."""
+    if not raw_text:
+        return ""
+    import html as html_lib
+    import re as re_lib
+
+    # Unescape twice to handle doubly-escaped entities like &amp;lt;
+    t = html_lib.unescape(raw_text)
+    t = html_lib.unescape(t)
+    # Strip any HTML tags
+    t = re_lib.sub(r"<[^>]+>", " ", t)
+    # Strip residual URLs if embedded in text
+    t = re_lib.sub(r"https?://\S+", "", t)
+    # Clean up non-breaking spaces and whitespace
+    t = t.replace("\xa0", " ").replace("&nbsp;", " ")
+    t = re_lib.sub(r"\s+", " ", t).strip()
+    return t
+
+
 class GoogleNewsSearchConnector(BaseConnector):
     """High-reliability real-time web news search via Google News RSS (never blocked by cloud IP checks)."""
 
@@ -175,7 +195,6 @@ class GoogleNewsSearchConnector(BaseConnector):
                     logger.warning(f"Google News RSS returned HTTP {resp.status_code}")
                     return []
 
-                import html as html_lib
                 import re as re_lib
 
                 items = re_lib.findall(r"<item>(.*?)</item>", resp.text, re_lib.DOTALL)
@@ -186,16 +205,18 @@ class GoogleNewsSearchConnector(BaseConnector):
                     l_m = re_lib.search(r"<link>(.*?)</link>", item, re_lib.DOTALL)
                     d_m = re_lib.search(r"<description[^>]*>(.*?)</description>", item, re_lib.DOTALL)
 
-                    title = html_lib.unescape(t_m.group(1).strip()) if t_m else ""
+                    title = clean_rss_text(t_m.group(1)) if t_m else ""
                     raw_link = l_m.group(1).strip() if l_m else ""
-                    desc = html_lib.unescape(re_lib.sub(r"<[^>]+>", " ", d_m.group(1)).strip()) if d_m else ""
+                    desc = clean_rss_text(d_m.group(1)) if d_m else ""
 
                     if title and raw_link:
+                        # Prefer clean description snippet if available, otherwise title
+                        snip = desc if (desc and len(desc) > 20 and desc != title) else title
                         results.append(
                             SearchResult(
                                 url=raw_link,
                                 title=title,
-                                snippet=desc[:260] if desc else title,
+                                snippet=snip[:260],
                             )
                         )
                 return results

@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from intelx.api.v1 import v1_router
 from intelx.api.v1.health import router as health_root_router
+from intelx.api.v1.stratex import router as stratex_root_router
 
 root_api_router = APIRouter()
 
@@ -12,3 +13,6 @@ root_api_router.include_router(health_root_router)
 
 # Versioned API routes (/api/v1/...)
 root_api_router.include_router(v1_router)
+
+# StrateX Direct Route (/v1/intelligence/research)
+root_api_router.include_router(stratex_root_router, prefix="/v1")

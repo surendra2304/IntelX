@@ -19,6 +19,19 @@ def _get_val(obj: Any, field_name: str, default: Any = None) -> Any:
     return val if val is not None else default
 
 
+def _clean_prose(text: str) -> str:
+    """Strip residual HTML tags, entities, and unwrap text for clean prose presentation."""
+    if not text:
+        return ""
+    import html as html_lib
+    t = html_lib.unescape(text)
+    t = html_lib.unescape(t)
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = t.replace("\xa0", " ").replace("&nbsp;", " ")
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
 def resolve_citation_id(target_token: str, valid_ids: set[str]) -> str | None:
     """Resolve a citation token (full ID or prefix) against a set of valid IDs."""
     if target_token in valid_ids:
@@ -119,10 +132,11 @@ def render_report_markdown(
             claims_map[str(c_id)] = c
 
     # Build Key Findings section
+    clean_answer = _clean_prose(executive_answer)
     findings_lines = []
     if grounded_findings:
         for f in grounded_findings:
-            stmt = f.get("statement") or f.get("conclusion") or ""
+            stmt = _clean_prose(f.get("statement") or f.get("conclusion") or "")
             conf_label = f.get("confidence_label") or "High"
             claim_ids = f.get("claim_ids") or f.get("claim_ids_json") or []
             citation_tokens = []
@@ -144,8 +158,8 @@ def render_report_markdown(
         "|---|---|---|---|",
     ]
     for f in grounded_findings:
-        stmt = f.get("statement") or f.get("conclusion") or ""
-        short_stmt = stmt[:40] + ("..." if len(stmt) > 40 else "")
+        stmt = _clean_prose(f.get("statement") or f.get("conclusion") or "")
+        short_stmt = stmt[:45] + ("..." if len(stmt) > 45 else "")
         claim_ids = f.get("claim_ids") or f.get("claim_ids_json") or []
         for cid in claim_ids:
             claim = claims_map.get(cid)
@@ -207,7 +221,7 @@ def render_report_markdown(
     if sources:
         for s in sources:
             s_id = str(_get_val(s, "id", ""))
-            title = _get_val(s, "title") or "Untitled Source"
+            title = _clean_prose(_get_val(s, "title") or "Untitled Source")
             domain = _get_val(s, "domain") or "local"
             tier = _get_val(s, "trust_tier") or "STANDARD"
             retrieved_at = _get_val(s, "retrieved_at") or now_str
@@ -292,7 +306,7 @@ def render_report_markdown(
     if unverified_findings:
         u_lines = []
         for uf in unverified_findings:
-            stmt = uf.get("statement") or uf.get("conclusion") or ""
+            stmt = _clean_prose(uf.get("statement") or uf.get("conclusion") or "")
             reason = uf.get("unverified_reason") or "Lacks verified supporting claims"
             u_lines.append(f"- {stmt} *(Reason: {reason})*")
         unverified_section = "\n\n## Unverified Observations\n" + "\n".join(u_lines)
@@ -300,7 +314,7 @@ def render_report_markdown(
     report_md = f"""# Research Report: {objective}
 
 ## Direct Answer (confidence: {overall_confidence_label})
-{executive_answer}
+{clean_answer}
 
 ## Key Findings
 {chr(10).join(findings_lines)}

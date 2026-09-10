@@ -27,6 +27,7 @@
   <button type="button" class="tab-btn" data-tab="tab-contra" onclick="switchTab('tab-contra')">Contradictions ({{ disputed_claims|length }})</button>
   <button type="button" class="tab-btn" data-tab="tab-sources" onclick="switchTab('tab-sources')">Sources ({{ sources|length }})</button>
   <button type="button" class="tab-btn" data-tab="tab-gaps" onclick="switchTab('tab-gaps')">Gaps & Degradations</button>
+  <button type="button" class="tab-btn" data-tab="tab-ecosystem" onclick="switchTab('tab-ecosystem')">Ecosystem Sync</button>
 </div>
 
 <!-- Tab 1: Rendered Report -->
@@ -157,6 +158,56 @@
         <li>No unresolved empirical gaps documented.</li>
       {% endif %}
     </ul>
+  </div>
+</div>
+
+<!-- Tab 6: Ecosystem Sync (Futuris & StrateX) -->
+<div id="tab-ecosystem" class="tab-content">
+  <div class="card">
+    <div class="card-header">
+      <h3 style="font-size: 15px; font-weight: 700;">FRIDAY Universe Ecosystem Collaboration</h3>
+      <span style="font-size: 12px; color: var(--text-muted);">Real-time cross-agent context synchronization</span>
+    </div>
+    
+    <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 16px;">
+      IntelX empirical research directly drives predictive probabilistic forecasting in <strong>Futuris</strong> and algorithmic market execution in <strong>StrateX</strong>. Trigger on-demand synchronization below or verify automated signal delivery.
+    </p>
+
+    <div class="ecosystem-grid">
+      <!-- Futuris Card -->
+      <div class="ecosystem-card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h4 style="font-size: 15px; font-weight: 700; color: var(--text-main);">📈 Futuris Forecasting</h4>
+          <span class="ecosystem-status-badge badge-online">● Connected</span>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted);">
+          Exchanges qualitative exogenous findings, temporal event sequence, and source credibility metrics to trigger automatic recalibration of forecast models.
+        </p>
+        <div style="margin-top: auto; padding-top: 10px; display: flex; gap: 8px;">
+          <button type="button" class="btn btn-primary btn-sm" id="btn-sync-futuris" onclick="syncWithFuturis('{{ run.id }}')">
+            Trigger Futuris Forecast
+          </button>
+        </div>
+        <div id="status-futuris" style="font-size: 12px; color: var(--text-muted); margin-top: 6px;"></div>
+      </div>
+
+      <!-- StrateX Card -->
+      <div class="ecosystem-card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h4 style="font-size: 15px; font-weight: 700; color: var(--text-main);">⚡ StrateX Quant Execution</h4>
+          <span class="ecosystem-status-badge badge-online">● Connected</span>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted);">
+          Extracts sentiment drivers, regulatory catalysts, and macroeconomic shifts to inform Binance futures algorithmic strategies and risk overlays.
+        </p>
+        <div style="margin-top: auto; padding-top: 10px; display: flex; gap: 8px;">
+          <button type="button" class="btn btn-primary btn-sm" id="btn-sync-stratex" onclick="syncWithStratex('{{ run.id }}')">
+            Dispatch StrateX Trade Signal
+          </button>
+        </div>
+        <div id="status-stratex" style="font-size: 12px; color: var(--text-muted); margin-top: 6px;"></div>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}
