@@ -15,6 +15,9 @@ def render_markdown_safe(md_text: str) -> str:
     escaped = html.escape(md_text)
     escaped = escaped.replace("\xa0", " ").replace("&amp;nbsp;", " ")
 
+    # 1.5 Strip residual escaped feed tags like &lt;font...&gt; or &lt;a href=...&gt; from raw RSS text
+    escaped = re.sub(r"&lt;/?(?:font|span|div|p|br)[^&]*&gt;", "", escaped, flags=re.IGNORECASE)
+
     # 2. Convert Citation Badges to Interactive Buttons
     def _badge_replace(match: re.Match) -> str:
         kind = match.group(1)
@@ -28,6 +31,16 @@ def render_markdown_safe(md_text: str) -> str:
         )
 
     escaped = CITATION_REGEX.sub(_badge_replace, escaped)
+
+    # 2.5 Support markdown links [label](url) safely
+    def _link_replace(match: re.Match) -> str:
+        label = match.group(1)
+        url = match.group(2)
+        if url.startswith("http://") or url.startswith("https://") or url.startswith("/"):
+            return f'<a href="{url}" target="_blank" rel="noopener noreferrer" class="report-ext-link">{label}</a>'
+        return f"{label} ({url})"
+
+    escaped = re.sub(r"\[([^\]]+)\]\((https?://[^\s\)]+|/[^\s\)]+)\)", _link_replace, escaped)
 
     # 3. Line by line markdown parsing
     lines = escaped.split("\n")

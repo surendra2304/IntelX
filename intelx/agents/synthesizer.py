@@ -284,12 +284,25 @@ class SynthesizerAgent(BaseAgent):
             else:
                 overall_conf_label = "Low"
 
+        # Clean any draft thinking artifacts / preambles from executive answer
+        clean_exec_answer = draft.executive_answer or ""
+        import re as _re_s
+        clean_exec_answer = _re_s.sub(r"(?s)^<think>.*?</think>", "", clean_exec_answer).strip()
+        if "Thus output likely bullet points:" in clean_exec_answer:
+            clean_exec_answer = clean_exec_answer.split("Thus output likely bullet points:")[-1].strip()
+        elif "Let's craft" in clean_exec_answer:
+            clean_exec_answer = clean_exec_answer.split("Let's craft")[-1].strip()
+        elif clean_exec_answer.lower().startswith("the user wants a clear"):
+            parts = _re_s.split(r"\n(?=- |\* |\bFree Fire\b|\bThe official\b|\bReleased\b|\bOriginal\b)", clean_exec_answer, maxsplit=1)
+            if len(parts) > 1 and len(parts[1].strip()) > 20:
+                clean_exec_answer = parts[1].strip()
+
         # Render official report markdown
         critique_dict = critique.model_dump() if isinstance(critique, CritiqueReport) else critique
         mode = kwargs.get("research_mode") or kwargs.get("domain_hint")
         report_md = render_report_markdown(
             objective=objective,
-            executive_answer=draft.executive_answer,
+            executive_answer=clean_exec_answer,
             grounded_findings=grounded_findings,
             unverified_findings=unverified_findings,
             claims=claims,

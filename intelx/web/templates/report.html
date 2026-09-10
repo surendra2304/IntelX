@@ -1,20 +1,20 @@
 {% extends "base.html" %}
 {% block title %}Report: {{ run.objective[:40] }} — IntelX{% endblock %}
 {% block content %}
-<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
-  <div>
-    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-      <a href="/research/{{ run.id }}" style="color: var(--text-muted); font-size: 12px; text-decoration: none;">&larr; Back to Job DAG</a>
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 20px;">
+  <div style="min-width: 0; flex: 1;">
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+      <a href="/research/{{ run.id }}" style="color: var(--text-muted); font-size: 12px; text-decoration: none; font-weight: 500;">&larr; Back to Job DAG</a>
       <span style="color: var(--border-color);">&bull;</span>
       <span style="font-size: 12px; color: var(--text-muted);">Completed {{ run.completed_at.strftime('%Y-%m-%d %H:%M UTC') if run.completed_at else '' }}</span>
     </div>
-    <h1 style="font-size: 20px; font-weight: 800; color: var(--text-main);">{{ run.objective }}</h1>
+    <h1 style="font-size: 22px; font-weight: 800; color: var(--text-main); word-break: break-word;">{{ run.objective }}</h1>
   </div>
 
-  <div style="display: flex; gap: 8px;">
+  <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
     {% for art in artifacts %}
     <a href="/api/v1/artifacts/{{ art.id }}?format={{ art.format.value.lower() }}" download class="btn btn-secondary btn-sm">
-      Download .{{ art.format.value.lower() }}
+      Download {% if art.format.value.lower() == 'md' %}Report (.md){% elif 'evidence' in art.type.lower() or 'graph' in art.type.lower() %}Evidence (.json){% elif art.format.value.lower() == 'json' %}Report (.json){% elif art.format.value.lower() == 'csv' %}Claims (.csv){% else %}.{{ art.format.value.lower() }}{% endif %}
     </a>
     {% endfor %}
   </div>

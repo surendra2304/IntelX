@@ -196,7 +196,7 @@ class Settings(BaseSettings):
         description="Enforce robots.txt rules during web fetching",
     )
     USER_AGENT: str = Field(
-        default="INTELX/0.1 research-bot (+contact)",
+        default="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (compatible; IntelXResearch/2.0; +https://github.com/surendra2304/IntelX)",
         description="HTTP User-Agent identifier sent with crawler requests",
     )
     DOMAIN_ALLOWLIST: list[str] = Field(
@@ -222,6 +222,10 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_FETCHES: int = Field(
         default=4,
         description="Max concurrent asynchronous page fetches",
+    )
+    ENABLE_DEMO_SEEDER: bool = Field(
+        default=False,
+        description="Seed fake demonstration runs on startup (disabled by default to ensure only genuine research)",
     )
 
     # Auth & Storage

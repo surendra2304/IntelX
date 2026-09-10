@@ -144,7 +144,7 @@ class MockProvider(BaseLLMProvider):
             claims.append(
                 {
                     "text": ctext,
-                    "subject": ent_names[0] if ent_names else "Electrochemical System",
+                    "subject": ent_names[0] if ent_names else "Entity",
                     "predicate": "demonstrates" if has_measurement else "indicates",
                     "object": quote[:40],
                     "claim_type": ctype,

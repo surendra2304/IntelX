@@ -140,11 +140,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await seed_api_keys_from_settings(session, settings)
     logger.info("API keys seeded from settings.")
 
-    # 3.6 Seed demonstration research runs if empty
-    from intelx.db.demo_seeder import auto_seed_demonstrations_if_empty
+    # 3.6 Seed demonstration research runs if explicitly enabled (default false)
+    if getattr(settings, "ENABLE_DEMO_SEEDER", False):
+        from intelx.db.demo_seeder import auto_seed_demonstrations_if_empty
 
-    async with sessionmaker() as session:
-        await auto_seed_demonstrations_if_empty(session)
+        async with sessionmaker() as session:
+            await auto_seed_demonstrations_if_empty(session)
 
     # 4. Start background worker hook
     await worker_hook.start()

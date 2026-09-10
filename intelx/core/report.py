@@ -27,6 +27,7 @@ def _clean_prose(text: str) -> str:
     t = html_lib.unescape(text)
     t = html_lib.unescape(t)
     t = re.sub(r"<[^>]+>", " ", t)
+    t = re.sub(r"&lt;[^&]+&gt;", " ", t)
     t = t.replace("\xa0", " ").replace("&nbsp;", " ")
     t = re.sub(r"\s+", " ", t).strip()
     return t
