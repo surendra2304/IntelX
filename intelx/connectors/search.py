@@ -189,7 +189,15 @@ class GoogleNewsSearchConnector(BaseConnector):
         raw_words = target.strip().replace("?", " ").replace(",", " ").replace('"', " ").split()
         substantive = [w for w in raw_words if w.lower() not in noise_words]
         clean_words = substantive if substantive else raw_words
-        clean_target = " ".join(clean_words[:8])
+
+        # If 2 or more core words, quote the leading 2-word entity to anchor Google News to the exact topic
+        if len(clean_words) >= 2:
+            entity_phrase = f'"{clean_words[0]} {clean_words[1]}"'
+            trailing = " ".join(clean_words[2:8])
+            clean_target = f"{entity_phrase} {trailing}".strip()
+        else:
+            clean_target = " ".join(clean_words[:8])
+
         encoded_query = urllib.parse.quote(clean_target)
         url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
 
@@ -245,27 +253,41 @@ class WikipediaSearchConnector(BaseConnector):
     async def fetch(self, target: str, **kwargs: Any) -> list[SearchResult]:
         max_results = min(kwargs.get("max_results", 5), 5)
         headers = {"User-Agent": "IntelXBot/2.0 (admin@intelx.org; contact@intelx.org)"}
-        encoded_query = urllib.parse.quote(target.strip())
-        url = f"https://en.wikipedia.org/w/api.php?action=opensearch&search={encoded_query}&limit={max_results}&namespace=0&format=json"
+
+        # Query candidates: raw target, then stripped of question words for title matching
+        strip_words = {
+            "release", "date", "dates", "timeline", "schedule", "history", "announcement",
+            "announcements", "official", "news", "update", "updates", "latest", "verified",
+            "specifications", "what", "is", "the", "for", "and", "facts", "milestones",
+        }
+        words = [w for w in target.strip().replace("?", " ").replace(",", " ").split() if w.lower() not in strip_words]
+        query_candidates = [target.strip()]
+        if words and " ".join(words[:4]).lower() != target.strip().lower():
+            query_candidates.append(" ".join(words[:4]))
 
         try:
             async with httpx.AsyncClient(timeout=8.0, headers=headers) as client:
-                resp = await client.get(url)
-                if resp.status_code != 200:
-                    return []
-                data = resp.json()
-                if not isinstance(data, list) or len(data) < 4:
-                    return []
+                for q in query_candidates:
+                    encoded_query = urllib.parse.quote(q)
+                    url = f"https://en.wikipedia.org/w/api.php?action=opensearch&search={encoded_query}&limit={max_results}&namespace=0&format=json"
+                    resp = await client.get(url)
+                    if resp.status_code != 200:
+                        continue
+                    data = resp.json()
+                    if not isinstance(data, list) or len(data) < 4:
+                        continue
 
-                titles = data[1]
-                snippets = data[2]
-                urls = data[3]
-                results: list[SearchResult] = []
+                    titles = data[1]
+                    snippets = data[2]
+                    urls = data[3]
+                    results: list[SearchResult] = []
 
-                for t, s, u in zip(titles, snippets, urls):
-                    if t and u:
-                        results.append(SearchResult(url=u, title=t, snippet=s or t))
-                return results
+                    for t, s, u in zip(titles, snippets, urls):
+                        if t and u:
+                            results.append(SearchResult(url=u, title=t, snippet=s or t))
+                    if results:
+                        return results
+                return []
         except Exception as e:
             logger.debug(f"Wikipedia search failed: {e}")
             return []
