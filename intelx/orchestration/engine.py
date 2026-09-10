@@ -285,7 +285,11 @@ class OrchestrationEngine:
                 run = await self._check_gates(session, run_id)
 
                 all_candidates: list[SourceCandidate] = []
-                for idx, subq in enumerate(plan.subquestions):
+                # Ensure primary objective is scouted directly as the first high-priority target
+                scouting_targets = [run.objective] + [
+                    sq for sq in plan.subquestions if sq.strip().lower() != run.objective.strip().lower()
+                ]
+                for idx, subq in enumerate(scouting_targets):
                     scout_task = Task(
                         run_id=run_id,
                         type=TaskType.SCOUT,
@@ -515,18 +519,62 @@ class OrchestrationEngine:
                     from intelx.integrations.memora_context import MemoraMemoryClient
                     from intelx.integrations.stratex_context import StratexConnector
 
-                    # Extract rich synthesized summary
-                    if "synthesis_res" in locals() and synthesis_res:
-                        direct_ans = getattr(synthesis_res, "executive_summary", "") or getattr(synthesis_res, "direct_answer", "")
-                        findings_snip = "\n".join(f"• {f.statement}" for f in getattr(synthesis_res, "findings", [])[:5])
-                        finding_text = f"{run.objective}\n\nDIRECT ANSWER:\n{direct_ans}\n\nKEY FINDINGS:\n{findings_snip}"
-                    else:
-                        finding_text = run.objective
-
-                    domain = scope.get("domain", "market")
+                    domain = scope.get("domain", "general")
                     target_agent = scope.get("agent") or scope.get("target_agent") or "all"
 
-                    # 1. Store directly into Memora Cloud persistent shared memory (accessible by ALL 9 agents)
+                    # Build structured research intelligence payload shared across all ecosystem agents
+                    syn = synthesis_res if "synthesis_res" in locals() and synthesis_res else None
+                    direct_ans = (
+                        getattr(syn, "executive_summary", "")
+                        or getattr(syn, "direct_answer", "")
+                        or ""
+                    ) if syn else ""
+                    structured_findings = []
+                    for f in (getattr(syn, "findings", []) or [])[:8]:
+                        structured_findings.append({
+                            "statement": getattr(f, "statement", str(f)),
+                            "confidence": getattr(f, "confidence", 0.80),
+                            "confidence_label": getattr(f, "confidence_label", "High"),
+                            "claim_ids": getattr(f, "claim_ids", []),
+                        })
+
+                    # Top claims for evidence tracing
+                    top_claims = []
+                    for c in sorted(claims, key=lambda x: getattr(x, "confidence", 0), reverse=True)[:10]:
+                        top_claims.append({
+                            "id": getattr(c, "id", ""),
+                            "text": getattr(c, "text", ""),
+                            "confidence": round(getattr(c, "confidence", 0.80), 4),
+                            "quote": getattr(c, "quote", ""),
+                        })
+
+                    rich_intel_payload = {
+                        "run_id": run_id,
+                        "objective": run.objective,
+                        "domain": domain,
+                        "outcome": str(outcome),
+                        "executive_answer": direct_ans,
+                        "findings": structured_findings,
+                        "top_claims": top_claims,
+                        "overall_confidence": getattr(syn, "overall_confidence_label", "High") if syn else "Moderate",
+                        "sources_count": len(all_ingested),
+                        "claims_count": len(claims),
+                        "usd_cost": round(run.usd_cost or 0, 6),
+                        "completed_at": datetime.now(UTC).isoformat(),
+                    }
+
+                    # Text summary for legacy webhook fields
+                    findings_snip = "\n".join(
+                        f"• {f['statement']}" for f in structured_findings
+                    ) if structured_findings else "No structured findings."
+                    finding_text = (
+                        f"RESEARCH OBJECTIVE: {run.objective}\n\n"
+                        f"EXECUTIVE ANSWER:\n{direct_ans}\n\n"
+                        f"KEY FINDINGS ({len(structured_findings)}):\n{findings_snip}\n\n"
+                        f"EVIDENCE: {len(claims)} claims from {len(all_ingested)} sources"
+                    )
+
+                    # 1. Store full research intel into Memora Cloud shared memory (all 9 FRIDAY agents)
                     memora_client = MemoraMemoryClient()
                     asyncio.create_task(
                         memora_client.store_research_memory(
@@ -540,22 +588,35 @@ class OrchestrationEngine:
                         )
                     )
 
-                    # 2. Dispatch to Futuris Predictive Forecasting
+                    # 2. Dispatch to Futuris Predictive Forecasting (with full structured research context)
                     asyncio.create_task(
                         FuturisContextProvider.notify_futuris_research_relevant(
-                            finding_text=finding_text, run_id=run_id, domain=domain
+                            finding_text=finding_text,
+                            run_id=run_id,
+                            domain=domain,
+                            confidence=rich_intel_payload.get("overall_confidence", 0.80)
+                            if isinstance(rich_intel_payload.get("overall_confidence"), float)
+                            else 0.80,
+                            extra_context=rich_intel_payload,
                         )
                     )
 
-                    # 3. Dispatch to StrateX Binance Futures Algorithmic Trading
+                    # 3. Dispatch to StrateX — always send research intel; StrateX filters relevance internally
                     asyncio.create_task(
                         StratexConnector.notify_stratex_trade_signal(
-                            finding_text=finding_text, run_id=run_id, domain=domain
+                            finding_text=finding_text,
+                            run_id=run_id,
+                            domain=domain,
+                            extra_context=rich_intel_payload,
                         )
                     )
-                    logger.info(f"Dispatched completed research for '{run.objective[:50]}' to Memora, Stratex, and Futuris.")
+                    logger.info(
+                        f"[IntelX→Ecosystem] Dispatched rich research intel for '{run.objective[:50]}' "
+                        f"({len(structured_findings)} findings, {len(claims)} claims) "
+                        f"→ Memora, Futuris, StrateX"
+                    )
                 except Exception as ex:
-                    logger.warning(f"Failed to dispatch external ecosystem webhooks: {ex}")
+                    logger.warning(f"Failed to dispatch external ecosystem webhooks: {ex}", exc_info=True)
 
             return run
 

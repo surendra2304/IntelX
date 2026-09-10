@@ -176,15 +176,19 @@ class GoogleNewsSearchConnector(BaseConnector):
         }
         # Strip noise and portfolio modifier words for clean news search
         noise_words = {
+            "what", "are", "is", "the", "and", "for", "with", "from", "that", "this",
+            "about", "does", "into", "how", "why", "who", "when", "which",
+            "exist", "have", "been", "regarding", "concerning", "evaluating",
             "official", "report", "study", "dataset", "methodology",
             "measurements", "benchmark", "criticism", "limitations",
             "contradictory", "evidence", "aspects", "subquestion",
-            "concerning", "regarding", "evaluating", "specifications",
-            "definitions", "baseline", "benchmarks", "empirical",
-            "experimental", "operational", "disputed", "claims",
+            "specifications", "definitions", "baseline", "benchmarks", "empirical",
+            "experimental", "operational", "disputed", "claims", "results", "measured",
         }
-        words = [w for w in target.strip().split() if w.lower() not in noise_words]
-        clean_target = " ".join(words[:6]) if words else target.strip()
+        raw_words = target.strip().replace("?", " ").replace(",", " ").replace('"', " ").split()
+        substantive = [w for w in raw_words if w.lower() not in noise_words]
+        clean_words = substantive if substantive else raw_words
+        clean_target = " ".join(clean_words[:8])
         encoded_query = urllib.parse.quote(clean_target)
         url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
 
@@ -239,7 +243,7 @@ class WikipediaSearchConnector(BaseConnector):
 
     async def fetch(self, target: str, **kwargs: Any) -> list[SearchResult]:
         max_results = min(kwargs.get("max_results", 5), 5)
-        headers = {"User-Agent": "IntelX-ResearchBot/2.0 (Evidence Engine)"}
+        headers = {"User-Agent": "IntelXBot/2.0 (admin@intelx.org; contact@intelx.org)"}
         encoded_query = urllib.parse.quote(target.strip())
         url = f"https://en.wikipedia.org/w/api.php?action=opensearch&search={encoded_query}&limit={max_results}&namespace=0&format=json"
 

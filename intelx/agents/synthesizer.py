@@ -209,12 +209,17 @@ class SynthesizerAgent(BaseAgent):
             ]
             overall_conf_label = "Very low"
         else:
-            # LLM Synthesis
+            # LLM Synthesis: Prioritize top 25 highest-confidence claims to preserve focus and token budget
+            sorted_claims = sorted(
+                claims,
+                key=lambda x: getattr(x, "confidence", None) or (x.get("confidence") if isinstance(x, dict) else 0.8) or 0.8,
+                reverse=True,
+            )[:25]
             formatted_claims = []
-            for c in claims:
-                cid = getattr(c, "id", None) or c.get("id")
-                ctext = getattr(c, "text", None) or c.get("text")
-                cconf = getattr(c, "confidence", 1.0) or c.get("confidence", 1.0)
+            for c in sorted_claims:
+                cid = getattr(c, "id", None) or (c.get("id") if isinstance(c, dict) else None)
+                ctext = getattr(c, "text", None) or (c.get("text") if isinstance(c, dict) else None)
+                cconf = getattr(c, "confidence", 1.0) or (c.get("confidence", 1.0) if isinstance(c, dict) else 1.0)
                 formatted_claims.append({"id": cid, "text": ctext, "confidence": cconf})
 
             user_prompt = (

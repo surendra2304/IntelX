@@ -95,8 +95,8 @@ class ModelGateway:
                 "Executing fallback chain..."
             )
 
-        # Attempt 2: Secondary direct LLM provider (if primary was AI-Universe and LLM keys exist)
-        if primary_name == "ai_universe":
+        # Attempt 2: Secondary direct LLM provider (if primary was AI-Universe/Inference and LLM keys exist)
+        if primary_name in ("ai_universe", "inference"):
             if self.settings.LLM_API_KEY:
                 try:
                     if self._openai_provider is None:

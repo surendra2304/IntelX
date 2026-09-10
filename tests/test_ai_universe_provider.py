@@ -144,3 +144,42 @@ def test_confidence_formula_with_ai_universe_multiplier():
     assert details_debated["ai_universe_confidence"] == 0.60
     assert score_debated < score_base
     assert score_debated == pytest.approx(score_base * 0.60, abs=0.05)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ai_universe_provider_canned_mock_bypass():
+    """Verify that when endpoint returns a canned mock template, provider automatically bypasses via /ask."""
+    v1_url = "http://localhost:9000/v1/intelx/research"
+    ask_url = "http://localhost:9000/ask"
+
+    canned_resp = {
+        "response": {
+            "research_synthesis_report": "Comprehensive Research Assessment on: 'free fire release date'\nKey Finding: Strong convergence across 0 extracted verbatim spans.\nCredibility Level: 80% weighted empirical reliability.",
+            "cited_spans": [],
+            "coherence_score": 0.95,
+        }
+    }
+    real_ask_resp = {
+        "task_id": "task-real-123",
+        "answer": json.dumps({"summary": "Genuine LLM synthesized intelligence.", "confidence": 0.95}),
+    }
+
+    respx.post(v1_url).mock(return_value=httpx.Response(200, json=canned_resp))
+    respx.post(ask_url).mock(return_value=httpx.Response(200, json=real_ask_resp))
+
+    provider = AIUniverseProvider(base_url="http://localhost:9000", api_key="test-key")
+    messages = [{"role": "user", "content": "RESEARCH OBJECTIVE: free fire release date"}]
+
+    text, usage = await provider.complete(
+        messages=messages,
+        model="ai-universe-v1",
+        role="synthesizer",
+        schema_model=DummySchema,
+    )
+
+    assert "Comprehensive Research Assessment on:" not in text
+    assert "Genuine LLM synthesized intelligence." in text
+    data = json.loads(text)
+    assert data["summary"] == "Genuine LLM synthesized intelligence."
+

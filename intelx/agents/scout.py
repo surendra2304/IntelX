@@ -84,23 +84,40 @@ class ScoutAgent(BaseAgent):
 
             # Also discover from ingested FRIDAY Universe sources in database
             try:
-                from sqlalchemy import or_, select
+                from sqlalchemy import and_, select
                 from intelx.db.models import Source
-                words = [w.strip().lower() for w in subquestion.replace("?", " ").replace(",", " ").split() if len(w.strip()) > 3][:5]
+                db_stop_words = {
+                    "what", "where", "when", "which", "with", "from", "that", "this",
+                    "have", "been", "does", "into", "about", "regarding", "concerning",
+                    "results", "study", "report", "paper", "data", "timeline", "details",
+                    "overview", "announcement", "announcements", "status", "schedule",
+                    "specifications", "definitions", "baseline", "benchmarks", "empirical",
+                    "experimental", "operational", "disputed", "claims", "measured",
+                }
+                words = [
+                    w.strip().lower() for w in subquestion.replace("?", " ").replace(",", " ").split()
+                    if len(w.strip()) > 3 and w.strip().lower() not in db_stop_words
+                ][:4]
                 if words:
                     conditions = [Source.title.ilike(f"%{w}%") for w in words]
-                    stmt = select(Source).where(or_(*conditions)).order_by(Source.retrieved_at.desc()).limit(4)
+                    stmt = select(Source).where(and_(*conditions)).order_by(Source.retrieved_at.desc()).limit(3)
                     res = await session.execute(stmt)
                     for src in res.scalars().all():
                         loc = src.location.strip()
                         if loc and loc not in seen_set:
                             seen_set.add(loc)
+                            q_score = self.source_quality.score(
+                                url=loc,
+                                title=src.title or "Ingested Source",
+                                snippet=src.title or "",
+                                query_terms=set(words),
+                            )
                             candidates.append(
                                 SourceCandidate(
                                     location=loc,
                                     title=src.title or src.publisher or "Ingested Intelligence Source",
-                                    reason=f"Ingested intelligence from {src.publisher or 'feed'}",
-                                    expected_relevance=0.90,
+                                    reason=f"Ingested intelligence from {src.publisher or 'database'}",
+                                    expected_relevance=q_score.total,
                                 )
                             )
             except Exception as ex:

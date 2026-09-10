@@ -45,6 +45,7 @@ where = ["."]
 include = ["intelx*"]
 
 [tool.pytest.ini_options]
+addopts = "-p no:fugue_test -p no:fugue_test_fixtures"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]

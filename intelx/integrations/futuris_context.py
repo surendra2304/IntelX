@@ -518,8 +518,14 @@ class ResearchTriggeredForecasting:
         confidence: float = 0.85,
         webhook_url: str | None = None,
         client: httpx.AsyncClient | None = None,
+        extra_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Notify Futuris via webhook that relevant research was identified to trigger re-forecasting."""
+        """Notify Futuris via webhook that relevant research was identified to trigger re-forecasting.
+
+        extra_context carries the full structured IntelX research payload:
+        findings list, top claims, executive answer, source count, claims count, etc.
+        Futuris uses this to recalibrate its forecasts with real evidence.
+        """
         settings = get_settings()
         target_url = (
             webhook_url
@@ -528,17 +534,22 @@ class ResearchTriggeredForecasting:
         )
 
         is_sig, category, targets = cls.detect_significant_trigger(finding_text, domain=domain)
+        data_block: dict[str, Any] = {
+            "run_id": run_id,
+            "finding_summary": finding_text,
+            "category": category,
+            "confidence": confidence,
+            "domain": domain,
+            "recommended_forecast_targets": targets,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+        # Embed full structured research intel so Futuris can work with the actual findings
+        if extra_context:
+            data_block["research_intel"] = extra_context
+
         payload = {
             "event": "research_finding_relevant",
-            "data": {
-                "run_id": run_id,
-                "finding_summary": finding_text,
-                "category": category,
-                "confidence": confidence,
-                "domain": domain,
-                "recommended_forecast_targets": targets,
-                "timestamp": datetime.now(UTC).isoformat(),
-            },
+            "data": data_block,
         }
 
         # If in Mock Mode or URL is unconfigured, return simulated success
@@ -559,14 +570,17 @@ class ResearchTriggeredForecasting:
                 headers["X-API-Key"] = settings.FUTURIS_API_KEY
 
             if client:
-                resp = await client.post(target_url, json=payload, headers=headers, timeout=5.0)
+                resp = await client.post(target_url, json=payload, headers=headers, timeout=8.0)
                 status_code = resp.status_code
             else:
-                async with httpx.AsyncClient(timeout=5.0) as http_c:
+                async with httpx.AsyncClient(timeout=8.0) as http_c:
                     resp = await http_c.post(target_url, json=payload, headers=headers)
                     status_code = resp.status_code
 
-            logger.info(f"Futuris webhook response {status_code} from {target_url}")
+            logger.info(
+                f"[Futuris] Webhook delivered HTTP {status_code} for run {run_id} "
+                f"({len(extra_context.get('findings', [])) if extra_context else 0} findings)"
+            )
             return {
                 "status": "delivered" if status_code < 300 else "failed_upstream",
                 "status_code": status_code,

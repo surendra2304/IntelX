@@ -144,6 +144,36 @@ class AIUniverseProvider(BaseLLMProvider):
         else:
             text_output = str(raw_response)
 
+        # Anti-Mock Guardrail: Detect static canned templates from un-updated backends
+        canned_markers = (
+            "Comprehensive Research Assessment on:",
+            "Key Finding: Strong convergence across 0 extracted verbatim spans",
+            "Synthesized findings for '",
+            "Patterns indicate high consistency across peer-reviewed",
+        )
+        is_canned = any(marker in text_output for marker in canned_markers)
+        if is_canned:
+            logger.info(
+                f"[AI-Universe] Detected canned mock response for role=[{role}]. "
+                "Executing live reasoning /ask bypass for genuine intelligence synthesis..."
+            )
+            real_answer = await self._execute_ask_bypass(
+                messages=messages,
+                headers=headers,
+                schema_model=schema_model,
+            )
+            if real_answer:
+                text_output = real_answer
+                logger.info(f"[AI-Universe] Live reasoning /ask bypass succeeded for role=[{role}]")
+
+        # Unwrap markdown code blocks if present
+        stripped = text_output.strip()
+        if stripped.startswith("```"):
+            import re
+            m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", stripped)
+            if m:
+                text_output = m.group(1).strip()
+
         confidence = data.get("confidence", 0.90)
         dissent = data.get("dissent")
         provenance = data.get("provenance", {})
@@ -175,3 +205,68 @@ class AIUniverseProvider(BaseLLMProvider):
             output_tokens=out_tokens,
             usd_cost=usd_cost,
         )
+
+    async def _execute_ask_bypass(
+        self,
+        messages: list[dict[str, str]],
+        headers: dict[str, str],  # kept for API compat; ignored — we build dedicated ask headers below
+        schema_model: type[BaseModel] | None = None,
+    ) -> str | None:
+        """Query Inference live multi-model LLM reasoning endpoint to produce genuine intelligence."""
+        import re
+
+        settings = get_settings()
+        # Build dedicated headers for the /ask endpoint — Inference requires X-API-Key
+        inference_key = settings.INFERENCE_API_KEY or "inference_api"
+        ask_headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "INTELX-Engine/1.0",
+            "X-API-Key": inference_key,
+        }
+
+        prompt_parts = []
+        for m in messages:
+            r = m.get("role", "user").upper()
+            c = m.get("content", "")
+            prompt_parts.append(f"[{r}]:\n{c}")
+
+        full_prompt = "\n\n".join(prompt_parts)
+        if schema_model is not None:
+            full_prompt += (
+                f"\n\nMANDATORY: Respond ONLY with a valid JSON object strictly matching this schema:\n"
+                f"{json.dumps(schema_model.model_json_schema(), indent=2)}\n"
+                f"Do NOT include markdown formatting or extra text outside the JSON object."
+            )
+
+        ask_payload = {
+            "question": full_prompt,
+            "mode": "fast",
+            "require_evidence": False,
+        }
+
+        ask_url = f"{self.base_url}/ask"
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                logger.info(f"[AI-Universe] Calling /ask bypass at {ask_url} with key={inference_key[:8]}...")
+                resp = await client.post(ask_url, json=ask_payload, headers=ask_headers)
+                if resp.status_code == 404:
+                    alt = f"{self.base_url}/v1/ask"
+                    logger.info(f"[AI-Universe] /ask 404 — trying fallback {alt}")
+                    resp = await client.post(alt, json=ask_payload, headers=ask_headers)
+
+                if resp.status_code == 200:
+                    data = resp.json()
+                    answer = str(data.get("answer") or "").strip()
+                    if answer.startswith("```"):
+                        m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", answer)
+                        if m:
+                            answer = m.group(1).strip()
+                    logger.info(f"[AI-Universe] /ask bypass answered ({len(answer)} chars)")
+                    return answer
+                else:
+                    logger.warning(
+                        f"[AI-Universe] Inference /ask returned HTTP {resp.status_code}: {resp.text[:300]}"
+                    )
+        except Exception as e:
+            logger.warning(f"[AI-Universe] Failed live reasoning /ask bypass: {e}", exc_info=True)
+        return None

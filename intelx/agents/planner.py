@@ -42,10 +42,10 @@ class ResearchQuestionEnhancer:
             "What are the breaking changes, backward compatibility constraints, and migration path feasibility for {subject}?",
         ],
         ResearchMode.GENERAL: [
-            "What are the foundational technical specifications, definitions, and baseline benchmarks of {subject}?",
-            "What empirical experimental or operational results have been measured for {subject}?",
-            "What verified limitations, disputed claims, or contradictory findings exist regarding {subject}?",
-            "What are the primary industry standards and forward-looking developments in {subject}?",
+            "What is the verified timeline, release date, and official schedule for {subject}?",
+            "What official announcements, statements, and primary documentation exist for {subject}?",
+            "What are the key technical specifications, features, and core facts regarding {subject}?",
+            "What recent updates, developments, and confirmed milestones have occurred for {subject}?",
         ],
     }
 
