@@ -241,9 +241,32 @@ Welcome to the engineering diary of **IntelX**. This document tracks daily progr
   - I executed the 14-stage end-to-end system test suite confirming full pipeline operational readiness.
   - I ran golden evaluation benchmarks verifying 100% completion, citation validity, and groundedness metrics.
   - I authored the Day 9 engineering diary entry and updated the master index in `INTELX_DIARY.md`.
-  - I verified all engineering diary entries with `scripts/verify_diary.py` confirming strict invariant compliance.
 - **🛡️ Fixes & Hardening**: Fixed cold-start empty dashboard with idempotent seeder, eliminated queued run stalling with embedded worker, and enabled session cookie authorization on API artifact endpoints.
 - **📊 Test Results**: **149 passed, 2 skipped** in unit/integration test suite + **14/14 stages passed** in end-to-end system test.
+
+---
+
+### 📈 [Day 10 — 2026-09-12: FRIDAY Research Specialist Hardening, Provenance Locking, Security Firewalls & Acceptance Suite](diary/2026-09-12.md)
+- **🎯 Focus**: Complete Prompt 6 overhaul: fail-closed production security, mock mode disablement by default, purged default keys, 4-dimension research job contracts, end-to-end provenance integrity (`Finding -> Claim -> Span -> Doc -> Source`), strict factual claim citations with `[Inference]` tagging, source freshness and contradiction detection, SSRF protection and private network blocking, prompt injection context firewalls, in-flight task cancellation with partial-evidence reporting, spoken/text citation exporters, and Memora writeback gating.
+- **💡 What I Accomplished**:
+  - I audited the full intelligence pipeline and reinforced all core agent contracts for autonomous FRIDAY delegation.
+  - I hardened `validate_production_security` to raise fatal `RuntimeError` on mock mode, mock LLMs, or demo keys in production.
+  - I purged hardcoded development keys from `docker-compose.yml` and enforced runtime environment variables.
+  - I implemented the canonical FRIDAY task envelope and research job contract on `/api/v1/friday/delegate` and `/v1/task/execute`.
+  - I added mandatory 4-dimension validation requiring `query_scope`, `source_policy`, `time_budget`, and `document_budget`.
+  - I enforced end-to-end provenance traversal ensuring claims link directly to document spans with verified character offsets.
+  - I enforced factual claim validation ensuring unbacked conclusions in final reports are explicitly tagged as `[Inference]`.
+  - I added source freshness tracking, trust reliability scoring, and explicit null-result states (`NO_EVIDENCE_FOUND`, `CONTRADICTION_DETECTED`).
+  - I hardened HTTP connectors with SSRF defenses, private IP/metadata blocking, redirect checks, and fetch size limits.
+  - I engineered a prompt injection context firewall wrapping retrieved web text in `<untrusted_external_content>` tags.
+  - I implemented in-flight task cancellation with partial-evidence preservation and structured status reporting.
+  - I built dual citation formatters `export_spoken_citations` for FRIDAY voice and `export_text_citations` for text summaries.
+  - I engineered idempotent request handling for duplicate delegation requests.
+  - I created the Memora writeback gate filtering memory writes to verified, provenance-backed facts with confidence >= 0.70.
+  - I authored the comprehensive 12-test acceptance test suite in `tests/test_prompt6_intelx.py`.
+  - I verified 100% green pass rate across all 37 unit, connector, orchestration, and acceptance test cases.
+- **🛡️ Fixes & Hardening**: Eliminated circular imports between core report and agents, fixed polymorphic dictionary attribute access in report generator, and isolated delegation contract enforcement to delegate endpoints.
+- **📊 Test Results**: **37 passed in 14.88s** (12/12 Prompt 6 acceptance tests + 25/25 integration and orchestration tests).
 
 ---
 

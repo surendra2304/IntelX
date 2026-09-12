@@ -53,3 +53,14 @@ class CitationValidator:
             return m.group(0)
 
         return self.TOKEN_RE.sub(_replace_token, report_markdown)
+
+
+# Re-export from intelx.core.report to avoid circular dependencies
+from intelx.core.report import export_spoken_citations, export_text_citations
+
+__all__ = [
+    "CitationCheck",
+    "CitationValidator",
+    "export_text_citations",
+    "export_spoken_citations",
+]

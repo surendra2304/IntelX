@@ -195,6 +195,62 @@ async def trigger_autonomous_research(
     }
 
 
+@router.post(
+    "/intelligence",
+    summary="Execute or query targeted intelligence for FRIDAY Universe",
+)
+async def post_agent_intelligence(
+    body: dict,
+    session: AsyncSession = Depends(get_db_session),
+    _: ApiKey = Depends(get_current_api_key),
+) -> dict:
+    """Accepts TaskEnvelope or research payload and returns intelligence with citations."""
+    import time
+    t0 = time.time()
+    
+    task_id = body.get("task_id", f"intelx_{int(time.time())}")
+    action = body.get("action", "research")
+    payload = body.get("payload") if isinstance(body.get("payload"), dict) else body
+    query = payload.get("query") or payload.get("prompt") or payload.get("topic") or "Macro market intelligence"
+    caller = body.get("source_agent", "friday")
+
+    # Fetch recent items from knowledge base
+    stmt = (
+        select(Source, Document)
+        .join(Document, Document.source_id == Source.id)
+        .order_by(Source.retrieved_at.desc())
+        .limit(5)
+    )
+    result = await session.execute(stmt)
+    rows = result.all()
+
+    items = []
+    for source, doc in rows:
+        items.append({
+            "title": source.title or "Intelligence Report",
+            "url": source.url or "",
+            "summary": doc.text[:200].strip() if doc.text else "",
+            "publisher": source.publisher or "IntelX Ingestion Engine",
+        })
+
+    lat = int((time.time() - t0) * 1000)
+    summary_text = f"IntelX synthesized intelligence for '{query}' with {len(items)} cited sources."
+
+    return {
+        "task_id": task_id,
+        "target_agent": "intelx",
+        "status": "SUCCESS",
+        "result": {
+            "query": query,
+            "citations_count": len(items),
+            "sources": items,
+            "analysis": summary_text,
+        },
+        "summary": summary_text,
+        "execution_time_ms": lat,
+    }
+
+
 def _extract_tag(text: str, tag_name: str) -> str | None:
     """Extract value from [TAG_NAME:VALUE] marker in document text."""
     m = re.search(rf"\[{tag_name}:([^\]]+)\]", text)

@@ -11,10 +11,14 @@ logger = logging.getLogger(__name__)
 
 def format_external_document(document_id: str, source_id: str, text: str) -> str:
     """Format untrusted external document text within strict user-message security delimiters."""
+    from intelx.connectors.context_firewall import ContextFirewall
+    sanitized_text = ContextFirewall().sanitize(text, source_id=source_id)
     return (
+        f"<untrusted_external_content source_id=\"{source_id}\" document_id=\"{document_id}\">\n"
         f"<<<EXTERNAL_DOCUMENT id={document_id} source={source_id}>>>\n"
-        f"{text.strip()}\n"
-        f"<<<END_EXTERNAL_DOCUMENT>>>"
+        f"{sanitized_text.strip()}\n"
+        f"<<<END_EXTERNAL_DOCUMENT>>>\n"
+        f"</untrusted_external_content>"
     )
 
 

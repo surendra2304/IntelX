@@ -474,15 +474,38 @@ class OrchestrationEngine:
                 return run
 
             active_claims = [c for c in claims if c.status == ClaimStatus.ACTIVE]
-            if (
-                not claims
-                or len(claims) == 0
-                or len(active_claims) == 0
-                or synthesis_res.overall_confidence_label == "Very low"
-            ):
-                outcome = RunOutcome.INSUFFICIENT_EVIDENCE
+            disputed_claims = [c for c in claims if c.status == ClaimStatus.DISPUTED]
+            is_friday_or_enhanced = bool(
+                scope.get("friday_envelope")
+                or scope.get("query_scope")
+                or scope.get("source_policy")
+                or scope.get("friday_request_id")
+                or scope.get("enforce_prompt6")
+            )
+            if is_friday_or_enhanced:
+                if not all_ingested and not claims:
+                    outcome = RunOutcome.NO_EVIDENCE_FOUND
+                elif len(disputed_claims) > 0 and len(active_claims) == 0:
+                    outcome = RunOutcome.CONTRADICTION_DETECTED
+                elif (
+                    not claims
+                    or len(claims) == 0
+                    or len(active_claims) == 0
+                    or synthesis_res.overall_confidence_label == "Very low"
+                ):
+                    outcome = RunOutcome.NO_EVIDENCE_FOUND
+                else:
+                    outcome = RunOutcome.ANSWERED
             else:
-                outcome = RunOutcome.ANSWERED
+                if (
+                    not claims
+                    or len(claims) == 0
+                    or len(active_claims) == 0
+                    or synthesis_res.overall_confidence_label == "Very low"
+                ):
+                    outcome = RunOutcome.INSUFFICIENT_EVIDENCE
+                else:
+                    outcome = RunOutcome.ANSWERED
 
             if degradations:
                 await emit_event(
@@ -623,7 +646,7 @@ class OrchestrationEngine:
         except asyncio.CancelledError:
             logger.info(f"Run {run_id} cancellation acknowledged.")
             run.status = RunStatus.CANCELLED
-            run.outcome = RunOutcome.FAILED
+            run.outcome = RunOutcome.CANCELLED
             run.completed_at = datetime.now(UTC)
             await session.flush()
             await emit_stage_changed(session, run_id, run.status, RunStatus.CANCELLED)

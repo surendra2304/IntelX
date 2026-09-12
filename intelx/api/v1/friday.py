@@ -7,19 +7,23 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from intelx.agents.citations import export_spoken_citations, export_text_citations
 from intelx.core.auth import get_friday_api_key
-from intelx.core.enums import ArtifactFormat, ClaimStatus, RunStatus, TaskStatus
+from intelx.core.enums import ArtifactFormat, ClaimStatus, RunOutcome, RunStatus, TaskStatus
 from intelx.db.models import (
     ApiKey,
     Artifact,
     Claim,
+    Document,
+    Evidence,
     Finding,
+    ResearchRun,
     Source,
     Task,
 )
@@ -57,6 +61,82 @@ class FridayRequestContext(BaseModel):
     )
 
 
+class QueryScope(BaseModel):
+    """Explicit query scope constraints."""
+
+    query: str = Field(
+        default="",
+        min_length=0,
+        description="Target query or research topic",
+        validation_alias=AliasChoices("query", "primary_query"),
+    )
+    domain: str | None = None
+    depth: str | None = None
+    allowed_domains: list[str] = Field(default_factory=list, description="Permitted source domains")
+    blocked_domains: list[str] = Field(default_factory=list, description="Explicitly forbidden domains")
+    time_horizon: str | None = Field(default=None, description="Time range for source freshness (e.g. '30d', '1y')")
+
+
+class SourcePolicy(BaseModel):
+    """Source policy governing credibility, freshness, and domain filtering."""
+
+    allowed_domains: list[str] = Field(default_factory=list, description="Explicitly allowed domains")
+    allowed_tiers: list[str] = Field(
+        default_factory=lambda: ["TIER_1", "TIER_2", "TIER_3", "STANDARD", "HIGH"],
+        description="Allowed trust tiers",
+    )
+    blocked_domains: list[str] = Field(default_factory=list, description="Explicitly blocked domains")
+    block_low_reliability: bool = Field(default=True, description="Block untrusted domains")
+    require_peer_reviewed_or_official: bool = Field(
+        default=False,
+        description="Require primary or official disclosures",
+        validation_alias=AliasChoices("require_peer_reviewed_or_official", "require_peer_reviewed"),
+    )
+    min_credibility_score: float = Field(
+        default=0.40, ge=0.0, le=1.0, description="Minimum credibility threshold"
+    )
+
+
+class FridayTimeBudget(BaseModel):
+    """Execution time constraints."""
+
+    max_time_minutes: int = Field(default=15, ge=1, le=60, description="Timeout ceiling in minutes")
+    max_wall_time_seconds: int | None = None
+    timeout_action: str | None = None
+
+    @model_validator(mode="after")
+    def sync_time(self) -> "FridayTimeBudget":
+        if self.max_wall_time_seconds and not self.max_time_minutes:
+            self.max_time_minutes = max(1, min(60, self.max_wall_time_seconds // 60))
+        return self
+
+
+class FridayDocumentBudget(BaseModel):
+    """Document collection constraints."""
+
+    max_documents: int = Field(default=15, ge=1, le=50, description="Max external documents to ingest")
+    max_chunks_per_doc: int | None = None
+
+
+class FridayProvenanceItem(BaseModel):
+    """Granular provenance chain link from finding to external source."""
+
+    finding_id: str
+    finding_conclusion: str
+    claim_id: str
+    claim_text: str
+    evidence_id: str | None = None
+    quote: str
+    span_start: int
+    span_end: int
+    document_id: str
+    source_id: str
+    source_url: str
+    source_title: str
+    publisher: str | None = None
+    retrieved_at: str | None = None
+
+
 class FridayBudget(BaseModel):
     """Resource and execution constraints for delegated research."""
 
@@ -73,21 +153,44 @@ class FridayDelegationRequest(BaseModel):
         examples=["friday-req-8f92a1"],
     )
     question: str = Field(
-        ...,
-        min_length=5,
+        default="",
         description="Core research question or intelligence objective",
         examples=["Assess sodium-ion battery cathode energy density limits and thermal stability"],
     )
+    action: str = Field(default="research", description="Action to perform: research | delegate | cancel")
+    task_id: str | None = None
     context: FridayRequestContext = Field(default_factory=FridayRequestContext)
     depth: Literal["quick_scan", "standard", "deep_dive"] = Field(
         default="standard",
         description="Depth mode determining subquestion decomposition granularity",
     )
     budget: FridayBudget = Field(default_factory=FridayBudget)
+    query_scope: QueryScope | None = None
+    source_policy: SourcePolicy | None = None
+    time_budget: FridayTimeBudget | None = None
+    document_budget: FridayDocumentBudget | None = None
     webhook_url: str | None = Field(
         default=None,
         description="Optional callback URL for completion notification",
     )
+
+    @model_validator(mode="after")
+    def populate_question(self) -> "FridayDelegationRequest":
+        if not self.question and self.query_scope:
+            self.question = self.query_scope.query or ""
+        return self
+
+
+class TaskEnvelope(BaseModel):
+    """Standard FRIDAY Universe Task Envelope."""
+
+    task_id: str = Field(..., description="Unique task identifier")
+    source_agent: str = Field(default="friday", description="Source subsystem")
+    target_agent: str = Field(default="intelx", description="Target specialist agent")
+    action: str = Field(default="research", description="Action: research | query | cancel")
+    payload: dict[str, Any] = Field(default_factory=dict, description="Task parameters")
+    priority: Literal["normal", "high", "urgent"] = Field(default="normal")
+    idempotency_key: str | None = Field(default=None)
 
 
 class FridayDelegationResponse(BaseModel):
@@ -100,6 +203,8 @@ class FridayDelegationResponse(BaseModel):
     subquestion_count: int = Field(
         ..., description="Estimated subquestions to be generated and investigated"
     )
+    envelope_version: str = Field(default="2.0", description="Envelope protocol version")
+    task_id: str | None = Field(default=None, description="Task correlation ID")
 
 
 class FridayProgress(BaseModel):
@@ -134,6 +239,8 @@ class FridayRunStatusResponse(BaseModel):
     contradiction_count: int
     usd_cost: float
     duration_seconds: float | None
+    is_partial: bool = False
+    outcome: str | None = None
 
 
 class FridayCitation(BaseModel):
@@ -152,7 +259,9 @@ class FridayFindingItem(BaseModel):
     confidence_score: float
     evidence_count: int
     citations: list[FridayCitation] = Field(default_factory=list)
-    status: Literal["verified", "disputed", "unverified"]
+    status: Literal["verified", "disputed", "unverified", "inference"]
+    is_inference: bool = False
+    provenance: list[FridayProvenanceItem] = Field(default_factory=list)
 
 
 class FridayFindingsResponse(BaseModel):
@@ -170,6 +279,9 @@ class FridayReportResponse(BaseModel):
     report_markdown: str
     report_json: dict[str, Any]
     citations_resolved: bool
+    spoken_summary: str = ""
+    text_response: str = ""
+    provenance_chain: list[FridayProvenanceItem] = Field(default_factory=list)
 
 
 class FridayClaimRef(BaseModel):
@@ -236,29 +348,122 @@ def map_run_phase(run_status: RunStatus) -> str:
     status_code=status.HTTP_201_CREATED,
     summary="Accept research delegation from FRIDAY",
 )
+@router.post(
+    "/delegate",
+    response_model=FridayDelegationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Accept research delegation from FRIDAY (Alias)",
+)
 async def delegate_research_from_friday(
+    request: Request,
     payload: FridayDelegationRequest,
+    response: Response,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     session: AsyncSession = Depends(get_db_session),
     _api_key: ApiKey = Depends(get_friday_api_key),
 ) -> FridayDelegationResponse:
-    """Submit a research delegation job from FRIDAY with priority queue handling."""
+    """Submit a research delegation job from FRIDAY with priority queue handling and contract validation."""
+    effective_idempotency_key = idempotency_key or payload.friday_request_id
+
+    # 1. Idempotency Check: Return existing run if already present
+    if effective_idempotency_key:
+        stmt_existing = select(ResearchRun).where(ResearchRun.idempotency_key == effective_idempotency_key)
+        existing_run = (await session.execute(stmt_existing)).scalar_one_or_none()
+        if existing_run:
+            logger.info(
+                f"[FRIDAY API] Idempotency hit: run={existing_run.id} for key={effective_idempotency_key}"
+            )
+            response.status_code = status.HTTP_200_OK
+            depth = (
+                existing_run.scope_json.get("depth", "standard")
+                if isinstance(existing_run.scope_json, dict)
+                else "standard"
+            )
+            subq_est = 2 if depth == "quick_scan" else (4 if depth == "standard" else 6)
+            return FridayDelegationResponse(
+                intelx_run_id=existing_run.id,
+                friday_request_id=payload.friday_request_id,
+                status=existing_run.status.value,
+                estimated_completion=existing_run.completed_at
+                or (datetime.now(UTC) + timedelta(minutes=5)),
+                subquestion_count=subq_est,
+                task_id=payload.task_id,
+            )
+
+    # 2. Mandatory Contract Validation (Query Scope, Source Policy, Time Budget, Document Budget)
+    is_delegate_endpoint = request.url.path.endswith("/delegate") or payload.action == "delegate"
+    if is_delegate_endpoint:
+        missing_dims = []
+        if not payload.query_scope:
+            missing_dims.append("query_scope")
+        if not payload.source_policy:
+            missing_dims.append("source_policy")
+        if not payload.time_budget:
+            missing_dims.append("time_budget")
+        if not payload.document_budget:
+            missing_dims.append("document_budget")
+        if missing_dims:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Missing mandatory FRIDAY research contract dimensions: {', '.join(missing_dims)}",
+            )
+
+    raw_query = payload.query_scope.query if payload.query_scope else payload.question
+    if not raw_query or len(raw_query.strip()) < 5:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Missing mandatory research contract parameter: query_scope (minimum 5 characters required)",
+        )
+
+    time_minutes = (
+        payload.time_budget.max_time_minutes
+        if payload.time_budget
+        else payload.budget.max_time_minutes
+    )
+    if time_minutes < 1 or time_minutes > 60:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid mandatory research contract parameter: time_budget (must be between 1 and 60 minutes)",
+        )
+
+    doc_count = (
+        payload.document_budget.max_documents
+        if payload.document_budget
+        else payload.budget.max_sources
+    )
+    if doc_count < 1 or doc_count > 50:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid mandatory research contract parameter: document_budget (must be between 1 and 50 documents)",
+        )
+
+    query_scope_obj = payload.query_scope or QueryScope(query=payload.question)
+    source_policy_obj = payload.source_policy or SourcePolicy()
+    time_budget_obj = payload.time_budget or FridayTimeBudget(max_time_minutes=time_minutes)
+    document_budget_obj = payload.document_budget or FridayDocumentBudget(max_documents=doc_count)
+
     subquestion_estimate = (
         2 if payload.depth == "quick_scan" else (4 if payload.depth == "standard" else 6)
     )
     est_duration_minutes = min(
-        payload.budget.max_time_minutes,
+        time_minutes,
         3 if payload.depth == "quick_scan" else (10 if payload.depth == "standard" else 20),
     )
     est_completion = datetime.now(UTC) + timedelta(minutes=est_duration_minutes)
 
     scope_data = {
         "depth": payload.depth,
-        "max_sources": payload.budget.max_sources,
+        "query_scope": query_scope_obj.model_dump(),
+        "source_policy": source_policy_obj.model_dump(),
+        "time_budget": time_budget_obj.model_dump(),
+        "document_budget": document_budget_obj.model_dump(),
+        "max_sources": doc_count,
         "budget": {
             "max_usd": 2.50 if payload.depth == "deep_dive" else 1.50,
-            "max_minutes": payload.budget.max_time_minutes,
+            "max_minutes": time_minutes,
         },
         "friday_request_id": payload.friday_request_id,
+        "idempotency_key": effective_idempotency_key,
         "context": payload.context.model_dump(),
         "priority": payload.context.priority,
         "webhook_url": payload.webhook_url,
@@ -270,6 +475,7 @@ async def delegate_research_from_friday(
         scope_json=scope_data,
         created_by=f"friday:{payload.context.requesting_system}",
     )
+    run.idempotency_key = effective_idempotency_key
     await session.commit()
 
     logger.info(
@@ -284,6 +490,149 @@ async def delegate_research_from_friday(
         estimated_completion=est_completion,
         subquestion_count=subquestion_estimate,
     )
+
+
+@router.post(
+    "/delegate",
+    summary="Execute research delegation using FRIDAY TaskEnvelope or DelegationRequest",
+)
+async def delegate_from_friday_envelope(
+    envelope: dict[str, Any],
+    response: Response,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    session: AsyncSession = Depends(get_db_session),
+    _api_key: ApiKey = Depends(get_friday_api_key),
+) -> dict[str, Any]:
+    """Universal FRIDAY Task Envelope delegation gateway."""
+    action = str(envelope.get("action", "research")).lower().strip()
+    if action == "cancel":
+        run_id = (
+            envelope.get("payload", {}).get("run_id")
+            or envelope.get("run_id")
+            or envelope.get("task_id")
+        )
+        if not run_id:
+            raise HTTPException(status_code=400, detail="Missing run_id for cancel action")
+        return await cancel_friday_research(run_id=run_id, session=session, _api_key=_api_key)
+
+    payload_data = (
+        envelope.get("payload") if isinstance(envelope.get("payload"), dict) else envelope
+    )
+    req_id = (
+        envelope.get("task_id")
+        or payload_data.get("friday_request_id")
+        or f"friday-{int(datetime.now(UTC).timestamp())}"
+    )
+    question = (
+        payload_data.get("question")
+        or payload_data.get("query")
+        or payload_data.get("objective")
+        or payload_data.get("prompt")
+        or payload_data.get("topic")
+    )
+    if not question or len(str(question).strip()) < 5:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Missing mandatory research contract parameter: query_scope (minimum 5 characters required)",
+        )
+
+    delegation_payload = FridayDelegationRequest(
+        friday_request_id=req_id,
+        question=str(question).strip(),
+        context=FridayRequestContext(
+            requesting_system=envelope.get("source_agent", "friday")
+            if envelope.get("source_agent") in ("friday", "sentinel", "nexus", "trading_bot", "forge")
+            else "friday",
+            priority=envelope.get("priority", "normal")
+            if envelope.get("priority") in ("normal", "high", "urgent")
+            else "normal",
+            domain_hint=payload_data.get("domain_hint", "general")
+            if payload_data.get("domain_hint") in ("security", "market", "technical", "competitive", "general")
+            else "general",
+        ),
+        depth=payload_data.get("depth", "standard")
+        if payload_data.get("depth") in ("quick_scan", "standard", "deep_dive")
+        else "standard",
+        budget=FridayBudget(
+            max_sources=payload_data.get("max_sources", payload_data.get("max_documents", 10)),
+            max_time_minutes=payload_data.get("max_time_minutes", 15),
+        ),
+        query_scope=QueryScope(query=str(question).strip())
+        if "query_scope" not in payload_data
+        else payload_data["query_scope"],
+        source_policy=SourcePolicy()
+        if "source_policy" not in payload_data
+        else payload_data["source_policy"],
+        time_budget=FridayTimeBudget(max_time_minutes=payload_data.get("max_time_minutes", 15)),
+        document_budget=FridayDocumentBudget(max_documents=payload_data.get("max_documents", 15)),
+    )
+
+    del_resp = await delegate_research_from_friday(
+        payload=delegation_payload,
+        response=response,
+        idempotency_key=idempotency_key or envelope.get("idempotency_key"),
+        session=session,
+        _api_key=_api_key,
+    )
+
+    return {
+        "task_id": envelope.get("task_id", req_id),
+        "target_agent": "intelx",
+        "status": "ACCEPTED" if del_resp.status == "QUEUED" else del_resp.status,
+        "run_id": del_resp.intelx_run_id,
+        "friday_request_id": del_resp.friday_request_id,
+        "estimated_completion": del_resp.estimated_completion.isoformat(),
+        "subquestion_count": del_resp.subquestion_count,
+    }
+
+
+@router.post(
+    "/research/{run_id}/cancel",
+    summary="Cancel in-flight research run and preserve partial evidence",
+)
+async def cancel_friday_research(
+    run_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    _api_key: ApiKey = Depends(get_friday_api_key),
+) -> dict[str, Any]:
+    """Cancel in-flight research run while preserving all partial evidence gathered so far."""
+    run = await RunRepo.get_run(session, run_id)
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Research run '{run_id}' not found",
+        )
+    if run.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
+        return {
+            "run_id": run.id,
+            "intelx_run_id": run.id,
+            "status": run.status.value,
+            "message": f"Run is already in terminal state '{run.status.value}'",
+            "partial_evidence_available": True,
+        }
+
+    run.status = RunStatus.CANCELLED
+    run.outcome = RunOutcome.CANCELLED
+    run.completed_at = datetime.now(UTC)
+    if run.error_json is None:
+        run.error_json = {}
+    run.error_json["cancel_requested"] = True
+
+    await RunRepo.add_event(
+        session=session,
+        run_id=run_id,
+        event_type="run.cancelled",
+        payload_json={"reason": "Cancelled by FRIDAY request"},
+    )
+    await session.commit()
+    logger.info(f"[FRIDAY API] Run {run_id} cancelled; partial evidence preserved.")
+    return {
+        "run_id": run.id,
+        "intelx_run_id": run.id,
+        "status": "cancelled",
+        "message": "Research run cancelled; partial evidence preserved.",
+        "partial_evidence_available": True,
+    }
 
 
 @router.get(
@@ -353,6 +702,12 @@ async def get_friday_research_status(
         run.scope_json.get("friday_request_id") if isinstance(run.scope_json, dict) else None
     )
 
+    is_partial = (
+        run.status in (RunStatus.CANCELLED, "CANCELLED", RunStatus.FAILED, "FAILED")
+        and (claims_count > 0 or findings_count > 0)
+    ) or run.status in (RunStatus.CANCELLED, "CANCELLED")
+    outcome_str = run.outcome.value if run.outcome else None
+
     return FridayRunStatusResponse(
         run_id=run.id,
         friday_request_id=friday_req_id,
@@ -368,6 +723,8 @@ async def get_friday_research_status(
         contradiction_count=contradiction_count,
         usd_cost=round(run.usd_cost, 6),
         duration_seconds=duration,
+        is_partial=is_partial,
+        outcome=outcome_str,
     )
 
 
@@ -406,6 +763,7 @@ async def get_friday_research_findings(
             citations: list[FridayCitation] = []
             claim_ids = f.claim_ids_json or []
             all_disputed = True if claim_ids else False
+            finding_provenance: list[FridayProvenanceItem] = []
 
             for c_id in claim_ids:
                 cl = claims.get(c_id)
@@ -420,13 +778,35 @@ async def get_friday_research_findings(
                             verbatim_span=cl.quote,
                         )
                     )
+                    finding_provenance.append(
+                        FridayProvenanceItem(
+                            finding_id=f.id,
+                            finding_conclusion=f.conclusion,
+                            claim_id=cl.id,
+                            claim_text=cl.text,
+                            quote=cl.quote,
+                            span_start=cl.span_start,
+                            span_end=cl.span_end,
+                            document_id=cl.document_id,
+                            source_id=cl.source_id,
+                            source_url=src.location if src else "internal://source",
+                            source_title=src.title if src and src.title else "Source Document",
+                            publisher=src.publisher if src else None,
+                            retrieved_at=src.retrieved_at.isoformat()
+                            if src and src.retrieved_at
+                            else None,
+                        )
+                    )
 
             if f.contradictions_json or all_disputed:
                 st = "disputed"
+                is_inf = False
             elif f.confidence >= 0.70 and len(citations) > 0:
                 st = "verified"
+                is_inf = False
             else:
-                st = "unverified"
+                st = "inference"
+                is_inf = True
 
             items.append(
                 FridayFindingItem(
@@ -436,6 +816,8 @@ async def get_friday_research_findings(
                     evidence_count=len(citations),
                     citations=citations,
                     status=st,
+                    is_inference=is_inf,
+                    provenance=finding_provenance,
                 )
             )
     else:
@@ -452,16 +834,39 @@ async def get_friday_research_findings(
             st = (
                 "disputed"
                 if cl.status == ClaimStatus.DISPUTED
-                else ("verified" if cl.confidence >= 0.75 else "unverified")
+                else ("verified" if cl.confidence >= 0.75 else "inference")
             )
+            is_inf = st == "inference"
+            f_id = f"cl-{cl.id[:8]}"
+            prov = [
+                FridayProvenanceItem(
+                    finding_id=f_id,
+                    finding_conclusion=cl.text,
+                    claim_id=cl.id,
+                    claim_text=cl.text,
+                    quote=cl.quote,
+                    span_start=cl.span_start,
+                    span_end=cl.span_end,
+                    document_id=cl.document_id,
+                    source_id=cl.source_id,
+                    source_url=src.location if src else "internal://source",
+                    source_title=src.title if src and src.title else "Source Document",
+                    publisher=src.publisher if src else None,
+                    retrieved_at=src.retrieved_at.isoformat()
+                    if src and src.retrieved_at
+                    else None,
+                )
+            ]
             items.append(
                 FridayFindingItem(
-                    finding_id=f"cl-{cl.id[:8]}",
+                    finding_id=f_id,
                     statement=cl.text,
                     confidence_score=round(cl.confidence, 4),
                     evidence_count=1,
                     citations=cit,
                     status=st,
+                    is_inference=is_inf,
+                    provenance=prov,
                 )
             )
 
@@ -516,12 +921,27 @@ async def get_friday_research_report(
             "outcome": run.outcome.value if run.outcome else None,
         }
 
+    # 3. Retrieve findings and sources to build full provenance and spoken/text citations
+    findings_resp = await get_friday_research_findings(run_id, session, _api_key)
+    all_provenance: list[FridayProvenanceItem] = []
+    for f_item in findings_resp.findings:
+        all_provenance.extend(f_item.provenance)
+
+    sources_stmt = select(Source)
+    sources = list((await session.execute(sources_stmt)).scalars().all())
+
+    spoken_summary = export_spoken_citations(findings_resp.findings, sources)
+    text_response = export_text_citations(findings_resp.findings, sources)
+
     return FridayReportResponse(
         run_id=run.id,
         objective=run.objective,
         report_markdown=md_text,
         report_json=json_data,
         citations_resolved=True,
+        spoken_summary=spoken_summary,
+        text_response=text_response,
+        provenance_chain=all_provenance,
     )
 
 

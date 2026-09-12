@@ -53,6 +53,7 @@ class MockProvider(BaseLLMProvider):
             chunk_text = doc_match.group(1).strip()
         else:
             chunk_text = messages[-1].get("content", "").strip()
+        chunk_text = re.sub(r"</?untrusted_external_content[^>]*>", "", chunk_text).strip()
 
         sentences = re.split(r"(?<=[.!?])\s+", chunk_text)
         claims: list[dict[str, Any]] = []

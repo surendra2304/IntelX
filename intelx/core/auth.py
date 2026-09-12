@@ -148,11 +148,14 @@ async def seed_api_keys_from_settings(session: AsyncSession, settings: Settings)
     if getattr(settings, "INTELX_API_KEY", None) and settings.INTELX_API_KEY not in keys:
         keys.append(settings.INTELX_API_KEY)
 
-    # Only seed development demo keys in development or test environments
-    if settings.is_dev_or_test():
+    # Strictly forbid demo keys in production; only seed in local dev or test if not production
+    if not settings.is_production() and settings.is_dev_or_test():
         for default_k in ["dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin"]:
             if default_k not in keys:
                 keys.append(default_k)
+    elif settings.is_production():
+        # Sanitize keys: strip any dev demo keys that might have slipped in
+        keys = [k for k in keys if k not in ("dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin")]
 
     if settings.FRIDAY_API_KEY and settings.FRIDAY_API_KEY not in keys:
         keys.append(settings.FRIDAY_API_KEY)

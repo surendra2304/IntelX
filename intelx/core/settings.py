@@ -284,20 +284,27 @@ class Settings(BaseSettings):
         return self.ENV.strip().lower() in ("development", "dev", "test", "testing")
 
     def validate_production_security(self) -> None:
-        """Enforce strict production security rules: no weak secrets, no demo keys."""
+        """Enforce strict production security rules: no weak secrets, no demo keys, no mock mode."""
         if not self.is_production():
             return
+        if self.MOCK_MODE:
+            raise RuntimeError(
+                "CRITICAL SECURITY VIOLATION: MOCK_MODE cannot be enabled in production. "
+                "Disable INTELX_MOCK_MODE immediately."
+            )
+        if (self.LLM_MODEL and self.LLM_MODEL.startswith("mock-")) or self.LLM_PROVIDER == "mock":
+            raise RuntimeError(
+                "CRITICAL SECURITY VIOLATION: Mock LLM models cannot be used in production. "
+                "Configure a valid production LLM provider and model."
+            )
         if self.SECRET_KEY in ("intelx-super-secret-key-change-in-production", "change-me", "secret"):
-            import logging
-            logging.getLogger("intelx.security").warning(
-                "CRITICAL SECURITY WARNING: Insecure default SECRET_KEY detected in production environment! "
-                "Session tokens and cryptographic signatures are vulnerable. "
+            raise RuntimeError(
+                "CRITICAL SECURITY VIOLATION: Insecure default SECRET_KEY detected in production! "
                 "Please set INTELX_SECRET_KEY in your deployment environment variables immediately."
             )
         if any(k in ("dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin") for k in (self.API_KEYS or [])):
-            import logging
-            logging.getLogger("intelx.security").warning(
-                "CRITICAL SECURITY WARNING: Insecure development API keys configured in production! "
+            raise RuntimeError(
+                "CRITICAL SECURITY VIOLATION: Insecure development API keys configured in production! "
                 "Please remove default demo keys from INTELX_API_KEYS immediately."
             )
 
@@ -347,4 +354,14 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Singleton getter for application settings."""
     return Settings()
+
+
+IntelXSettings = Settings
+
+
+def validate_production_security(settings: Settings | None = None) -> None:
+    """Validate that the given or current settings conform to strict production security standards."""
+    s = settings or get_settings()
+    s.validate_production_security()
+
 

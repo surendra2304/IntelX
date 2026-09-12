@@ -11,11 +11,11 @@ services:
       - "8000:8000"
     environment:
       - INTELX_ENV=production
-      - INTELX_MOCK_MODE=true
+      - INTELX_MOCK_MODE=false
       - INTELX_DB_URL=sqlite+aiosqlite:////app/data/intelx.db
       - INTELX_DATA_DIR=/app/data
-      - INTELX_API_KEYS={"dev-admin-key":"admin","dev-member-key":"member"}
-      - INTELX_SECRET_KEY=change-this-in-production-intelx-super-secret-key-32-chars
+      - INTELX_API_KEYS=${INTELX_API_KEYS:-}
+      - INTELX_SECRET_KEY=${INTELX_SECRET_KEY}
     volumes:
       - intelx_data:/app/data
     healthcheck:

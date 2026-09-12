@@ -8,6 +8,14 @@ from intelx.core.enums import ClaimStatus, ResearchMode, normalize_research_mode
 from intelx.core.errors import IntegrityError
 
 CITATION_PATTERN = re.compile(r"\[([SC]):([a-zA-Z0-9_\-]+)\]")
+__all__ = [
+    "render_report_markdown",
+    "filter_and_ground_findings",
+    "validate_citations",
+    "resolve_citation_id",
+    "export_spoken_citations",
+    "export_text_citations",
+]
 
 
 def _get_val(obj: Any, field_name: str, default: Any = None) -> Any:
@@ -149,7 +157,9 @@ def render_report_markdown(
                     if sid:
                         citation_tokens.append(f"[S:{str(sid)[:8]}]")
             cite_str = " ".join(dict.fromkeys(citation_tokens))
-            findings_lines.append(f"- {stmt} [Confidence: {conf_label}] {cite_str}")
+            is_inf = f.get("is_inference", False) or not citation_tokens
+            prefix = "[Inference] " if is_inf else ""
+            findings_lines.append(f"- {prefix}{stmt} [Confidence: {conf_label}] {cite_str}".strip())
     else:
         findings_lines.append("- No verifiable key findings established within the given scope.")
 
@@ -309,8 +319,8 @@ def render_report_markdown(
         for uf in unverified_findings:
             stmt = _clean_prose(uf.get("statement") or uf.get("conclusion") or "")
             reason = uf.get("unverified_reason") or "Lacks verified supporting claims"
-            u_lines.append(f"- {stmt} *(Reason: {reason})*")
-        unverified_section = "\n\n## Unverified Observations\n" + "\n".join(u_lines)
+            u_lines.append(f"- [Inference] {stmt} *(Reason: {reason})*")
+        unverified_section = "\n\n## Unverified Observations & Inferences\n" + "\n".join(u_lines)
 
     report_md = f"""# Research Report: {objective}
 
@@ -345,3 +355,85 @@ Retrieved: {now_str}.
 {chr(10).join(source_lines)}{unverified_section}
 """
     return report_md
+
+
+def export_text_citations(findings: list[Any], sources: list[Any]) -> str:
+    """Format findings with clean inline citations and a full bibliography."""
+    sources_by_id: dict[str, Any] = {}
+    for s in sources:
+        sid = _get_val(s, "id")
+        if sid:
+            sources_by_id[str(sid)] = s
+
+    lines: list[str] = ["### Key Findings with Citations\n"]
+    used_sources: set[str] = set()
+
+    for idx, f in enumerate(findings, 1):
+        statement = _get_val(f, "statement") or _get_val(f, "conclusion", "")
+        status = _get_val(f, "status", "verified")
+        conf = _get_val(f, "confidence") or _get_val(f, "confidence_score", 0.8)
+        claim_ids = _get_val(f, "claim_ids") or _get_val(f, "claim_ids_json", [])
+
+        cites = []
+        for cid in claim_ids:
+            cites.append(f"[C:{str(cid)[:8]}]")
+
+        citations_list = _get_val(f, "citations", [])
+        for cit in citations_list:
+            stitle = _get_val(cit, "source_title", "")
+            surl = _get_val(cit, "source_url", "")
+            if surl:
+                used_sources.add(f"[{stitle or 'Source'}]({surl})")
+
+        prefix = "[Inference] " if str(status).lower() in ("inference", "unverified") else ""
+        cite_str = f" ({' '.join(cites)})" if cites else ""
+        lines.append(f"{idx}. {prefix}{statement}{cite_str} *(Confidence: {conf})*")
+
+    if used_sources or sources_by_id:
+        lines.append("\n### Sources & Evidence References")
+        if used_sources:
+            for src in sorted(used_sources):
+                lines.append(f"- {src}")
+        else:
+            for sid, s in sources_by_id.items():
+                title = _get_val(s, "title", "Source Document")
+                loc = _get_val(s, "location", "") or _get_val(s, "url", "")
+                lines.append(f"- **[S:{sid[:8]}]** [{title}]({loc})")
+
+    return "\n".join(lines)
+
+
+def export_spoken_citations(findings: list[Any], sources: list[Any]) -> str:
+    """Format findings into natural, conversational speech for FRIDAY voice TTS."""
+    clean_prose_re = re.compile(r"\[[CS]:[a-zA-Z0-9_\-]+\]|\*\*|\*|`|\[|\]|\([^\)]*\)")
+    spoken_sentences: list[str] = []
+
+    for f in findings:
+        statement = _get_val(f, "statement") or _get_val(f, "conclusion", "")
+        status = str(_get_val(f, "status", "verified")).lower()
+        clean_stmt = clean_prose_re.sub("", statement).strip()
+        clean_stmt = re.sub(r"\s+", " ", clean_stmt)
+
+        citations = _get_val(f, "citations", [])
+        source_title = None
+        if citations:
+            first_cit = citations[0]
+            source_title = _get_val(first_cit, "source_title", None)
+        elif sources:
+            first_s = sources[0]
+            source_title = _get_val(first_s, "title", None)
+
+        if not source_title or source_title == "Source Document":
+            source_title = "reported evidence"
+
+        if status in ("inference", "unverified"):
+            spoken_sentences.append(f"Based on analytical inference, {clean_stmt}.")
+        elif status == "disputed":
+            spoken_sentences.append(f"Regarding disputed reports from {source_title}, {clean_stmt}.")
+        else:
+            spoken_sentences.append(f"According to {source_title}, {clean_stmt}.")
+
+    if not spoken_sentences:
+        return "No conclusive empirical evidence was found for this query within the designated research scope."
+
+    return " ".join(spoken_sentences)
