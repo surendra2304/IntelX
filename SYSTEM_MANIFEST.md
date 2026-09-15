@@ -11,8 +11,8 @@
 
 | Attribute | Production Configuration |
 | :--- | :--- |
-| **Live Production URL** | [https://intelx-3cz1.onrender.com](https://intelx-3cz1.onrender.com) |
-| **Health Check Endpoint** | https://intelx-3cz1.onrender.com/health |
+| **Live Production URL** | [https://intelx-mygl.onrender.com](https://intelx-mygl.onrender.com) |
+| **Health Check Endpoint** | https://intelx-mygl.onrender.com/health |
 | **Master API Key Variable** | INTELX_API_KEY=intelx_api |
 | **Authentication Header** | Authorization: Bearer intelx_api |
 | **Database Topology** | Turso LibSQL Cloud DB (9 GB Free Tier) |
@@ -55,7 +55,7 @@ STRATEX_URL=https://stratex-ucjz.onrender.com
 STRATEX_API_KEY=stratex_api
 
 # 4. 🧠 IntelX Evidence & Intelligence Research Engine (Turso AWS Mumbai)
-INTELX_URL=https://intelx-3cz1.onrender.com
+INTELX_URL=https://intelx-mygl.onrender.com
 INTELX_API_KEY=intelx_api
 
 # 5. 🔮 Futuris Calibrated Predictive Forecasting Engine
@@ -85,7 +85,7 @@ FRIDAY_API_KEY=friday_api
 
 When opening this directory in **Antigravity AI**:
 * **Identity:** You are working inside **IntelX** (d:\FRIDAY Universe\IntelX).
-* **Live Service:** This service is deployed live at https://intelx-3cz1.onrender.com.
+* **Live Service:** This service is deployed live at https://intelx-mygl.onrender.com.
 * **Authentication:** Incoming requests use INTELX_API_KEY=intelx_api.
 * **Never Fake Tests:** All tests and verifications must be executed against real code and real endpoints.
 * **No Unapproved Git Pushes:** Keep modifications local unless explicitly instructed to push.

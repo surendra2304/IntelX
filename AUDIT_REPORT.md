@@ -75,7 +75,7 @@
 - Expanded `.env.example` to document all ecosystem variables (`INTELX_API_KEY`, `INTELX_INFERENCE_URL`, `INTELX_MEMORA_URL`, `INTELX_FUTURIS_BASE_URL`, `INTELX_MAX_CONCURRENT_RUNS`, `INTELX_RETENTION_DAYS_RAW_DOCS`, `INTELX_RETENTION_DAYS_REPORTS`).
 
 ### Phase 7: Documentation & Manifest Accuracy
-- Verified `SYSTEM_MANIFEST.md` matches live Render deployment (`https://intelx-3cz1.onrender.com`) and Turso database (`https://intelx-db-surendra2304.aws-ap-south-1.turso.io`).
+- Verified `SYSTEM_MANIFEST.md` matches live Render deployment (`https://intelx-mygl.onrender.com`) and Turso database (`https://intelx-db-surendra2304.aws-ap-south-1.turso.io`).
 - Updated `INTELX_DIARY.md` and created `diary/2026-09-01.md` conforming to strict validation rules (`scripts/verify_diary.py`).
 
 ### Phase 8: Performance & Reliability
