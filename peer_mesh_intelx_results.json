@@ -22,7 +22,7 @@
       "status": 200,
       "latency_ms": 2050.12,
       "endpoint_used": "/health",
-      "full_url": "https://forge-u98k.onrender.com/health",
+      "full_url": "https://forge-e9kl.onrender.com/health",
       "response_snippet": "{\"status\":\"ok\",\"version\":\"2.0.0\",\"uptime_seconds\":562.4,\"database_connected\":true}",
       "success": true,
       "error": null,
