@@ -14,6 +14,8 @@ from intelx.db.session import check_database_health
 router = APIRouter(tags=["Health & Telemetry"])
 
 
+@router.get("/", summary="System Root Probe")
+@router.head("/", summary="System Root Probe")
 @router.get("/healthz", summary="System Liveness Probe")
 @router.head("/healthz", summary="System Liveness Probe")
 @router.get("/health", summary="System Liveness Probe Alias")
