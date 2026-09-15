@@ -100,7 +100,7 @@
       "status": 200,
       "latency_ms": 237.35,
       "endpoint_used": "/health",
-      "full_url": "https://cortex-qifr.onrender.com/health",
+      "full_url": "https://cortex-0m7c.onrender.com/health",
       "response_snippet": "{\"status\":\"UP\",\"timestamp\":\"2026-09-10T04:30:31.923021\",\"service\":\"CORTEX API\"}",
       "success": true,
       "error": null,
