@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: friday-intelx
+    env: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: ENVIRONMENT
+        value: "production"
+      - key: INTELX_API_KEY
+        sync: false
+      - key: INTELX_INFERENCE_API_KEY
+        sync: false
+      - key: INTELX_DB_URL
+        sync: false
+      - key: INTELX_INFERENCE_URL
+        sync: false
+      - key: INTELX_SECRET_KEY
+        sync: false
+      - key: INTELX_FUTURIS_BASE_URL
+        sync: false
+      - key: INTELX_FUTURIS_API_KEY
+        sync: false
