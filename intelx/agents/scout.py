@@ -87,25 +87,72 @@ class ScoutAgent(BaseAgent):
             # Also discover from ingested FRIDAY Universe sources in database
             try:
                 from sqlalchemy import and_, select
+
                 from intelx.db.models import Source
+
                 db_stop_words = {
-                    "what", "where", "when", "which", "with", "from", "that", "this",
-                    "have", "been", "does", "into", "about", "regarding", "concerning",
-                    "results", "study", "report", "paper", "data", "timeline", "details",
-                    "overview", "announcement", "announcements", "status", "schedule",
-                    "specifications", "definitions", "baseline", "benchmarks", "empirical",
-                    "experimental", "operational", "disputed", "claims", "measured",
-                    "statements", "primary", "investigation", "documentation", "verified",
-                    "updates", "milestones", "features", "facts", "occurred",
+                    "what",
+                    "where",
+                    "when",
+                    "which",
+                    "with",
+                    "from",
+                    "that",
+                    "this",
+                    "have",
+                    "been",
+                    "does",
+                    "into",
+                    "about",
+                    "regarding",
+                    "concerning",
+                    "results",
+                    "study",
+                    "report",
+                    "paper",
+                    "data",
+                    "timeline",
+                    "details",
+                    "overview",
+                    "announcement",
+                    "announcements",
+                    "status",
+                    "schedule",
+                    "specifications",
+                    "definitions",
+                    "baseline",
+                    "benchmarks",
+                    "empirical",
+                    "experimental",
+                    "operational",
+                    "disputed",
+                    "claims",
+                    "measured",
+                    "statements",
+                    "primary",
+                    "investigation",
+                    "documentation",
+                    "verified",
+                    "updates",
+                    "milestones",
+                    "features",
+                    "facts",
+                    "occurred",
                 }
                 words = [
-                    w for w in self.portfolio_planner.keywords(subquestion)
+                    w
+                    for w in self.portfolio_planner.keywords(subquestion)
                     if w not in db_stop_words and len(w) > 2
                 ]
                 # Require at least 2 distinct substantive search tokens to prevent spurious DB matches
                 if len(words) >= 2:
                     conditions = [Source.title.ilike(f"%{w}%") for w in words[:3]]
-                    stmt = select(Source).where(and_(*conditions)).order_by(Source.retrieved_at.desc()).limit(3)
+                    stmt = (
+                        select(Source)
+                        .where(and_(*conditions))
+                        .order_by(Source.retrieved_at.desc())
+                        .limit(3)
+                    )
                     res = await session.execute(stmt)
                     for src in res.scalars().all():
                         loc = src.location.strip()
@@ -120,7 +167,9 @@ class ScoutAgent(BaseAgent):
                             candidates.append(
                                 SourceCandidate(
                                     location=loc,
-                                    title=src.title or src.publisher or "Ingested Intelligence Source",
+                                    title=src.title
+                                    or src.publisher
+                                    or "Ingested Intelligence Source",
                                     reason=f"Ingested intelligence from {src.publisher or 'database'}",
                                     expected_relevance=q_score.total,
                                 )

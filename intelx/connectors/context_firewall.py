@@ -33,13 +33,28 @@ class ContextFirewall:
     patterns: list[tuple[str, str]] = [
         ("ignore_previous", r"(?i)\bignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions\b"),
         ("disregard_instructions", r"(?i)\bdisregard\s+(?:all\s+)?(?:previous|prior|above)\b"),
-        ("system_prompt", r"(?i)\b(?:reveal|print|output|dump)\s+(?:the\s+|your\s+)?(?:entire\s+)?system\s+prompt\b"),
+        (
+            "system_prompt",
+            r"(?i)\b(?:reveal|print|output|dump)\s+(?:the\s+|your\s+)?(?:entire\s+)?system\s+prompt\b",
+        ),
         ("override_policy", r"(?i)\boverride\s+(?:the\s+|all\s+)?(?:system\s+)?policy\b"),
         ("disable_guardrails", r"(?i)\bdisable\s+(?:all\s+)?guardrails\b"),
-        ("secret_exfiltration", r"(?i)\b(?:print|output|dump)\s+(?:all\s+)?(?:env|keys|credentials|secrets)\b"),
-        ("role_impersonation", r"(?i)(?:\b\[system\]\b|\bsystem\s*:|<\|system\|>|<\|im_start\|>|<\|im_end\|>)"),
-        ("instruction_tag", r"(?i)(?:\[inst\]|\[\/inst\]|<\/?(?:instructions|prompt|assistant|human)>)"),
-        ("delimiter_breakout", r"(?i)(?:<<<END_EXTERNAL_DOCUMENT>>>|<<<EXTERNAL_DOCUMENT|<\/untrusted_external_content>)"),
+        (
+            "secret_exfiltration",
+            r"(?i)\b(?:print|output|dump)\s+(?:all\s+)?(?:env|keys|credentials|secrets)\b",
+        ),
+        (
+            "role_impersonation",
+            r"(?i)(?:\b\[system\]\b|\bsystem\s*:|<\|system\|>|<\|im_start\|>|<\|im_end\|>)",
+        ),
+        (
+            "instruction_tag",
+            r"(?i)(?:\[inst\]|\[\/inst\]|<\/?(?:instructions|prompt|assistant|human)>)",
+        ),
+        (
+            "delimiter_breakout",
+            r"(?i)(?:<<<END_EXTERNAL_DOCUMENT>>>|<<<EXTERNAL_DOCUMENT|<\/untrusted_external_content>)",
+        ),
         ("jailbreak", r"(?i)\b(?:jailbreak|you\s+are\s+now\s+an?\s+unrestricted|DAN\s+mode)\b"),
     ]
 
@@ -90,9 +105,17 @@ class ContextFirewall:
 
         # 3. Neutralize direct override commands by prefixing with inert marker
         for name, pat in self.patterns:
-            if name in ("ignore_previous", "disregard_instructions", "override_policy", "disable_guardrails", "system_prompt"):
+            if name in (
+                "ignore_previous",
+                "disregard_instructions",
+                "override_policy",
+                "disable_guardrails",
+                "system_prompt",
+            ):
+
                 def _neutralize(m: re.Match) -> str:
                     return f"[INERT_HOSTILE_DIRECTIVE: {m.group(0)}]"
+
                 sanitized = re.sub(pat, _neutralize, sanitized)
 
         return sanitized

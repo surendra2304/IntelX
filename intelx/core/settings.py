@@ -42,12 +42,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("INTELX_MOCK_MODE", "MOCK_MODE"),
         description="When true, all LLM & search calls use local synthetic mock data",
     )
-    LLM_PROVIDER: Literal["mock", "openai_compatible", "anthropic", "inference", "ai_universe"] = Field(
-        default="inference",
-        validation_alias=AliasChoices(
-            "INTELX_LLM_PROVIDER", "LLM_PROVIDER", "INTELX_MODEL_PROVIDER", "MODEL_PROVIDER"
-        ),
-        description="Active LLM provider backend",
+    LLM_PROVIDER: Literal["mock", "openai_compatible", "anthropic", "inference", "ai_universe"] = (
+        Field(
+            default="inference",
+            validation_alias=AliasChoices(
+                "INTELX_LLM_PROVIDER", "LLM_PROVIDER", "INTELX_MODEL_PROVIDER", "MODEL_PROVIDER"
+            ),
+            description="Active LLM provider backend",
+        )
     )
     LLM_BASE_URL: str | None = Field(
         default=None,
@@ -70,12 +72,23 @@ class Settings(BaseSettings):
     # Inference Multi-Agent Gateway Provider
     INFERENCE_URL: str = Field(
         default="https://inference-3i2b.onrender.com",
-        validation_alias=AliasChoices("INTELX_INFERENCE_URL", "INFERENCE_URL", "INTELX_AI_UNIVERSE_BASE_URL", "AI_UNIVERSE_BASE_URL", "AI_UNIVERSE_URL"),
+        validation_alias=AliasChoices(
+            "INTELX_INFERENCE_URL",
+            "INFERENCE_URL",
+            "INTELX_AI_UNIVERSE_BASE_URL",
+            "AI_UNIVERSE_BASE_URL",
+            "AI_UNIVERSE_URL",
+        ),
         description="Base URL for Inference multi-agent intelligence server",
     )
     INFERENCE_API_KEY: str | None = Field(
         default="inference_api",
-        validation_alias=AliasChoices("INTELX_INFERENCE_API_KEY", "INFERENCE_API_KEY", "INTELX_AI_UNIVERSE_API_KEY", "AI_UNIVERSE_API_KEY"),
+        validation_alias=AliasChoices(
+            "INTELX_INFERENCE_API_KEY",
+            "INFERENCE_API_KEY",
+            "INTELX_AI_UNIVERSE_API_KEY",
+            "AI_UNIVERSE_API_KEY",
+        ),
         description="API key for Inference service",
     )
 
@@ -297,12 +310,19 @@ class Settings(BaseSettings):
                 "CRITICAL SECURITY VIOLATION: Mock LLM models cannot be used in production. "
                 "Configure a valid production LLM provider and model."
             )
-        if self.SECRET_KEY in ("intelx-super-secret-key-change-in-production", "change-me", "secret"):
+        if self.SECRET_KEY in (
+            "intelx-super-secret-key-change-in-production",
+            "change-me",
+            "secret",
+        ):
             raise RuntimeError(
                 "CRITICAL SECURITY VIOLATION: Insecure default SECRET_KEY detected in production! "
                 "Please set INTELX_SECRET_KEY in your deployment environment variables immediately."
             )
-        if any(k in ("dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin") for k in (self.API_KEYS or [])):
+        if any(
+            k in ("dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin")
+            for k in (self.API_KEYS or [])
+        ):
             raise RuntimeError(
                 "CRITICAL SECURITY VIOLATION: Insecure development API keys configured in production! "
                 "Please remove default demo keys from INTELX_API_KEYS immediately."
@@ -363,5 +383,3 @@ def validate_production_security(settings: Settings | None = None) -> None:
     """Validate that the given or current settings conform to strict production security standards."""
     s = settings or get_settings()
     s.validate_production_security()
-
-

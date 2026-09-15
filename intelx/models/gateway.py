@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from intelx.core.errors import StructuredOutputError
 from intelx.core.settings import Settings, get_settings

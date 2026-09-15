@@ -229,10 +229,10 @@ class OrchestrationEngine:
                     from intelx.integrations.futuris_context import FuturisContextProvider
                     from intelx.integrations.memora_context import MemoraMemoryClient
                     from intelx.integrations.stratex_context import StratexConnector
-                    
+
                     finding_text = f"{run.objective} (Post-Review Resolution)"
                     domain = scope.get("domain", "market")
-                    
+
                     memora_client = MemoraMemoryClient()
                     asyncio.create_task(
                         memora_client.store_research_memory(
@@ -287,7 +287,9 @@ class OrchestrationEngine:
                 all_candidates: list[SourceCandidate] = []
                 # Ensure primary objective is scouted directly as the first high-priority target
                 scouting_targets = [run.objective] + [
-                    sq for sq in plan.subquestions if sq.strip().lower() != run.objective.strip().lower()
+                    sq
+                    for sq in plan.subquestions
+                    if sq.strip().lower() != run.objective.strip().lower()
                 ]
                 for idx, subq in enumerate(scouting_targets):
                     scout_task = Task(
@@ -548,28 +550,38 @@ class OrchestrationEngine:
                     # Build structured research intelligence payload shared across all ecosystem agents
                     syn = synthesis_res if "synthesis_res" in locals() and synthesis_res else None
                     direct_ans = (
-                        getattr(syn, "executive_summary", "")
-                        or getattr(syn, "direct_answer", "")
-                        or ""
-                    ) if syn else ""
+                        (
+                            getattr(syn, "executive_summary", "")
+                            or getattr(syn, "direct_answer", "")
+                            or ""
+                        )
+                        if syn
+                        else ""
+                    )
                     structured_findings = []
                     for f in (getattr(syn, "findings", []) or [])[:8]:
-                        structured_findings.append({
-                            "statement": getattr(f, "statement", str(f)),
-                            "confidence": getattr(f, "confidence", 0.80),
-                            "confidence_label": getattr(f, "confidence_label", "High"),
-                            "claim_ids": getattr(f, "claim_ids", []),
-                        })
+                        structured_findings.append(
+                            {
+                                "statement": getattr(f, "statement", str(f)),
+                                "confidence": getattr(f, "confidence", 0.80),
+                                "confidence_label": getattr(f, "confidence_label", "High"),
+                                "claim_ids": getattr(f, "claim_ids", []),
+                            }
+                        )
 
                     # Top claims for evidence tracing
                     top_claims = []
-                    for c in sorted(claims, key=lambda x: getattr(x, "confidence", 0), reverse=True)[:10]:
-                        top_claims.append({
-                            "id": getattr(c, "id", ""),
-                            "text": getattr(c, "text", ""),
-                            "confidence": round(getattr(c, "confidence", 0.80), 4),
-                            "quote": getattr(c, "quote", ""),
-                        })
+                    for c in sorted(
+                        claims, key=lambda x: getattr(x, "confidence", 0), reverse=True
+                    )[:10]:
+                        top_claims.append(
+                            {
+                                "id": getattr(c, "id", ""),
+                                "text": getattr(c, "text", ""),
+                                "confidence": round(getattr(c, "confidence", 0.80), 4),
+                                "quote": getattr(c, "quote", ""),
+                            }
+                        )
 
                     rich_intel_payload = {
                         "run_id": run_id,
@@ -579,7 +591,9 @@ class OrchestrationEngine:
                         "executive_answer": direct_ans,
                         "findings": structured_findings,
                         "top_claims": top_claims,
-                        "overall_confidence": getattr(syn, "overall_confidence_label", "High") if syn else "Moderate",
+                        "overall_confidence": getattr(syn, "overall_confidence_label", "High")
+                        if syn
+                        else "Moderate",
                         "sources_count": len(all_ingested),
                         "claims_count": len(claims),
                         "usd_cost": round(run.usd_cost or 0, 6),
@@ -587,9 +601,11 @@ class OrchestrationEngine:
                     }
 
                     # Text summary for legacy webhook fields
-                    findings_snip = "\n".join(
-                        f"• {f['statement']}" for f in structured_findings
-                    ) if structured_findings else "No structured findings."
+                    findings_snip = (
+                        "\n".join(f"• {f['statement']}" for f in structured_findings)
+                        if structured_findings
+                        else "No structured findings."
+                    )
                     finding_text = (
                         f"RESEARCH OBJECTIVE: {run.objective}\n\n"
                         f"EXECUTIVE ANSWER:\n{direct_ans}\n\n"
@@ -639,7 +655,9 @@ class OrchestrationEngine:
                         f"→ Memora, Futuris, StrateX"
                     )
                 except Exception as ex:
-                    logger.warning(f"Failed to dispatch external ecosystem webhooks: {ex}", exc_info=True)
+                    logger.warning(
+                        f"Failed to dispatch external ecosystem webhooks: {ex}", exc_info=True
+                    )
 
             return run
 

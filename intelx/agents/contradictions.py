@@ -33,11 +33,35 @@ class ContradictionEngine:
                 id_b = getattr(cb, "claim_id", getattr(cb, "id", f"c{j}"))
 
                 # Check semantic opposition markers
-                if ("increases" in text_a and "decreases" in text_b) or ("increases" in text_b and "decreases" in text_a):
-                    conflicts.append(Conflict(id_a, id_b, "opposing directional assertions (increase vs decrease)", "directional"))
-                elif ("not " in text_a and "not " not in text_b and any(w in text_b for w in text_a.split() if len(w) > 4)):
-                    conflicts.append(Conflict(id_a, id_b, "direct negation of factual proposition", "negation"))
-                elif ("fails" in text_a and "succeeds" in text_b) or ("fails" in text_b and "succeeds" in text_a):
-                    conflicts.append(Conflict(id_a, id_b, "contradictory outcome assertion (fails vs succeeds)", "outcome"))
+                if ("increases" in text_a and "decreases" in text_b) or (
+                    "increases" in text_b and "decreases" in text_a
+                ):
+                    conflicts.append(
+                        Conflict(
+                            id_a,
+                            id_b,
+                            "opposing directional assertions (increase vs decrease)",
+                            "directional",
+                        )
+                    )
+                elif (
+                    "not " in text_a
+                    and "not " not in text_b
+                    and any(w in text_b for w in text_a.split() if len(w) > 4)
+                ):
+                    conflicts.append(
+                        Conflict(id_a, id_b, "direct negation of factual proposition", "negation")
+                    )
+                elif ("fails" in text_a and "succeeds" in text_b) or (
+                    "fails" in text_b and "succeeds" in text_a
+                ):
+                    conflicts.append(
+                        Conflict(
+                            id_a,
+                            id_b,
+                            "contradictory outcome assertion (fails vs succeeds)",
+                            "outcome",
+                        )
+                    )
 
         return conflicts

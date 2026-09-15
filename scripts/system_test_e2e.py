@@ -18,9 +18,9 @@ os.environ["INTELX_ENV"] = "test"
 os.environ["INTELX_MOCK_MODE"] = "true"
 
 import httpx
+
 from intelx.app.factory import create_app
 from intelx.core.auth import hash_api_key
-from intelx.core.settings import get_settings
 from intelx.db.base import Base
 from intelx.db.engine import get_async_engine
 from intelx.db.models import ApiKey
@@ -53,9 +53,15 @@ def log_fail(msg: str):
 
 
 async def run_end_to_end_system_test():
-    print(f"{Colors.BOLD}{Colors.HEADER}======================================================================{Colors.ENDC}")
-    print(f"{Colors.BOLD}{Colors.HEADER}              INTELX COMPLETE END-TO-END SYSTEM TEST                  {Colors.ENDC}")
-    print(f"{Colors.BOLD}{Colors.HEADER}======================================================================{Colors.ENDC}")
+    print(
+        f"{Colors.BOLD}{Colors.HEADER}======================================================================{Colors.ENDC}"
+    )
+    print(
+        f"{Colors.BOLD}{Colors.HEADER}              INTELX COMPLETE END-TO-END SYSTEM TEST                  {Colors.ENDC}"
+    )
+    print(
+        f"{Colors.BOLD}{Colors.HEADER}======================================================================{Colors.ENDC}"
+    )
 
     start_time = time.time()
     passed_tests = 0
@@ -79,15 +85,19 @@ async def run_end_to_end_system_test():
     admin_hash = hash_api_key(admin_token)
     async with sessionmaker() as session:
         from sqlalchemy import select
+
         res = await session.execute(select(ApiKey).where(ApiKey.key_hash == admin_hash))
         if not res.scalar_one_or_none():
             from intelx.core.enums import ApiKeyRole
-            session.add(ApiKey(
-                id="e2e-admin-key-id",
-                key_hash=admin_hash,
-                name="e2e-admin-key",
-                role=ApiKeyRole.ADMIN,
-            ))
+
+            session.add(
+                ApiKey(
+                    id="e2e-admin-key-id",
+                    key_hash=admin_hash,
+                    name="e2e-admin-key",
+                    role=ApiKeyRole.ADMIN,
+                )
+            )
             await session.commit()
     log_pass(f"Seeded and verified API key: {admin_token[:12]}...")
     passed_tests += 1
@@ -149,7 +159,9 @@ async def run_end_to_end_system_test():
             },
         }
         r_job = await client.post("/api/v1/research/jobs", json=job_payload, headers=headers)
-        assert r_job.status_code in (201, 202), f"Expected 201/202, got {r_job.status_code}: {r_job.text}"
+        assert r_job.status_code in (201, 202), (
+            f"Expected 201/202, got {r_job.status_code}: {r_job.text}"
+        )
         job_data = r_job.json()
         run_id = job_data["id"]
         assert job_data["status"] == "QUEUED"
@@ -206,7 +218,9 @@ async def run_end_to_end_system_test():
             assert run_record is not None
             assert run_record.status.value == "COMPLETED"
             assert run_record.outcome is not None
-        log_pass(f"Research run completed DAG transitions: Status={run_record.status.value}, Outcome={run_record.outcome.value}.")
+        log_pass(
+            f"Research run completed DAG transitions: Status={run_record.status.value}, Outcome={run_record.outcome.value}."
+        )
         passed_tests += 1
 
         # Step 8: Verifying Generated Multi-Format Artifacts
@@ -231,13 +245,19 @@ async def run_end_to_end_system_test():
         assert r_art_file.status_code == 200
         report_md = r_art_file.text
         assert len(report_md) > 100
-        assert "Direct Answer" in report_md or "Executive Summary" in report_md or "Key Findings" in report_md
+        assert (
+            "Direct Answer" in report_md
+            or "Executive Summary" in report_md
+            or "Key Findings" in report_md
+        )
 
         # Verify HTML Web View
         r_web_rep = await client.get(f"/research/{run_id}/report")
         assert r_web_rep.status_code == 200
         assert "Direct Answer" in r_web_rep.text
-        log_pass("Intelligence report passed citation postconditions and rendered with interactive drawer.")
+        log_pass(
+            "Intelligence report passed citation postconditions and rendered with interactive drawer."
+        )
         passed_tests += 1
 
         # Step 10: FRIDAY Autonomous Delegation Integration
@@ -258,11 +278,15 @@ async def run_end_to_end_system_test():
             },
         }
         r_friday = await client.post("/api/v1/friday/research", json=friday_req, headers=headers)
-        assert r_friday.status_code == 201, f"Expected 201 Created, got {r_friday.status_code}: {r_friday.text}"
+        assert r_friday.status_code == 201, (
+            f"Expected 201 Created, got {r_friday.status_code}: {r_friday.text}"
+        )
         f_data = r_friday.json()
         f_run_id = f_data["intelx_run_id"]
         assert f_data["status"] == "QUEUED"
-        log_pass(f"FRIDAY delegation accepted: Run ID={f_run_id}, Request ID={f_data['friday_request_id']}.")
+        log_pass(
+            f"FRIDAY delegation accepted: Run ID={f_run_id}, Request ID={f_data['friday_request_id']}."
+        )
         passed_tests += 1
 
         # Step 11: Futuris Continuous Forecasting Exchange
@@ -274,11 +298,15 @@ async def run_end_to_end_system_test():
             "requesting_context": {"domain": "market", "lookback_days": 30},
         }
         r_futuris = await client.post("/api/v1/futuris/context", json=futuris_req, headers=headers)
-        assert r_futuris.status_code == 200, f"Expected 200 OK, got {r_futuris.status_code}: {r_futuris.text}"
+        assert r_futuris.status_code == 200, (
+            f"Expected 200 OK, got {r_futuris.status_code}: {r_futuris.text}"
+        )
         futuris_data = r_futuris.json()
         assert "forecast_target" in futuris_data
         assert "research_findings" in futuris_data
-        log_pass(f"Futuris context exchange exported calibrated features for target: {futuris_data['forecast_target']}.")
+        log_pass(
+            f"Futuris context exchange exported calibrated features for target: {futuris_data['forecast_target']}."
+        )
         passed_tests += 1
 
         # Step 12: Continuous Research Subscriptions Fleet
@@ -345,13 +373,21 @@ async def run_end_to_end_system_test():
             valid, violations = await AuditChain.verify(session)
             assert valid is True
             assert len(violations) == 0
-        log_pass("Audit ledger verified: 100% cryptographic block continuity with zero tamper violations.")
+        log_pass(
+            "Audit ledger verified: 100% cryptographic block continuity with zero tamper violations."
+        )
         passed_tests += 1
 
     elapsed = time.time() - start_time
-    print(f"\n{Colors.BOLD}{Colors.GREEN}======================================================================{Colors.ENDC}")
-    print(f"{Colors.BOLD}{Colors.GREEN}       ALL {passed_tests}/{total_tests} END-TO-END SYSTEM TESTS PASSED IN {elapsed:.2f}s!          {Colors.ENDC}")
-    print(f"{Colors.BOLD}{Colors.GREEN}======================================================================{Colors.ENDC}\n")
+    print(
+        f"\n{Colors.BOLD}{Colors.GREEN}======================================================================{Colors.ENDC}"
+    )
+    print(
+        f"{Colors.BOLD}{Colors.GREEN}       ALL {passed_tests}/{total_tests} END-TO-END SYSTEM TESTS PASSED IN {elapsed:.2f}s!          {Colors.ENDC}"
+    )
+    print(
+        f"{Colors.BOLD}{Colors.GREEN}======================================================================{Colors.ENDC}\n"
+    )
 
 
 if __name__ == "__main__":

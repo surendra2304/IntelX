@@ -103,7 +103,13 @@ class DurableResearchStore:
         with self.lock, self.conn:
             cursor = self.conn.execute(
                 "INSERT INTO outbox (tenant_id, research_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
-                (tenant, research_id, event_type, json.dumps(payload, sort_keys=True, default=str), time.time()),
+                (
+                    tenant,
+                    research_id,
+                    event_type,
+                    json.dumps(payload, sort_keys=True, default=str),
+                    time.time(),
+                ),
             )
             return cursor.lastrowid or 0
 

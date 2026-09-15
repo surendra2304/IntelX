@@ -101,7 +101,9 @@ class BudgetController:
                 )
             ledger.reserved_usd += usd_estimate
 
-    async def commit_reservation(self, ledger: BudgetLedger, reserved_usd: float, actual_usd: float) -> None:
+    async def commit_reservation(
+        self, ledger: BudgetLedger, reserved_usd: float, actual_usd: float
+    ) -> None:
         """Commit actual expenditure and release unused reserved balance."""
         async with self._lock:
             ledger.reserved_usd = max(0.0, ledger.reserved_usd - reserved_usd)
@@ -111,13 +113,21 @@ class BudgetController:
     def _check(self, l: BudgetLedger) -> None:
         """Check all ceilings and fail closed if exceeded."""
         if l.queries > self.max_queries:
-            raise BudgetExceeded(f"research query limit exhausted: {l.queries} > {self.max_queries}")
+            raise BudgetExceeded(
+                f"research query limit exhausted: {l.queries} > {self.max_queries}"
+            )
         if l.fetches > self.max_fetches:
-            raise BudgetExceeded(f"research fetch limit exhausted: {l.fetches} > {self.max_fetches}")
+            raise BudgetExceeded(
+                f"research fetch limit exhausted: {l.fetches} > {self.max_fetches}"
+            )
         if l.sources > self.max_sources:
-            raise BudgetExceeded(f"research source limit exhausted: {l.sources} > {self.max_sources}")
+            raise BudgetExceeded(
+                f"research source limit exhausted: {l.sources} > {self.max_sources}"
+            )
         if l.cost_usd > self.max_cost:
-            raise BudgetExceeded(f"research budget exhausted: ${l.cost_usd:.4f} > ${self.max_cost:.4f}")
+            raise BudgetExceeded(
+                f"research budget exhausted: ${l.cost_usd:.4f} > ${self.max_cost:.4f}"
+            )
         if l.runtime_seconds > self.max_runtime_seconds:
             raise BudgetExceeded(
                 f"research time limit exhausted: {l.runtime_seconds:.1f}s > {self.max_runtime_seconds:.1f}s"

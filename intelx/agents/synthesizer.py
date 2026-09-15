@@ -212,13 +212,27 @@ class SynthesizerAgent(BaseAgent):
         else:
             # LLM Synthesis: Prioritize claims relevant to the research objective, then by confidence
             obj_words = set(re.findall(r"\w{3,}", objective.lower())) - {
-                "what", "when", "where", "which", "with", "from", "that", "this", "about"
+                "what",
+                "when",
+                "where",
+                "which",
+                "with",
+                "from",
+                "that",
+                "this",
+                "about",
             }
 
             def claim_priority(c: Any) -> tuple[int, float]:
-                txt = (getattr(c, "text", None) or (c.get("text") if isinstance(c, dict) else "") or "").lower()
+                txt = (
+                    getattr(c, "text", None) or (c.get("text") if isinstance(c, dict) else "") or ""
+                ).lower()
                 matches = sum(1 for w in obj_words if w in txt)
-                conf = getattr(c, "confidence", None) or (c.get("confidence") if isinstance(c, dict) else 0.8) or 0.8
+                conf = (
+                    getattr(c, "confidence", None)
+                    or (c.get("confidence") if isinstance(c, dict) else 0.8)
+                    or 0.8
+                )
                 try:
                     conf_val = float(conf)
                 except (ValueError, TypeError):
@@ -230,7 +244,9 @@ class SynthesizerAgent(BaseAgent):
             for c in sorted_claims:
                 cid = getattr(c, "id", None) or (c.get("id") if isinstance(c, dict) else None)
                 ctext = getattr(c, "text", None) or (c.get("text") if isinstance(c, dict) else None)
-                cconf = getattr(c, "confidence", 1.0) or (c.get("confidence", 1.0) if isinstance(c, dict) else 1.0)
+                cconf = getattr(c, "confidence", 1.0) or (
+                    c.get("confidence", 1.0) if isinstance(c, dict) else 1.0
+                )
                 formatted_claims.append({"id": cid, "text": ctext, "confidence": cconf})
 
             user_prompt = (
@@ -263,19 +279,25 @@ class SynthesizerAgent(BaseAgent):
             if not grounded_findings and claims:
                 for c in claims[:5]:
                     cid = getattr(c, "id", None) or (c.get("id") if isinstance(c, dict) else None)
-                    ctext = getattr(c, "text", None) or (c.get("text") if isinstance(c, dict) else None)
-                    cconf = getattr(c, "confidence", 0.85) or (c.get("confidence", 0.85) if isinstance(c, dict) else 0.85)
+                    ctext = getattr(c, "text", None) or (
+                        c.get("text") if isinstance(c, dict) else None
+                    )
+                    cconf = getattr(c, "confidence", 0.85) or (
+                        c.get("confidence", 0.85) if isinstance(c, dict) else 0.85
+                    )
                     try:
                         conf_val = float(cconf)
                     except (ValueError, TypeError):
                         conf_val = 0.85
                     if ctext:
-                        grounded_findings.append({
-                            "statement": ctext,
-                            "confidence": conf_val,
-                            "confidence_label": get_confidence_label(conf_val),
-                            "claim_ids": [cid] if cid else [],
-                        })
+                        grounded_findings.append(
+                            {
+                                "statement": ctext,
+                                "confidence": conf_val,
+                                "confidence_label": get_confidence_label(conf_val),
+                                "claim_ids": [cid] if cid else [],
+                            }
+                        )
 
             # Overall confidence: max finding confidence that passed groundedness
             if grounded_findings:
@@ -287,13 +309,20 @@ class SynthesizerAgent(BaseAgent):
         # Clean any draft thinking artifacts / preambles from executive answer
         clean_exec_answer = draft.executive_answer or ""
         import re as _re_s
+
         clean_exec_answer = _re_s.sub(r"(?s)^<think>.*?</think>", "", clean_exec_answer).strip()
         if "Thus output likely bullet points:" in clean_exec_answer:
-            clean_exec_answer = clean_exec_answer.split("Thus output likely bullet points:")[-1].strip()
+            clean_exec_answer = clean_exec_answer.split("Thus output likely bullet points:")[
+                -1
+            ].strip()
         elif "Let's craft" in clean_exec_answer:
             clean_exec_answer = clean_exec_answer.split("Let's craft")[-1].strip()
         elif clean_exec_answer.lower().startswith("the user wants a clear"):
-            parts = _re_s.split(r"\n(?=- |\* |\bFree Fire\b|\bThe official\b|\bReleased\b|\bOriginal\b)", clean_exec_answer, maxsplit=1)
+            parts = _re_s.split(
+                r"\n(?=- |\* |\bFree Fire\b|\bThe official\b|\bReleased\b|\bOriginal\b)",
+                clean_exec_answer,
+                maxsplit=1,
+            )
             if len(parts) > 1 and len(parts[1].strip()) > 20:
                 clean_exec_answer = parts[1].strip()
 

@@ -25,7 +25,12 @@ class ProviderResultStatus(str, Enum):
 class ProviderError(RuntimeError):
     """Raised when an external LLM or Search provider experiences fatal errors."""
 
-    def __init__(self, message: str, status: ProviderResultStatus = ProviderResultStatus.PROVIDER_UNAVAILABLE, details: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        status: ProviderResultStatus = ProviderResultStatus.PROVIDER_UNAVAILABLE,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status = status
         self.details = details or {}

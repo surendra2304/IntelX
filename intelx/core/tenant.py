@@ -43,7 +43,9 @@ class TenantBoundary:
     def require_scope(self, principal: Principal, scope: str) -> None:
         """Enforce that principal possesses the requested permission scope."""
         if scope not in principal.scopes and "*" not in principal.scopes:
-            raise TenantViolation(f"scope denied: required '{scope}', granted {set(principal.scopes)}")
+            raise TenantViolation(
+                f"scope denied: required '{scope}', granted {set(principal.scopes)}"
+            )
 
     def filter_query(self, query: Any, principal: Principal, tenant_column: Any) -> Any:
         """Apply tenant predicate filter to SQLAlchemy query unless wildcard principal."""

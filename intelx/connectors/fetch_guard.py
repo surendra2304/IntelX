@@ -6,13 +6,13 @@ import ipaddress
 import socket
 from urllib.parse import urlsplit
 
-from intelx.core.errors import PolicyViolationError, SSRFBlockedError
+from intelx.core.errors import SSRFBlockedError
 
 BLOCKED_EXPLICIT_IPS = {
     "169.254.169.254",  # AWS/GCP metadata endpoint
-    "169.254.170.2",    # AWS container credentials
+    "169.254.170.2",  # AWS container credentials
     "100.100.100.200",  # Alibaba metadata
-    "fd00:ec2::254",    # AWS IPv6 metadata
+    "fd00:ec2::254",  # AWS IPv6 metadata
 }
 
 
@@ -39,7 +39,9 @@ def resolve_and_validate(host: str, allow_private: bool = False) -> list[str]:
                 raise SSRFBlocked(f"resolved explicit metadata endpoint: {raw}")
 
             # Handle NAT64 / DNS64 Well-Known Prefix (RFC 6052: 64:ff9b::/96)
-            if isinstance(ip, ipaddress.IPv6Address) and ip in ipaddress.IPv6Network("64:ff9b::/96"):
+            if isinstance(ip, ipaddress.IPv6Address) and ip in ipaddress.IPv6Network(
+                "64:ff9b::/96"
+            ):
                 embedded = ipaddress.IPv4Address(ip.packed[-4:])
                 if (
                     embedded.is_private

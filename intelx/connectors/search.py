@@ -175,16 +175,64 @@ class GoogleNewsSearchConnector(BaseConnector):
             "Accept": "application/rss+xml, application/xml, text/xml, */*",
         }
         noise_words = {
-            "what", "are", "is", "the", "and", "for", "with", "from", "that", "this",
-            "about", "does", "into", "how", "why", "who", "when", "which",
-            "exist", "have", "been", "regarding", "concerning", "evaluating",
-            "official", "report", "study", "dataset", "methodology",
-            "measurements", "benchmark", "criticism", "limitations",
-            "contradictory", "evidence", "aspects", "subquestion",
-            "specifications", "definitions", "baseline", "benchmarks", "empirical",
-            "experimental", "operational", "disputed", "claims", "results", "measured",
-            "recent", "updates", "developments", "confirmed", "milestones", "occurred",
-            "investigation", "primary", "statements", "documentation",
+            "what",
+            "are",
+            "is",
+            "the",
+            "and",
+            "for",
+            "with",
+            "from",
+            "that",
+            "this",
+            "about",
+            "does",
+            "into",
+            "how",
+            "why",
+            "who",
+            "when",
+            "which",
+            "exist",
+            "have",
+            "been",
+            "regarding",
+            "concerning",
+            "evaluating",
+            "official",
+            "report",
+            "study",
+            "dataset",
+            "methodology",
+            "measurements",
+            "benchmark",
+            "criticism",
+            "limitations",
+            "contradictory",
+            "evidence",
+            "aspects",
+            "subquestion",
+            "specifications",
+            "definitions",
+            "baseline",
+            "benchmarks",
+            "empirical",
+            "experimental",
+            "operational",
+            "disputed",
+            "claims",
+            "results",
+            "measured",
+            "recent",
+            "updates",
+            "developments",
+            "confirmed",
+            "milestones",
+            "occurred",
+            "investigation",
+            "primary",
+            "statements",
+            "documentation",
         }
         raw_words = target.strip().replace("?", " ").replace(",", " ").replace('"', " ").split()
         substantive = [w for w in raw_words if w.lower() not in noise_words]
@@ -202,7 +250,9 @@ class GoogleNewsSearchConnector(BaseConnector):
         url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
 
         try:
-            async with httpx.AsyncClient(timeout=10.0, headers=headers, follow_redirects=True) as client:
+            async with httpx.AsyncClient(
+                timeout=10.0, headers=headers, follow_redirects=True
+            ) as client:
                 resp = await client.get(url)
                 if resp.status_code != 200:
                     logger.warning(f"Google News RSS returned HTTP {resp.status_code}")
@@ -216,7 +266,9 @@ class GoogleNewsSearchConnector(BaseConnector):
                 for item in items[:max_results]:
                     t_m = re_lib.search(r"<title[^>]*>(.*?)</title>", item, re_lib.DOTALL)
                     l_m = re_lib.search(r"<link>(.*?)</link>", item, re_lib.DOTALL)
-                    d_m = re_lib.search(r"<description[^>]*>(.*?)</description>", item, re_lib.DOTALL)
+                    d_m = re_lib.search(
+                        r"<description[^>]*>(.*?)</description>", item, re_lib.DOTALL
+                    )
 
                     title = clean_rss_text(t_m.group(1)) if t_m else ""
                     raw_link = l_m.group(1).strip() if l_m else ""
@@ -256,11 +308,34 @@ class WikipediaSearchConnector(BaseConnector):
 
         # Query candidates: raw target, then stripped of question words for title matching
         strip_words = {
-            "release", "date", "dates", "timeline", "schedule", "history", "announcement",
-            "announcements", "official", "news", "update", "updates", "latest", "verified",
-            "specifications", "what", "is", "the", "for", "and", "facts", "milestones",
+            "release",
+            "date",
+            "dates",
+            "timeline",
+            "schedule",
+            "history",
+            "announcement",
+            "announcements",
+            "official",
+            "news",
+            "update",
+            "updates",
+            "latest",
+            "verified",
+            "specifications",
+            "what",
+            "is",
+            "the",
+            "for",
+            "and",
+            "facts",
+            "milestones",
         }
-        words = [w for w in target.strip().replace("?", " ").replace(",", " ").split() if w.lower() not in strip_words]
+        words = [
+            w
+            for w in target.strip().replace("?", " ").replace(",", " ").split()
+            if w.lower() not in strip_words
+        ]
         query_candidates = [target.strip()]
         if words and " ".join(words[:4]).lower() != target.strip().lower():
             query_candidates.append(" ".join(words[:4]))

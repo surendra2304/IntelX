@@ -21,7 +21,9 @@ class CitationValidator:
 
     TOKEN_RE = re.compile(r"\[([SC]):([a-zA-Z0-9_-]+)\]")
 
-    def validate(self, report_markdown: str, known_sources: set[str], known_claims: set[str]) -> CitationCheck:
+    def validate(
+        self, report_markdown: str, known_sources: set[str], known_claims: set[str]
+    ) -> CitationCheck:
         """Scan report text and verify every citation resolves to a known source or claim."""
         matches = self.TOKEN_RE.findall(report_markdown)
         missing_s: list[str] = []
@@ -29,7 +31,9 @@ class CitationValidator:
 
         for kind, target_id in matches:
             if kind == "S":
-                if target_id not in known_sources and not any(target_id in s for s in known_sources):
+                if target_id not in known_sources and not any(
+                    target_id in s for s in known_sources
+                ):
                     missing_s.append(target_id)
             elif kind == "C":
                 if target_id not in known_claims and not any(target_id in c for c in known_claims):
@@ -42,13 +46,24 @@ class CitationValidator:
             missing_claims=tuple(sorted(set(missing_c))),
         )
 
-    def repair_or_strip(self, report_markdown: str, known_sources: set[str], known_claims: set[str]) -> str:
+    def repair_or_strip(
+        self, report_markdown: str, known_sources: set[str], known_claims: set[str]
+    ) -> str:
         """Perform one bounded repair stripping dangling citation references."""
+
         def _replace_token(m: re.Match) -> str:
             kind, target_id = m.group(1), m.group(2)
-            if kind == "S" and target_id not in known_sources and not any(target_id in s for s in known_sources):
+            if (
+                kind == "S"
+                and target_id not in known_sources
+                and not any(target_id in s for s in known_sources)
+            ):
                 return ""
-            if kind == "C" and target_id not in known_claims and not any(target_id in c for c in known_claims):
+            if (
+                kind == "C"
+                and target_id not in known_claims
+                and not any(target_id in c for c in known_claims)
+            ):
                 return ""
             return m.group(0)
 

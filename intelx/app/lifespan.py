@@ -61,6 +61,7 @@ class NewsIngesterHook:
 
     def __init__(self) -> None:
         from intelx.ingestion.news_ingester import NewsIngester
+
         self._ingester = NewsIngester(interval_seconds=300)
 
     async def start(self) -> None:
@@ -75,6 +76,7 @@ class AutonomousResearchHook:
 
     def __init__(self) -> None:
         from intelx.orchestration.autonomous_researcher import AutonomousResearcher
+
         self._researcher = AutonomousResearcher(interval_seconds=900)
 
     async def start(self) -> None:
@@ -107,28 +109,44 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         if engine.dialect.name == "sqlite":
-            await conn.execute(text("CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(id UNINDEXED, text);"))
-            await conn.execute(text("CREATE VIRTUAL TABLE IF NOT EXISTS claims_fts USING fts5(id UNINDEXED, text, quote);"))
-            await conn.execute(text(
-                "CREATE TRIGGER IF NOT EXISTS chunks_after_insert AFTER INSERT ON chunks BEGIN "
-                "INSERT INTO chunks_fts(id, text) VALUES (new.id, new.text); "
-                "END;"
-            ))
-            await conn.execute(text(
-                "CREATE TRIGGER IF NOT EXISTS chunks_after_delete AFTER DELETE ON chunks BEGIN "
-                "DELETE FROM chunks_fts WHERE id = old.id; "
-                "END;"
-            ))
-            await conn.execute(text(
-                "CREATE TRIGGER IF NOT EXISTS claims_after_insert AFTER INSERT ON claims BEGIN "
-                "INSERT INTO claims_fts(id, text, quote) VALUES (new.id, new.text, new.quote); "
-                "END;"
-            ))
-            await conn.execute(text(
-                "CREATE TRIGGER IF NOT EXISTS claims_after_delete AFTER DELETE ON claims BEGIN "
-                "DELETE FROM claims_fts WHERE id = old.id; "
-                "END;"
-            ))
+            await conn.execute(
+                text(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(id UNINDEXED, text);"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS claims_fts USING fts5(id UNINDEXED, text, quote);"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE TRIGGER IF NOT EXISTS chunks_after_insert AFTER INSERT ON chunks BEGIN "
+                    "INSERT INTO chunks_fts(id, text) VALUES (new.id, new.text); "
+                    "END;"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE TRIGGER IF NOT EXISTS chunks_after_delete AFTER DELETE ON chunks BEGIN "
+                    "DELETE FROM chunks_fts WHERE id = old.id; "
+                    "END;"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE TRIGGER IF NOT EXISTS claims_after_insert AFTER INSERT ON claims BEGIN "
+                    "INSERT INTO claims_fts(id, text, quote) VALUES (new.id, new.text, new.quote); "
+                    "END;"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE TRIGGER IF NOT EXISTS claims_after_delete AFTER DELETE ON claims BEGIN "
+                    "DELETE FROM claims_fts WHERE id = old.id; "
+                    "END;"
+                )
+            )
     logger.info("Database schemas and FTS5 indexes initialized.")
 
     # 3.5 Seed API keys from settings

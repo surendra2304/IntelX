@@ -35,14 +35,34 @@ class StratexConnector:
 
     # Keywords that raise priority for trade signal detection (informational only)
     TRADE_KEYWORDS = {
-        "bullish", "bearish", "surge", "plummet", "buy", "sell",
-        "breakout", "rally", "catalyst", "earnings", "revenue",
-        "profit", "loss", "market cap", "ipo", "merger", "acquisition",
-        "bankruptcy", "default", "downgrade", "upgrade", "valuation",
+        "bullish",
+        "bearish",
+        "surge",
+        "plummet",
+        "buy",
+        "sell",
+        "breakout",
+        "rally",
+        "catalyst",
+        "earnings",
+        "revenue",
+        "profit",
+        "loss",
+        "market cap",
+        "ipo",
+        "merger",
+        "acquisition",
+        "bankruptcy",
+        "default",
+        "downgrade",
+        "upgrade",
+        "valuation",
     }
 
     @classmethod
-    def detect_trade_signal(cls, finding_text: str, domain: str = "general") -> tuple[bool, str, list[str]]:
+    def detect_trade_signal(
+        cls, finding_text: str, domain: str = "general"
+    ) -> tuple[bool, str, list[str]]:
         """Identify if a finding contains actionable trade signals.
 
         Unlike the old implementation, we no longer gate on domain — any topic

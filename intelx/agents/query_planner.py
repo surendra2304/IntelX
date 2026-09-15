@@ -21,9 +21,31 @@ class QueryPortfolioPlanner:
     """Constructs multi-angle query portfolios covering direct, primary, counter-evidence, and temporal dimensions."""
 
     STOP: set[str] = {
-        "what", "are", "is", "the", "and", "for", "with", "from", "that", "this",
-        "about", "does", "into", "how", "why", "who", "when", "where", "which",
-        "exist", "have", "been", "regarding", "concerning", "evaluating",
+        "what",
+        "are",
+        "is",
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "that",
+        "this",
+        "about",
+        "does",
+        "into",
+        "how",
+        "why",
+        "who",
+        "when",
+        "where",
+        "which",
+        "exist",
+        "have",
+        "been",
+        "regarding",
+        "concerning",
+        "evaluating",
     }
 
     def keywords(self, question: str) -> list[str]:
@@ -44,7 +66,13 @@ class QueryPortfolioPlanner:
             ("historical", f"{base} background history", 60),
         ]
         return [
-            Query(text=t, plan_item_id=plan_item_id, purpose=purpose, priority=priority, source_angle=purpose)
+            Query(
+                text=t,
+                plan_item_id=plan_item_id,
+                purpose=purpose,
+                priority=priority,
+                source_angle=purpose,
+            )
             for purpose, t, priority in variants
         ]
 

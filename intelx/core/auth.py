@@ -102,7 +102,13 @@ def validate_production_secret(secret: str) -> bool:
     """Validate that production secrets satisfy length and complexity bounds."""
     if len(secret) < 16:
         return False
-    if secret.lower() in ("secret", "password", "intelx-super-secret-key-change-in-production", "change-me", "dev-admin-key"):
+    if secret.lower() in (
+        "secret",
+        "password",
+        "intelx-super-secret-key-change-in-production",
+        "change-me",
+        "dev-admin-key",
+    ):
         return False
     return True
 
@@ -155,7 +161,11 @@ async def seed_api_keys_from_settings(session: AsyncSession, settings: Settings)
                 keys.append(default_k)
     elif settings.is_production():
         # Sanitize keys: strip any dev demo keys that might have slipped in
-        keys = [k for k in keys if k not in ("dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin")]
+        keys = [
+            k
+            for k in keys
+            if k not in ("dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin")
+        ]
 
     if settings.FRIDAY_API_KEY and settings.FRIDAY_API_KEY not in keys:
         keys.append(settings.FRIDAY_API_KEY)
@@ -253,7 +263,11 @@ async def get_current_principal(
     settings = get_settings()
     tenant_id = getattr(api_key, "tenant_id", None) or "default"
     role_str = api_key.role.value if hasattr(api_key.role, "value") else str(api_key.role)
-    scopes = frozenset({"*"}) if role_str == "admin" else frozenset({"research:run", "research:view", "source:fetch"})
+    scopes = (
+        frozenset({"*"})
+        if role_str == "admin"
+        else frozenset({"research:run", "research:view", "source:fetch"})
+    )
 
     return Principal(
         tenant_id=tenant_id,

@@ -41,6 +41,7 @@ async def run_evaluation_suite(
 
     # Enforce Mock Mode for deterministic golden evaluation benchmarks
     from intelx.core.settings import get_settings
+
     settings = get_settings()
     settings.MOCK_MODE = True
     settings.LLM_PROVIDER = "mock"

@@ -193,9 +193,7 @@ async def test_full_web_lifecycle_and_citation_drawer(web_client):
     assert claim_data["id"] == claim_id
     assert "thermal stability" in claim_data["text"]
 
-    res_source_cite = await web_client.get(
-        f"/api/citation/S/{source_id[:8]}"
-    )
+    res_source_cite = await web_client.get(f"/api/citation/S/{source_id[:8]}")
     assert res_source_cite.status_code == 200
     source_data = res_source_cite.json()
     assert source_data["id"] == source_id

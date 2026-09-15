@@ -42,4 +42,6 @@ class SentinelSecurityClient:
         tenant_id: str = "default",
     ) -> None:
         """Forward detected SSRF, prompt injection, or policy denial events to Sentinel."""
-        logger.warning(f"[Sentinel Incident Report] [{incident_type}] for tenant '{tenant_id}': {details}")
+        logger.warning(
+            f"[Sentinel Incident Report] [{incident_type}] for tenant '{tenant_id}': {details}"
+        )

@@ -215,7 +215,11 @@ async def fetch_research_reports_for_sector(
         n_c = sum(1 for t in findings_texts if any(k in t.lower() for k in neg_kw))
         total_s = p_c + n_c
         sentiment = round((p_c - n_c) / total_s, 2) if total_s > 0 else 0.15
-        vol_impact = 1.35 if any("volatil" in t.lower() or "drawdown" in t.lower() for t in findings_texts) else 1.05
+        vol_impact = (
+            1.35
+            if any("volatil" in t.lower() or "drawdown" in t.lower() for t in findings_texts)
+            else 1.05
+        )
 
         summary_text = (
             findings_texts[0]

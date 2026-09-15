@@ -22,10 +22,12 @@ root_api_router.include_router(stratex_root_router, prefix="/v1")
 async def execute_task(body: dict):
     """Universal Task Protocol endpoint for IntelX."""
     import time
+
     from sqlalchemy import select
+
     from intelx.agents.citations import export_spoken_citations, export_text_citations
     from intelx.core.enums import RunOutcome, RunStatus
-    from intelx.db.models import Claim, Document, Finding, ResearchRun, Source
+    from intelx.db.models import Claim, Finding, ResearchRun, Source
     from intelx.db.session import get_sessionmaker
 
     t0 = time.time()
@@ -74,7 +76,12 @@ async def execute_task(body: dict):
         stmt_src = select(Source).order_by(Source.retrieved_at.desc()).limit(10)
         sources = list((await session.execute(stmt_src)).scalars().all())
 
-        stmt_cl = select(Claim).where(Claim.status != "DISPUTED").order_by(Claim.created_at.desc()).limit(10)
+        stmt_cl = (
+            select(Claim)
+            .where(Claim.status != "DISPUTED")
+            .order_by(Claim.created_at.desc())
+            .limit(10)
+        )
         claims = list((await session.execute(stmt_cl)).scalars().all())
 
         stmt_f = select(Finding).order_by(Finding.created_at.desc()).limit(5)
@@ -83,39 +90,45 @@ async def execute_task(body: dict):
         # Construct findings items for citation generators
         findings_items = []
         for f in findings:
-            findings_items.append({
-                "statement": f.conclusion,
-                "confidence": f.confidence,
-                "confidence_score": f.confidence,
-                "status": "verified" if f.confidence >= 0.70 else "inference",
-                "claim_ids": f.claim_ids_json or [],
-            })
+            findings_items.append(
+                {
+                    "statement": f.conclusion,
+                    "confidence": f.confidence,
+                    "confidence_score": f.confidence,
+                    "status": "verified" if f.confidence >= 0.70 else "inference",
+                    "claim_ids": f.claim_ids_json or [],
+                }
+            )
 
         if not findings_items and claims:
             for cl in claims[:5]:
-                findings_items.append({
-                    "statement": cl.text,
-                    "confidence": cl.confidence,
-                    "confidence_score": cl.confidence,
-                    "status": "verified" if cl.confidence >= 0.75 else "inference",
-                    "claim_ids": [cl.id],
-                })
+                findings_items.append(
+                    {
+                        "statement": cl.text,
+                        "confidence": cl.confidence,
+                        "confidence_score": cl.confidence,
+                        "status": "verified" if cl.confidence >= 0.75 else "inference",
+                        "claim_ids": [cl.id],
+                    }
+                )
 
         provenance_chain = []
         for cl in claims[:10]:
             matching_s = next((s for s in sources if s.id == cl.source_id), None)
-            provenance_chain.append({
-                "claim_id": cl.id,
-                "claim_text": cl.text,
-                "quote": cl.quote,
-                "span_start": cl.span_start,
-                "span_end": cl.span_end,
-                "document_id": cl.document_id,
-                "source_id": cl.source_id,
-                "source_title": matching_s.title if matching_s else "Source Document",
-                "source_url": matching_s.location if matching_s else "internal://source",
-                "publisher": matching_s.publisher if matching_s else None,
-            })
+            provenance_chain.append(
+                {
+                    "claim_id": cl.id,
+                    "claim_text": cl.text,
+                    "quote": cl.quote,
+                    "span_start": cl.span_start,
+                    "span_end": cl.span_end,
+                    "document_id": cl.document_id,
+                    "source_id": cl.source_id,
+                    "source_title": matching_s.title if matching_s else "Source Document",
+                    "source_url": matching_s.location if matching_s else "internal://source",
+                    "publisher": matching_s.publisher if matching_s else None,
+                }
+            )
 
         sources_data = [
             {

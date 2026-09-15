@@ -58,7 +58,9 @@ async def auto_seed_demonstrations_if_empty(session: AsyncSession) -> bool:
         logger.debug("Canonical demonstration runs already exist; skipping demonstration seed.")
         return False
 
-    logger.info("Canonical demonstration runs missing. Bootstrapping realistic production demonstrations...")
+    logger.info(
+        "Canonical demonstration runs missing. Bootstrapping realistic production demonstrations..."
+    )
 
     artifacts_root = Path("./data/artifacts").resolve()
     artifacts_root.mkdir(parents=True, exist_ok=True)
@@ -115,7 +117,9 @@ async def auto_seed_demonstrations_if_empty(session: AsyncSession) -> bool:
         title="Thermal runaway mitigation and abuse tolerance of commercial-scale Na-ion pouch cells",
         retrieved_at=base_time + timedelta(minutes=2, seconds=45),
         content_type="text/html",
-        fingerprint=_compute_sha256("https://www.sciencedirect.com/science/article/pii/S037877532500112X"),
+        fingerprint=_compute_sha256(
+            "https://www.sciencedirect.com/science/article/pii/S037877532500112X"
+        ),
         trust_tier=TrustTier.TRUSTED,
         robots_ok=True,
         injection_risk=False,
@@ -176,9 +180,30 @@ async def auto_seed_demonstrations_if_empty(session: AsyncSession) -> bool:
     session.add_all([d1, d2, d3])
     await session.flush()
 
-    c1_1 = Chunk(id="chk-na-01", document_id=d1.id, idx=0, start_char=0, end_char=len(doc1_text), text=doc1_text)
-    c1_2 = Chunk(id="chk-na-02", document_id=d2.id, idx=0, start_char=0, end_char=len(doc2_text), text=doc2_text)
-    c1_3 = Chunk(id="chk-na-03", document_id=d3.id, idx=0, start_char=0, end_char=len(doc3_text), text=doc3_text)
+    c1_1 = Chunk(
+        id="chk-na-01",
+        document_id=d1.id,
+        idx=0,
+        start_char=0,
+        end_char=len(doc1_text),
+        text=doc1_text,
+    )
+    c1_2 = Chunk(
+        id="chk-na-02",
+        document_id=d2.id,
+        idx=0,
+        start_char=0,
+        end_char=len(doc2_text),
+        text=doc2_text,
+    )
+    c1_3 = Chunk(
+        id="chk-na-03",
+        document_id=d3.id,
+        idx=0,
+        start_char=0,
+        end_char=len(doc3_text),
+        text=doc3_text,
+    )
 
     session.add_all([c1_1, c1_2, c1_3])
     await session.flush()
@@ -318,7 +343,9 @@ async def auto_seed_demonstrations_if_empty(session: AsyncSession) -> bool:
         conclusion="Layered oxide Na-ion cathodes exhibit commercial cycle life (>2,000 cycles at 1C) with acceptable 165 mAh/g specific capacity.",
         confidence=0.96,
         claim_ids_json=[clm1_1.id],
-        gaps_json=["Long-term calendar aging above 45°C requires further electrolyte optimization."],
+        gaps_json=[
+            "Long-term calendar aging above 45°C requires further electrolyte optimization."
+        ],
         contradictions_json=[],
         unverified_json=[],
     )
@@ -392,20 +419,44 @@ Synthesized across 4 peer-reviewed and industrial telemetry sources [S:{s1_1.id[
     evidence_pack1 = {
         "run_id": run1_id,
         "claims": [
-            {"id": clm1_1.id, "text": clm1_1.text, "quote": clm1_1.quote, "source_id": s1_1.id, "confidence": clm1_1.confidence},
-            {"id": clm1_2.id, "text": clm1_2.text, "quote": clm1_2.quote, "source_id": s1_2.id, "confidence": clm1_2.confidence},
-            {"id": clm1_3.id, "text": clm1_3.text, "quote": clm1_3.quote, "source_id": s1_3.id, "confidence": clm1_3.confidence},
-            {"id": clm1_4.id, "text": clm1_4.text, "quote": clm1_4.quote, "source_id": s1_3.id, "confidence": clm1_4.confidence},
-        ]
+            {
+                "id": clm1_1.id,
+                "text": clm1_1.text,
+                "quote": clm1_1.quote,
+                "source_id": s1_1.id,
+                "confidence": clm1_1.confidence,
+            },
+            {
+                "id": clm1_2.id,
+                "text": clm1_2.text,
+                "quote": clm1_2.quote,
+                "source_id": s1_2.id,
+                "confidence": clm1_2.confidence,
+            },
+            {
+                "id": clm1_3.id,
+                "text": clm1_3.text,
+                "quote": clm1_3.quote,
+                "source_id": s1_3.id,
+                "confidence": clm1_3.confidence,
+            },
+            {
+                "id": clm1_4.id,
+                "text": clm1_4.text,
+                "quote": clm1_4.quote,
+                "source_id": s1_3.id,
+                "confidence": clm1_4.confidence,
+            },
+        ],
     }
     (dir1 / "evidence_pack.json").write_text(json.dumps(evidence_pack1, indent=2), encoding="utf-8")
 
     sources_csv1 = (
         "id,domain,publisher,title,url,trust_tier\n"
-        f"{s1_1.id},{s1_1.domain},{s1_1.publisher},\"{s1_1.title}\",{s1_1.location},{s1_1.trust_tier.value}\n"
-        f"{s1_2.id},{s1_2.domain},{s1_2.publisher},\"{s1_2.title}\",{s1_2.location},{s1_2.trust_tier.value}\n"
-        f"{s1_3.id},{s1_3.domain},{s1_3.publisher},\"{s1_3.title}\",{s1_3.location},{s1_3.trust_tier.value}\n"
-        f"{s1_4.id},{s1_4.domain},{s1_4.publisher},\"{s1_4.title}\",{s1_4.location},{s1_4.trust_tier.value}\n"
+        f'{s1_1.id},{s1_1.domain},{s1_1.publisher},"{s1_1.title}",{s1_1.location},{s1_1.trust_tier.value}\n'
+        f'{s1_2.id},{s1_2.domain},{s1_2.publisher},"{s1_2.title}",{s1_2.location},{s1_2.trust_tier.value}\n'
+        f'{s1_3.id},{s1_3.domain},{s1_3.publisher},"{s1_3.title}",{s1_3.location},{s1_3.trust_tier.value}\n'
+        f'{s1_4.id},{s1_4.domain},{s1_4.publisher},"{s1_4.title}",{s1_4.location},{s1_4.trust_tier.value}\n'
     )
     (dir1 / "sources.csv").write_text(sources_csv1, encoding="utf-8")
 
@@ -444,13 +495,48 @@ Synthesized across 4 peer-reviewed and industrial telemetry sources [S:{s1_1.id[
     session.add_all([art1_md, art1_json, art1_ev, art1_csv])
 
     evs1 = [
-        Event(run_id=run1_id, type="run.started", payload_json={"objective": run1.objective}, created_at=base_time),
-        Event(run_id=run1_id, type="planner.dag_generated", payload_json={"stages": 7, "subquestions": 3}, created_at=base_time + timedelta(seconds=30)),
-        Event(run_id=run1_id, type="scout.sources_discovered", payload_json={"candidate_count": 4}, created_at=base_time + timedelta(minutes=1, seconds=30)),
-        Event(run_id=run1_id, type="extractor.claims_extracted", payload_json={"extracted_claims": 4}, created_at=base_time + timedelta(minutes=3)),
-        Event(run_id=run1_id, type="verifier.evidence_grounded", payload_json={"grounded_spans": 4, "avg_confidence": 0.94}, created_at=base_time + timedelta(minutes=4)),
-        Event(run_id=run1_id, type="synthesizer.artifacts_generated", payload_json={"artifacts": 4}, created_at=base_time + timedelta(minutes=5, seconds=30)),
-        Event(run_id=run1_id, type="run.completed", payload_json={"outcome": "ANSWERED", "duration_s": 240}, created_at=base_time + timedelta(minutes=6)),
+        Event(
+            run_id=run1_id,
+            type="run.started",
+            payload_json={"objective": run1.objective},
+            created_at=base_time,
+        ),
+        Event(
+            run_id=run1_id,
+            type="planner.dag_generated",
+            payload_json={"stages": 7, "subquestions": 3},
+            created_at=base_time + timedelta(seconds=30),
+        ),
+        Event(
+            run_id=run1_id,
+            type="scout.sources_discovered",
+            payload_json={"candidate_count": 4},
+            created_at=base_time + timedelta(minutes=1, seconds=30),
+        ),
+        Event(
+            run_id=run1_id,
+            type="extractor.claims_extracted",
+            payload_json={"extracted_claims": 4},
+            created_at=base_time + timedelta(minutes=3),
+        ),
+        Event(
+            run_id=run1_id,
+            type="verifier.evidence_grounded",
+            payload_json={"grounded_spans": 4, "avg_confidence": 0.94},
+            created_at=base_time + timedelta(minutes=4),
+        ),
+        Event(
+            run_id=run1_id,
+            type="synthesizer.artifacts_generated",
+            payload_json={"artifacts": 4},
+            created_at=base_time + timedelta(minutes=5, seconds=30),
+        ),
+        Event(
+            run_id=run1_id,
+            type="run.completed",
+            payload_json={"outcome": "ANSWERED", "duration_s": 240},
+            created_at=base_time + timedelta(minutes=6),
+        ),
     ]
     session.add_all(evs1)
     await session.flush()
@@ -462,7 +548,11 @@ Synthesized across 4 peer-reviewed and industrial telemetry sources [S:{s1_1.id[
     run2 = ResearchRun(
         id=run2_id,
         objective="Analyze composite sulfide-halide solid electrolytes for lithium metal dendrite suppression",
-        scope_json={"depth": "standard", "max_sources": 8, "budget": {"max_usd": 3.00, "max_minutes": 10}},
+        scope_json={
+            "depth": "standard",
+            "max_sources": 8,
+            "budget": {"max_usd": 3.00, "max_minutes": 10},
+        },
         status=RunStatus.COMPLETED,
         outcome=RunOutcome.ANSWERED,
         input_tokens=5600,
@@ -524,8 +614,22 @@ Synthesized across 4 peer-reviewed and industrial telemetry sources [S:{s1_1.id[
     session.add_all([d2_1, d2_2])
     await session.flush()
 
-    chk2_1 = Chunk(id="chk-ss-01", document_id=d2_1.id, idx=0, start_char=0, end_char=len(doc2_1_text), text=doc2_1_text)
-    chk2_2 = Chunk(id="chk-ss-02", document_id=d2_2.id, idx=0, start_char=0, end_char=len(doc2_2_text), text=doc2_2_text)
+    chk2_1 = Chunk(
+        id="chk-ss-01",
+        document_id=d2_1.id,
+        idx=0,
+        start_char=0,
+        end_char=len(doc2_1_text),
+        text=doc2_1_text,
+    )
+    chk2_2 = Chunk(
+        id="chk-ss-02",
+        document_id=d2_2.id,
+        idx=0,
+        start_char=0,
+        end_char=len(doc2_2_text),
+        text=doc2_2_text,
+    )
     session.add_all([chk2_1, chk2_2])
     await session.flush()
 
@@ -600,7 +704,9 @@ Synthesized across 4 peer-reviewed and industrial telemetry sources [S:{s1_1.id[
         conclusion="Dual halide-doped argyrodites overcome the conductivity-stability trade-off, surpassing 10 mS/cm while suppressing lithium filament growth under high current loads.",
         confidence=0.95,
         claim_ids_json=[clm2_1.id, clm2_2.id],
-        gaps_json=["Mechanical stress under continuous unconstrained volume expansion remains an engineering barrier."],
+        gaps_json=[
+            "Mechanical stress under continuous unconstrained volume expansion remains an engineering barrier."
+        ],
         contradictions_json=[],
         unverified_json=[],
     )
@@ -618,16 +724,54 @@ Halide-substituted argyrodite solid electrolytes (specifically Li6PS5Cl0.5Br0.5)
 - Critical current density for dendrite propagation is elevated from 0.8 mA/cm2 to 4.2 mA/cm2 via interface passivation [S:{s2_2.id[:8]}].
 """
     (dir2 / "report.md").write_text(report_md_content2, encoding="utf-8")
-    (dir2 / "report.json").write_text(json.dumps({"run_id": run2_id, "status": "COMPLETED"}, indent=2), encoding="utf-8")
-    (dir2 / "evidence_pack.json").write_text(json.dumps({"run_id": run2_id, "claims": [{"id": clm2_1.id}, {"id": clm2_2.id}]}, indent=2), encoding="utf-8")
-    (dir2 / "sources.csv").write_text(f"id,domain,title\n{s2_1.id},{s2_1.domain},\"{s2_1.title}\"\n{s2_2.id},{s2_2.domain},\"{s2_2.title}\"\n", encoding="utf-8")
+    (dir2 / "report.json").write_text(
+        json.dumps({"run_id": run2_id, "status": "COMPLETED"}, indent=2), encoding="utf-8"
+    )
+    (dir2 / "evidence_pack.json").write_text(
+        json.dumps({"run_id": run2_id, "claims": [{"id": clm2_1.id}, {"id": clm2_2.id}]}, indent=2),
+        encoding="utf-8",
+    )
+    (dir2 / "sources.csv").write_text(
+        f'id,domain,title\n{s2_1.id},{s2_1.domain},"{s2_1.title}"\n{s2_2.id},{s2_2.domain},"{s2_2.title}"\n',
+        encoding="utf-8",
+    )
 
-    session.add_all([
-        Artifact(id="art-ss-01-md", run_id=run2_id, type=ArtifactType.REPORT, format=ArtifactFormat.MD, path=str(dir2 / "report.md"), sha256=_compute_sha256(report_md_content2)),
-        Artifact(id="art-ss-01-json", run_id=run2_id, type=ArtifactType.REPORT, format=ArtifactFormat.JSON, path=str(dir2 / "report.json"), sha256=_compute_sha256(dir2 / "report.json")),
-        Artifact(id="art-ss-01-ev", run_id=run2_id, type=ArtifactType.EVIDENCE_PACK, format=ArtifactFormat.JSON, path=str(dir2 / "evidence_pack.json"), sha256=_compute_sha256(dir2 / "evidence_pack.json")),
-        Artifact(id="art-ss-01-csv", run_id=run2_id, type=ArtifactType.SOURCE_LIST, format=ArtifactFormat.CSV, path=str(dir2 / "sources.csv"), sha256=_compute_sha256(dir2 / "sources.csv")),
-    ])
+    session.add_all(
+        [
+            Artifact(
+                id="art-ss-01-md",
+                run_id=run2_id,
+                type=ArtifactType.REPORT,
+                format=ArtifactFormat.MD,
+                path=str(dir2 / "report.md"),
+                sha256=_compute_sha256(report_md_content2),
+            ),
+            Artifact(
+                id="art-ss-01-json",
+                run_id=run2_id,
+                type=ArtifactType.REPORT,
+                format=ArtifactFormat.JSON,
+                path=str(dir2 / "report.json"),
+                sha256=_compute_sha256(dir2 / "report.json"),
+            ),
+            Artifact(
+                id="art-ss-01-ev",
+                run_id=run2_id,
+                type=ArtifactType.EVIDENCE_PACK,
+                format=ArtifactFormat.JSON,
+                path=str(dir2 / "evidence_pack.json"),
+                sha256=_compute_sha256(dir2 / "evidence_pack.json"),
+            ),
+            Artifact(
+                id="art-ss-01-csv",
+                run_id=run2_id,
+                type=ArtifactType.SOURCE_LIST,
+                format=ArtifactFormat.CSV,
+                path=str(dir2 / "sources.csv"),
+                sha256=_compute_sha256(dir2 / "sources.csv"),
+            ),
+        ]
+    )
     await session.flush()
 
     # =========================================================================
@@ -637,7 +781,11 @@ Halide-substituted argyrodite solid electrolytes (specifically Li6PS5Cl0.5Br0.5)
     run3 = ResearchRun(
         id=run3_id,
         objective="Evaluate fault-tolerant consensus and verification architectures in enterprise autonomous LLM agent pipelines",
-        scope_json={"depth": "standard", "max_sources": 6, "budget": {"max_usd": 2.00, "max_minutes": 8}},
+        scope_json={
+            "depth": "standard",
+            "max_sources": 6,
+            "budget": {"max_usd": 2.00, "max_minutes": 8},
+        },
         status=RunStatus.COMPLETED,
         outcome=RunOutcome.ANSWERED,
         input_tokens=4900,
@@ -678,7 +826,14 @@ Halide-substituted argyrodite solid electrolytes (specifically Li6PS5Cl0.5Br0.5)
     session.add(d3_1)
     await session.flush()
 
-    chk3_1 = Chunk(id="chk-ag-01", document_id=d3_1.id, idx=0, start_char=0, end_char=len(doc3_text), text=doc3_text)
+    chk3_1 = Chunk(
+        id="chk-ag-01",
+        document_id=d3_1.id,
+        idx=0,
+        start_char=0,
+        end_char=len(doc3_text),
+        text=doc3_text,
+    )
     session.add(chk3_1)
     await session.flush()
 
@@ -741,16 +896,52 @@ Enterprise autonomous agent systems require multi-agent debate and cryptographic
 2. **Deterministic Offsets**: Byte-level offsets ensure tamper-evident evidence packs.
 """
     (dir3 / "report.md").write_text(report_md_content3, encoding="utf-8")
-    (dir3 / "report.json").write_text(json.dumps({"run_id": run3_id, "status": "COMPLETED"}, indent=2), encoding="utf-8")
-    (dir3 / "evidence_pack.json").write_text(json.dumps({"run_id": run3_id, "claims": [{"id": clm3_1.id}]}, indent=2), encoding="utf-8")
-    (dir3 / "sources.csv").write_text(f"id,domain,title\n{s3_1.id},{s3_1.domain},\"{s3_1.title}\"\n", encoding="utf-8")
+    (dir3 / "report.json").write_text(
+        json.dumps({"run_id": run3_id, "status": "COMPLETED"}, indent=2), encoding="utf-8"
+    )
+    (dir3 / "evidence_pack.json").write_text(
+        json.dumps({"run_id": run3_id, "claims": [{"id": clm3_1.id}]}, indent=2), encoding="utf-8"
+    )
+    (dir3 / "sources.csv").write_text(
+        f'id,domain,title\n{s3_1.id},{s3_1.domain},"{s3_1.title}"\n', encoding="utf-8"
+    )
 
-    session.add_all([
-        Artifact(id="art-ag-01-md", run_id=run3_id, type=ArtifactType.REPORT, format=ArtifactFormat.MD, path=str(dir3 / "report.md"), sha256=_compute_sha256(report_md_content3)),
-        Artifact(id="art-ag-01-json", run_id=run3_id, type=ArtifactType.REPORT, format=ArtifactFormat.JSON, path=str(dir3 / "report.json"), sha256=_compute_sha256(dir3 / "report.json")),
-        Artifact(id="art-ag-01-ev", run_id=run3_id, type=ArtifactType.EVIDENCE_PACK, format=ArtifactFormat.JSON, path=str(dir3 / "evidence_pack.json"), sha256=_compute_sha256(dir3 / "evidence_pack.json")),
-        Artifact(id="art-ag-01-csv", run_id=run3_id, type=ArtifactType.SOURCE_LIST, format=ArtifactFormat.CSV, path=str(dir3 / "sources.csv"), sha256=_compute_sha256(dir3 / "sources.csv")),
-    ])
+    session.add_all(
+        [
+            Artifact(
+                id="art-ag-01-md",
+                run_id=run3_id,
+                type=ArtifactType.REPORT,
+                format=ArtifactFormat.MD,
+                path=str(dir3 / "report.md"),
+                sha256=_compute_sha256(report_md_content3),
+            ),
+            Artifact(
+                id="art-ag-01-json",
+                run_id=run3_id,
+                type=ArtifactType.REPORT,
+                format=ArtifactFormat.JSON,
+                path=str(dir3 / "report.json"),
+                sha256=_compute_sha256(dir3 / "report.json"),
+            ),
+            Artifact(
+                id="art-ag-01-ev",
+                run_id=run3_id,
+                type=ArtifactType.EVIDENCE_PACK,
+                format=ArtifactFormat.JSON,
+                path=str(dir3 / "evidence_pack.json"),
+                sha256=_compute_sha256(dir3 / "evidence_pack.json"),
+            ),
+            Artifact(
+                id="art-ag-01-csv",
+                run_id=run3_id,
+                type=ArtifactType.SOURCE_LIST,
+                format=ArtifactFormat.CSV,
+                path=str(dir3 / "sources.csv"),
+                sha256=_compute_sha256(dir3 / "sources.csv"),
+            ),
+        ]
+    )
     await session.flush()
 
     # =========================================================================
@@ -760,7 +951,11 @@ Enterprise autonomous agent systems require multi-agent debate and cryptographic
     run4 = ResearchRun(
         id=run4_id,
         objective="Investigate high-temperature superconducting quantum interconnect protocols",
-        scope_json={"depth": "standard", "max_sources": 5, "budget": {"max_usd": 2.00, "max_minutes": 5}},
+        scope_json={
+            "depth": "standard",
+            "max_sources": 5,
+            "budget": {"max_usd": 2.00, "max_minutes": 5},
+        },
         status=RunStatus.REVIEW_REQUIRED,
         outcome=None,
         input_tokens=2200,
@@ -784,7 +979,9 @@ Enterprise autonomous agent systems require multi-agent debate and cryptographic
         title="Thermal decoherence bounds in microwave quantum state transfer channels",
         retrieved_at=base_time + timedelta(hours=3, minutes=11),
         content_type="text/html",
-        fingerprint=_compute_sha256("https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.132.080601"),
+        fingerprint=_compute_sha256(
+            "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.132.080601"
+        ),
         trust_tier=TrustTier.TRUSTED,
         robots_ok=True,
         injection_risk=False,
@@ -799,7 +996,9 @@ Enterprise autonomous agent systems require multi-agent debate and cryptographic
         title="Room temperature optical-microwave quantum coherent transducer without cryogenics",
         retrieved_at=base_time + timedelta(hours=3, minutes=12),
         content_type="text/html",
-        fingerprint=_compute_sha256("https://unverified-preprint-vault.net/papers/quantum-rt-claim.html"),
+        fingerprint=_compute_sha256(
+            "https://unverified-preprint-vault.net/papers/quantum-rt-claim.html"
+        ),
         trust_tier=TrustTier.QUARANTINE,
         robots_ok=True,
         injection_risk=True,
@@ -814,15 +1013,27 @@ Enterprise autonomous agent systems require multi-agent debate and cryptographic
     )
     d4_1 = Document(id="doc-qu-01", source_id=s4_1.id, text=doc4_1_text, language="en")
 
-    doc4_2_text = (
-        "Photonic-piezoelectric transceivers demonstrate room temperature coherence preservation exceeding 100 microseconds."
-    )
+    doc4_2_text = "Photonic-piezoelectric transceivers demonstrate room temperature coherence preservation exceeding 100 microseconds."
     d4_2 = Document(id="doc-qu-02", source_id=s4_2.id, text=doc4_2_text, language="en")
     session.add_all([d4_1, d4_2])
     await session.flush()
 
-    chk4_1 = Chunk(id="chk-qu-01", document_id=d4_1.id, idx=0, start_char=0, end_char=len(doc4_1_text), text=doc4_1_text)
-    chk4_2 = Chunk(id="chk-qu-02", document_id=d4_2.id, idx=0, start_char=0, end_char=len(doc4_2_text), text=doc4_2_text)
+    chk4_1 = Chunk(
+        id="chk-qu-01",
+        document_id=d4_1.id,
+        idx=0,
+        start_char=0,
+        end_char=len(doc4_1_text),
+        text=doc4_1_text,
+    )
+    chk4_2 = Chunk(
+        id="chk-qu-02",
+        document_id=d4_2.id,
+        idx=0,
+        start_char=0,
+        end_char=len(doc4_2_text),
+        text=doc4_2_text,
+    )
     session.add_all([chk4_1, chk4_2])
     await session.flush()
 
@@ -903,16 +1114,54 @@ High-fidelity quantum state transfer currently mandates cryogenic temperatures (
 - **Claim [C:{clm4_2.id[:8]}]**: Flagged DISPUTED. Contradicted by empirical thermal bounds. Requires administrator review in Review Queue.
 """
     (dir4 / "report.md").write_text(report_md_content4, encoding="utf-8")
-    (dir4 / "report.json").write_text(json.dumps({"run_id": run4_id, "status": "REVIEW_REQUIRED"}, indent=2), encoding="utf-8")
-    (dir4 / "evidence_pack.json").write_text(json.dumps({"run_id": run4_id, "claims": [{"id": clm4_1.id}, {"id": clm4_2.id}]}, indent=2), encoding="utf-8")
-    (dir4 / "sources.csv").write_text(f"id,domain,title,trust_tier\n{s4_1.id},{s4_1.domain},\"{s4_1.title}\",{s4_1.trust_tier.value}\n{s4_2.id},{s4_2.domain},\"{s4_2.title}\",{s4_2.trust_tier.value}\n", encoding="utf-8")
+    (dir4 / "report.json").write_text(
+        json.dumps({"run_id": run4_id, "status": "REVIEW_REQUIRED"}, indent=2), encoding="utf-8"
+    )
+    (dir4 / "evidence_pack.json").write_text(
+        json.dumps({"run_id": run4_id, "claims": [{"id": clm4_1.id}, {"id": clm4_2.id}]}, indent=2),
+        encoding="utf-8",
+    )
+    (dir4 / "sources.csv").write_text(
+        f'id,domain,title,trust_tier\n{s4_1.id},{s4_1.domain},"{s4_1.title}",{s4_1.trust_tier.value}\n{s4_2.id},{s4_2.domain},"{s4_2.title}",{s4_2.trust_tier.value}\n',
+        encoding="utf-8",
+    )
 
-    session.add_all([
-        Artifact(id="art-qu-01-md", run_id=run4_id, type=ArtifactType.REPORT, format=ArtifactFormat.MD, path=str(dir4 / "report.md"), sha256=_compute_sha256(report_md_content4)),
-        Artifact(id="art-qu-01-json", run_id=run4_id, type=ArtifactType.REPORT, format=ArtifactFormat.JSON, path=str(dir4 / "report.json"), sha256=_compute_sha256(dir4 / "report.json")),
-        Artifact(id="art-qu-01-ev", run_id=run4_id, type=ArtifactType.EVIDENCE_PACK, format=ArtifactFormat.JSON, path=str(dir4 / "evidence_pack.json"), sha256=_compute_sha256(dir4 / "evidence_pack.json")),
-        Artifact(id="art-qu-01-csv", run_id=run4_id, type=ArtifactType.SOURCE_LIST, format=ArtifactFormat.CSV, path=str(dir4 / "sources.csv"), sha256=_compute_sha256(dir4 / "sources.csv")),
-    ])
+    session.add_all(
+        [
+            Artifact(
+                id="art-qu-01-md",
+                run_id=run4_id,
+                type=ArtifactType.REPORT,
+                format=ArtifactFormat.MD,
+                path=str(dir4 / "report.md"),
+                sha256=_compute_sha256(report_md_content4),
+            ),
+            Artifact(
+                id="art-qu-01-json",
+                run_id=run4_id,
+                type=ArtifactType.REPORT,
+                format=ArtifactFormat.JSON,
+                path=str(dir4 / "report.json"),
+                sha256=_compute_sha256(dir4 / "report.json"),
+            ),
+            Artifact(
+                id="art-qu-01-ev",
+                run_id=run4_id,
+                type=ArtifactType.EVIDENCE_PACK,
+                format=ArtifactFormat.JSON,
+                path=str(dir4 / "evidence_pack.json"),
+                sha256=_compute_sha256(dir4 / "evidence_pack.json"),
+            ),
+            Artifact(
+                id="art-qu-01-csv",
+                run_id=run4_id,
+                type=ArtifactType.SOURCE_LIST,
+                format=ArtifactFormat.CSV,
+                path=str(dir4 / "sources.csv"),
+                sha256=_compute_sha256(dir4 / "sources.csv"),
+            ),
+        ]
+    )
     await session.flush()
 
     # =========================================================================
@@ -968,5 +1217,7 @@ High-fidelity quantum state transfer currently mandates cryogenic temperatures (
     )
 
     await session.commit()
-    logger.info("Successfully bootstrapped 4 production demonstrations with full evidence graph & artifacts.")
+    logger.info(
+        "Successfully bootstrapped 4 production demonstrations with full evidence graph & artifacts."
+    )
     return True

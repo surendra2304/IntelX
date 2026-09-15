@@ -162,7 +162,9 @@ async def test_ai_universe_provider_canned_mock_bypass():
     }
     real_ask_resp = {
         "task_id": "task-real-123",
-        "answer": json.dumps({"summary": "Genuine LLM synthesized intelligence.", "confidence": 0.95}),
+        "answer": json.dumps(
+            {"summary": "Genuine LLM synthesized intelligence.", "confidence": 0.95}
+        ),
     }
 
     respx.post(v1_url).mock(return_value=httpx.Response(200, json=canned_resp))
@@ -182,4 +184,3 @@ async def test_ai_universe_provider_canned_mock_bypass():
     assert "Genuine LLM synthesized intelligence." in text
     data = json.loads(text)
     assert data["summary"] == "Genuine LLM synthesized intelligence."
-

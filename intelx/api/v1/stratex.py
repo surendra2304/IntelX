@@ -5,18 +5,15 @@ and volatility impact factors directly consumable by StrateX trading bots and ad
 """
 
 import logging
-import re
 import time
-from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intelx.connectors.search import GoogleNewsSearchConnector, TavilySearchConnector
-from intelx.core.settings import get_settings
+from intelx.connectors.search import GoogleNewsSearchConnector
 from intelx.db.models import Claim, Finding, ResearchRun
 from intelx.db.session import get_db_session
 from intelx.integrations.stratex_context import StratexConnector
@@ -31,7 +28,8 @@ class StratexResearchRequest(BaseModel):
 
     symbol: str = Field(..., description="Asset or pair symbol, e.g. BTC, ETH, SOL, BTCUSDT")
     query: str | None = Field(
-        None, description="Hypothesis or query to investigate (defaults to volatility/macro inquiry)"
+        None,
+        description="Hypothesis or query to investigate (defaults to volatility/macro inquiry)",
     )
     trigger_reason: str = Field(
         default="MANUAL_OR_EVENT",
@@ -129,8 +127,29 @@ async def query_stratex_market_research(
 
     pos_kw = {"surge", "bullish", "rally", "inflow", "gain", "breakout", "accumulate", "boost"}
     neg_kw = {"drop", "bearish", "plummet", "outflow", "loss", "decline", "selloff", "crash"}
-    reg_kw = {"sec", "cftc", "regulation", "etf", "approval", "compliance", "lawsuit", "ban", "court", "legal"}
-    macro_kw = {"fomc", "fed", "interest rate", "inflation", "cpi", "liquidity", "yield", "dollar", "treasury"}
+    reg_kw = {
+        "sec",
+        "cftc",
+        "regulation",
+        "etf",
+        "approval",
+        "compliance",
+        "lawsuit",
+        "ban",
+        "court",
+        "legal",
+    }
+    macro_kw = {
+        "fomc",
+        "fed",
+        "interest rate",
+        "inflation",
+        "cpi",
+        "liquidity",
+        "yield",
+        "dollar",
+        "treasury",
+    }
 
     pos_count = 0
     neg_count = 0
@@ -143,7 +162,7 @@ async def query_stratex_market_research(
         elif any(k in txt_lower for k in neg_kw):
             neg_count += 1
             sentiment_drivers.append(text[:120])
-        
+
         if any(k in txt_lower for k in reg_kw):
             regulatory_changes.append(text[:120])
         if any(k in txt_lower for k in macro_kw):
@@ -153,7 +172,9 @@ async def query_stratex_market_research(
     if not sentiment_drivers or not regulatory_changes:
         try:
             connector = GoogleNewsSearchConnector()
-            news_results = await connector.search(f"{clean_sym} crypto market price ETF SEC Fed", max_results=6)
+            news_results = await connector.search(
+                f"{clean_sym} crypto market price ETF SEC Fed", max_results=6
+            )
             for res in news_results:
                 title = res.title or res.snippet
                 txt_lower = title.lower()

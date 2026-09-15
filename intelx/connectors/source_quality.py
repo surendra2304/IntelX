@@ -21,7 +21,16 @@ class SourceScore:
     total: float
 
 
-PRIMARY_HINTS = ("gov", "edu", "who.int", "un.org", "sec.gov", "europa.eu", "arxiv.org", "nature.com")
+PRIMARY_HINTS = (
+    "gov",
+    "edu",
+    "who.int",
+    "un.org",
+    "sec.gov",
+    "europa.eu",
+    "arxiv.org",
+    "nature.com",
+)
 LOW_QUALITY_HINTS = ("pinterest", "quora", "forums", "aggregator", "unknown", "spam")
 
 
@@ -49,7 +58,9 @@ class SourceQuality:
         matched = sum(1 for t in query_terms if t.lower() in text)
         relevance = min(1.0, matched / max(1, len(query_terms)))
 
-        freshness = 1.0 if published_age_days is None else math.exp(-max(0, published_age_days) / 3650)
+        freshness = (
+            1.0 if published_age_days is None else math.exp(-max(0, published_age_days) / 3650)
+        )
         independence = 1.0 / (1.0 + duplicate_count * 0.5)
         accessibility = 0.95 if url.startswith(("https://", "http://")) else 0.60
 
@@ -81,12 +92,14 @@ class SourceQuality:
         term_set = set(query_terms)
         return sorted(
             sources,
-            key=lambda s: self.score(
-                getattr(s, "url", getattr(s, "location", "")),
-                getattr(s, "title", ""),
-                getattr(s, "snippet", ""),
-                term_set,
-            ).total,
+            key=lambda s: (
+                self.score(
+                    getattr(s, "url", getattr(s, "location", "")),
+                    getattr(s, "title", ""),
+                    getattr(s, "snippet", ""),
+                    term_set,
+                ).total
+            ),
             reverse=True,
         )
 

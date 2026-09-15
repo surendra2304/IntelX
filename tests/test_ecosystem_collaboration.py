@@ -6,7 +6,6 @@ from httpx import ASGITransport, AsyncClient
 from intelx.app.factory import create_app
 from intelx.connectors.search import clean_rss_text
 from intelx.core.report import _clean_prose
-from intelx.core.settings import get_settings
 
 
 @pytest.mark.asyncio
@@ -110,7 +109,7 @@ def test_rss_and_prose_cleaning():
     dirty_rss = (
         '&lt;a href="https://news.google.com/rss/articles/CBMi'
         'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"&gt;'
-        'Realme GT 7 Pro Launch Announcement&lt;/a&gt;&amp;nbsp;&amp;nbsp;'
+        "Realme GT 7 Pro Launch Announcement&lt;/a&gt;&amp;nbsp;&amp;nbsp;"
         '&lt;font color="#6f6f6f"&gt;GSMArena&lt;/font&gt;'
     )
     cleaned = clean_rss_text(dirty_rss)
@@ -120,7 +119,9 @@ def test_rss_and_prose_cleaning():
     assert "Realme GT 7 Pro Launch Announcement" in cleaned
     assert "&nbsp;" not in cleaned
 
-    dirty_prose = 'Analysis on &lt;font color="red"&gt;regulatory action&lt;/font&gt;&nbsp;in market.'
+    dirty_prose = (
+        'Analysis on &lt;font color="red"&gt;regulatory action&lt;/font&gt;&nbsp;in market.'
+    )
     cleaned_prose = _clean_prose(dirty_prose)
     assert "<font" not in cleaned_prose
     assert "regulatory action" in cleaned_prose

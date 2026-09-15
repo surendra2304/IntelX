@@ -1,6 +1,9 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
+
 from .models import Claim, Evidence
+
 
 @dataclass(frozen=True, slots=True)
 class VerificationResult:
@@ -8,14 +11,18 @@ class VerificationResult:
     reason: str
     score: float
 
+
 class ClaimVerifier:
-    def verify(self, claim: Claim, evidences: dict[str, Evidence], documents: dict[str, str]) -> VerificationResult:
+    def verify(
+        self, claim: Claim, evidences: dict[str, Evidence], documents: dict[str, str]
+    ) -> VerificationResult:
         if not claim.evidence_ids:
             return VerificationResult(False, "claim has no evidence", 0.0)
         checked = 0
         for eid in claim.evidence_ids:
             ev = evidences.get(eid)
-            if not ev: continue
+            if not ev:
+                continue
             doc = documents.get(ev.source_id, "")
             if ev.validate_against(doc):
                 checked += 1

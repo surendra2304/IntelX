@@ -83,7 +83,9 @@ async def get_subscription(
     if not sub:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
     if sub["tenant_id"] != principal.tenant_id and "*" not in principal.scopes:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cross-tenant subscription access denied")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Cross-tenant subscription access denied"
+        )
     return SubscriptionResponse(**sub)
 
 
@@ -101,7 +103,9 @@ async def pause_subscription(
     if not sub:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
     if sub["tenant_id"] != principal.tenant_id and "*" not in principal.scopes:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cross-tenant subscription access denied")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Cross-tenant subscription access denied"
+        )
     sub["status"] = "PAUSED"
     return SubscriptionResponse(**sub)
 
@@ -120,6 +124,8 @@ async def resume_subscription(
     if not sub:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
     if sub["tenant_id"] != principal.tenant_id and "*" not in principal.scopes:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cross-tenant subscription access denied")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Cross-tenant subscription access denied"
+        )
     sub["status"] = "ACTIVE"
     return SubscriptionResponse(**sub)

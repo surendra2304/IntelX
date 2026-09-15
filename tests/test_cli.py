@@ -1,7 +1,7 @@
 """Tests for INTELX Command Line Interface (CLI) parsers and command dispatch."""
 
 import argparse
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 from intelx.cli.main import (
     build_parser,
@@ -51,12 +51,17 @@ def test_cli_parser_subcommands():
     assert args_smoke_llm.command == "smoke-llm"
 
     # 9. smoke-live
-    args_smoke_live = parser.parse_args([
-        "smoke-live",
-        "--objective", "Test query",
-        "--max-sources", "8",
-        "--max-usd", "2.0",
-    ])
+    args_smoke_live = parser.parse_args(
+        [
+            "smoke-live",
+            "--objective",
+            "Test query",
+            "--max-sources",
+            "8",
+            "--max-usd",
+            "2.0",
+        ]
+    )
     assert args_smoke_live.command == "smoke-live"
     assert args_smoke_live.objective == "Test query"
     assert args_smoke_live.max_sources == 8
@@ -65,6 +70,7 @@ def test_cli_parser_subcommands():
 
 def test_cli_verify_audit_command():
     """Verify audit verification CLI output when audit chain is valid."""
+
     def _fake_run(coro):
         coro.close()
         return None
@@ -77,6 +83,7 @@ def test_cli_verify_audit_command():
 
 def test_cli_purge_command():
     """Verify purge CLI command execution."""
+
     def _fake_run(coro):
         coro.close()
         return None

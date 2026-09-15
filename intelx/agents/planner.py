@@ -142,12 +142,7 @@ class Plan(BaseModel):
     @classmethod
     def _validate_raw(cls, data: Any) -> Any:
         if isinstance(data, dict):
-            obj = (
-                data.get("objective")
-                or data.get("goal")
-                or data.get("research_objective")
-                or ""
-            )
+            obj = data.get("objective") or data.get("goal") or data.get("research_objective") or ""
             data["objective"] = obj
 
             # Accept subquestions from any standard or planned field
@@ -171,12 +166,19 @@ class Plan(BaseModel):
                     candidates = []
 
                 meta_prefixes = (
-                    "decomposed", "here is", "investigative track", "step 1", "step 2",
-                    "phase 1", "phase 2", "i will", "planning to", "let's",
+                    "decomposed",
+                    "here is",
+                    "investigative track",
+                    "step 1",
+                    "step 2",
+                    "phase 1",
+                    "phase 2",
+                    "i will",
+                    "planning to",
+                    "let's",
                 )
                 raw_subqs = [
-                    c for c in candidates
-                    if not any(c.lower().startswith(p) for p in meta_prefixes)
+                    c for c in candidates if not any(c.lower().startswith(p) for p in meta_prefixes)
                 ]
 
             data["subquestions"] = raw_subqs

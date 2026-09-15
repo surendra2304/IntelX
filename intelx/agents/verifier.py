@@ -32,7 +32,7 @@ class VerificationVerdict(BaseModel):
 
     verdict: str = Field(
         default="SUPPORTED",
-        description="SUPPORTED, PARTIALLY_SUPPORTED, CONTRADICTED, or UNVERIFIABLE"
+        description="SUPPORTED, PARTIALLY_SUPPORTED, CONTRADICTED, or UNVERIFIABLE",
     )
     support_type: EvidenceSupportType = EvidenceSupportType.SUPPORTS
     confidence_adjustment: float = Field(default=0.0, ge=-0.10, le=0.10)
@@ -101,9 +101,7 @@ class VerifierAgent(BaseAgent):
             target_claims = claims[:8]
         elif depth.lower() == "quick":
             target_claims = [
-                c
-                for c in claims
-                if c.claim_type in (ClaimType.FACT, ClaimType.MEASUREMENT)
+                c for c in claims if c.claim_type in (ClaimType.FACT, ClaimType.MEASUREMENT)
             ][:2]
         else:
             target_claims = [

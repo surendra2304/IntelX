@@ -19,7 +19,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from intelx.core.enums import RunOutcome, RunStatus
+from intelx.core.enums import RunStatus
 from intelx.db.models import ResearchRun
 from intelx.db.repos import RunRepo
 from intelx.db.session import get_sessionmaker
@@ -67,9 +67,18 @@ class AutonomousResearcher:
         """Check if we have capacity and need a new autonomous run."""
         # Check active runs
         stmt_active = select(func.count(ResearchRun.id)).where(
-            ResearchRun.status.in_([RunStatus.QUEUED, RunStatus.PLANNING, RunStatus.DISCOVERING,
-                                   RunStatus.RETRIEVING, RunStatus.EXTRACTING, RunStatus.VERIFYING,
-                                   RunStatus.ANALYZING, RunStatus.SYNTHESIZING])
+            ResearchRun.status.in_(
+                [
+                    RunStatus.QUEUED,
+                    RunStatus.PLANNING,
+                    RunStatus.DISCOVERING,
+                    RunStatus.RETRIEVING,
+                    RunStatus.EXTRACTING,
+                    RunStatus.VERIFYING,
+                    RunStatus.ANALYZING,
+                    RunStatus.SYNTHESIZING,
+                ]
+            )
         )
         active_count = (await session.execute(stmt_active)).scalar() or 0
         if active_count >= MAX_CONCURRENT_AUTONOMOUS_RUNS:

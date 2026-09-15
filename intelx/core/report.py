@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 from intelx.core.enums import ClaimStatus, ResearchMode, normalize_research_mode
-from intelx.core.errors import IntegrityError
 
 CITATION_PATTERN = re.compile(r"\[([SC]):([a-zA-Z0-9_\-]+)\]")
 __all__ = [
@@ -32,6 +31,7 @@ def _clean_prose(text: str) -> str:
     if not text:
         return ""
     import html as html_lib
+
     t = html_lib.unescape(text)
     t = html_lib.unescape(t)
     t = re.sub(r"<[^>]+>", " ", t)
@@ -57,6 +57,7 @@ def validate_citations(
 ) -> str:
     """Validate citation tokens, strip unresolvable ones, and return cleaned text."""
     import logging
+
     _logger = logging.getLogger("intelx.report")
 
     def replace_token(match: re.Match) -> str:
@@ -429,7 +430,9 @@ def export_spoken_citations(findings: list[Any], sources: list[Any]) -> str:
         if status in ("inference", "unverified"):
             spoken_sentences.append(f"Based on analytical inference, {clean_stmt}.")
         elif status == "disputed":
-            spoken_sentences.append(f"Regarding disputed reports from {source_title}, {clean_stmt}.")
+            spoken_sentences.append(
+                f"Regarding disputed reports from {source_title}, {clean_stmt}."
+            )
         else:
             spoken_sentences.append(f"According to {source_title}, {clean_stmt}.")
 

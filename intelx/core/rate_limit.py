@@ -16,8 +16,7 @@ class LimitDecision:
 
 
 class RateLimitBackend(Protocol):
-    def allow(self, key: str, max_requests: int, window_seconds: int) -> LimitDecision:
-        ...
+    def allow(self, key: str, max_requests: int, window_seconds: int) -> LimitDecision: ...
 
 
 class SlidingWindow:
@@ -28,7 +27,9 @@ class SlidingWindow:
         self.window_seconds = window_seconds
         self._history: dict[str, list[float]] = defaultdict(list)
 
-    def allow(self, key: str, max_requests: int | None = None, window_seconds: int | None = None) -> LimitDecision:
+    def allow(
+        self, key: str, max_requests: int | None = None, window_seconds: int | None = None
+    ) -> LimitDecision:
         now = time.time()
         limit = max_requests or self.default_limit
         window = window_seconds or self.window_seconds
@@ -51,7 +52,9 @@ class SlidingWindow:
 class RedisRateLimiter:
     """Distributed Redis sliding window rate limiter using Redis sorted sets (or in-memory fallback)."""
 
-    def __init__(self, redis_url: str | None = None, default_limit: int = 120, window_seconds: int = 60) -> None:
+    def __init__(
+        self, redis_url: str | None = None, default_limit: int = 120, window_seconds: int = 60
+    ) -> None:
         self.redis_url = redis_url
         self.fallback = SlidingWindow(default_limit=default_limit, window_seconds=window_seconds)
 

@@ -168,6 +168,7 @@ async def ingest_and_normalize(
                 session=session, source_id=existing_source.id, text_content=normalized_text
             )
         from sqlalchemy import select
+
         stmt_c = select(Chunk).where(Chunk.document_id == doc.id).order_by(Chunk.idx.asc())
         existing_chunks = list((await session.execute(stmt_c)).scalars().all())
         return existing_source, doc, existing_chunks, False

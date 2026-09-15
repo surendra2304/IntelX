@@ -1,19 +1,39 @@
 from __future__ import annotations
-from dataclasses import dataclass, field, asdict
+
+import hashlib
+import json
+import time
+from dataclasses import asdict, dataclass, field
 from enum import StrEnum
-from typing import Any, Mapping
-import hashlib, json, time, uuid
+
 
 class ResearchStatus(StrEnum):
-    QUEUED="queued"; PLANNING="planning"; SEARCHING="searching"; FETCHING="fetching"
-    EXTRACTING="extracting"; VERIFYING="verifying"; SYNTHESIZING="synthesizing"
-    COMPLETE="complete"; FAILED="failed"; CANCELLED="cancelled"; INSUFFICIENT_EVIDENCE="insufficient_evidence"
+    QUEUED = "queued"
+    PLANNING = "planning"
+    SEARCHING = "searching"
+    FETCHING = "fetching"
+    EXTRACTING = "extracting"
+    VERIFYING = "verifying"
+    SYNTHESIZING = "synthesizing"
+    COMPLETE = "complete"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
 
 class SourceTier(StrEnum):
-    PRIMARY="primary"; SECONDARY="secondary"; TERTIARY="tertiary"; UNKNOWN="unknown"
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+    TERTIARY = "tertiary"
+    UNKNOWN = "unknown"
+
 
 class EvidenceType(StrEnum):
-    VERBATIM="verbatim"; STRUCTURED="structured"; METADATA="metadata"; NEGATIVE="negative"
+    VERBATIM = "verbatim"
+    STRUCTURED = "structured"
+    METADATA = "metadata"
+    NEGATIVE = "negative"
+
 
 @dataclass(frozen=True, slots=True)
 class ResearchIdentity:
@@ -21,6 +41,7 @@ class ResearchIdentity:
     actor_id: str
     research_id: str
     correlation_id: str
+
 
 @dataclass(frozen=True, slots=True)
 class ResearchBudget:
@@ -31,6 +52,7 @@ class ResearchBudget:
     max_cost_usd: float = 10.0
     max_report_chars: int = 120_000
 
+
 @dataclass(frozen=True, slots=True)
 class ResearchPlanItem:
     id: str
@@ -39,12 +61,14 @@ class ResearchPlanItem:
     required_domain_count: int = 2
     priority: int = 50
 
+
 @dataclass(frozen=True, slots=True)
 class ResearchPlan:
     id: str
     objective: str
     items: tuple[ResearchPlanItem, ...]
     breadth_required: bool = True
+
 
 @dataclass(frozen=True, slots=True)
 class Source:
@@ -59,6 +83,7 @@ class Source:
     canonical_url: str | None = None
     is_syndicated: bool = False
 
+
 @dataclass(frozen=True, slots=True)
 class Evidence:
     id: str
@@ -70,7 +95,8 @@ class Evidence:
     evidence_type: EvidenceType = EvidenceType.VERBATIM
 
     def validate_against(self, document_text: str) -> bool:
-        return document_text[self.span_start:self.span_end] == self.quote
+        return document_text[self.span_start : self.span_end] == self.quote
+
 
 @dataclass(frozen=True, slots=True)
 class Claim:
@@ -83,12 +109,14 @@ class Claim:
     disputed: bool = False
     status: str = "active"
 
+
 @dataclass(frozen=True, slots=True)
 class QueryRecord:
     query: str
     plan_item_id: str
     issued_at: float
     result_count: int
+
 
 @dataclass(frozen=True, slots=True)
 class ResearchState:
@@ -104,7 +132,8 @@ class ResearchState:
 
     def content_hash(self) -> str:
         payload = {
-            "identity": asdict(self.identity), "objective": self.objective,
+            "identity": asdict(self.identity),
+            "objective": self.objective,
             "status": self.status.value,
             "plan": asdict(self.plan) if self.plan else None,
             "sources": [asdict(x) for x in self.sources],
@@ -114,6 +143,7 @@ class ResearchState:
             "loop": self.loop,
         }
         return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
 
 def stable_id(*parts: str) -> str:
     raw = "\x1f".join(parts).encode()

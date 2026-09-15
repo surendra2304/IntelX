@@ -7,7 +7,6 @@ from intelx.integrations.futuris_context import (
     ResearchTriggeredForecasting,
     generate_combined_intelligence_report,
 )
-
 from intelx.integrations.stratex_context import StratexConnector
 
 __all__ = [

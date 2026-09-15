@@ -38,7 +38,11 @@ class CritiqueReport(BaseModel):
                     s = "LOW"
                 data["severity"] = s
             if "summary" not in data or not data["summary"]:
-                data["summary"] = data.get("critique") or data.get("rationale") or "Analysis is grounded in verified claims."
+                data["summary"] = (
+                    data.get("critique")
+                    or data.get("rationale")
+                    or "Analysis is grounded in verified claims."
+                )
         return data
 
     @classmethod

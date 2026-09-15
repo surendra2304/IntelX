@@ -19,7 +19,6 @@ from intelx.core.enums import (
     ClaimStatus,
     ClaimType,
 )
-from intelx.core.errors import IntegrityError
 from intelx.core.report import (
     filter_and_ground_findings,
     render_report_markdown,

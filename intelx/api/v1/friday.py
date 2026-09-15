@@ -20,8 +20,6 @@ from intelx.db.models import (
     ApiKey,
     Artifact,
     Claim,
-    Document,
-    Evidence,
     Finding,
     ResearchRun,
     Source,
@@ -73,19 +71,27 @@ class QueryScope(BaseModel):
     domain: str | None = None
     depth: str | None = None
     allowed_domains: list[str] = Field(default_factory=list, description="Permitted source domains")
-    blocked_domains: list[str] = Field(default_factory=list, description="Explicitly forbidden domains")
-    time_horizon: str | None = Field(default=None, description="Time range for source freshness (e.g. '30d', '1y')")
+    blocked_domains: list[str] = Field(
+        default_factory=list, description="Explicitly forbidden domains"
+    )
+    time_horizon: str | None = Field(
+        default=None, description="Time range for source freshness (e.g. '30d', '1y')"
+    )
 
 
 class SourcePolicy(BaseModel):
     """Source policy governing credibility, freshness, and domain filtering."""
 
-    allowed_domains: list[str] = Field(default_factory=list, description="Explicitly allowed domains")
+    allowed_domains: list[str] = Field(
+        default_factory=list, description="Explicitly allowed domains"
+    )
     allowed_tiers: list[str] = Field(
         default_factory=lambda: ["TIER_1", "TIER_2", "TIER_3", "STANDARD", "HIGH"],
         description="Allowed trust tiers",
     )
-    blocked_domains: list[str] = Field(default_factory=list, description="Explicitly blocked domains")
+    blocked_domains: list[str] = Field(
+        default_factory=list, description="Explicitly blocked domains"
+    )
     block_low_reliability: bool = Field(default=True, description="Block untrusted domains")
     require_peer_reviewed_or_official: bool = Field(
         default=False,
@@ -114,7 +120,9 @@ class FridayTimeBudget(BaseModel):
 class FridayDocumentBudget(BaseModel):
     """Document collection constraints."""
 
-    max_documents: int = Field(default=15, ge=1, le=50, description="Max external documents to ingest")
+    max_documents: int = Field(
+        default=15, ge=1, le=50, description="Max external documents to ingest"
+    )
     max_chunks_per_doc: int | None = None
 
 
@@ -157,7 +165,9 @@ class FridayDelegationRequest(BaseModel):
         description="Core research question or intelligence objective",
         examples=["Assess sodium-ion battery cathode energy density limits and thermal stability"],
     )
-    action: str = Field(default="research", description="Action to perform: research | delegate | cancel")
+    action: str = Field(
+        default="research", description="Action to perform: research | delegate | cancel"
+    )
     task_id: str | None = None
     context: FridayRequestContext = Field(default_factory=FridayRequestContext)
     depth: Literal["quick_scan", "standard", "deep_dive"] = Field(
@@ -367,7 +377,9 @@ async def delegate_research_from_friday(
 
     # 1. Idempotency Check: Return existing run if already present
     if effective_idempotency_key:
-        stmt_existing = select(ResearchRun).where(ResearchRun.idempotency_key == effective_idempotency_key)
+        stmt_existing = select(ResearchRun).where(
+            ResearchRun.idempotency_key == effective_idempotency_key
+        )
         existing_run = (await session.execute(stmt_existing)).scalar_one_or_none()
         if existing_run:
             logger.info(
@@ -541,13 +553,15 @@ async def delegate_from_friday_envelope(
         question=str(question).strip(),
         context=FridayRequestContext(
             requesting_system=envelope.get("source_agent", "friday")
-            if envelope.get("source_agent") in ("friday", "sentinel", "nexus", "trading_bot", "forge")
+            if envelope.get("source_agent")
+            in ("friday", "sentinel", "nexus", "trading_bot", "forge")
             else "friday",
             priority=envelope.get("priority", "normal")
             if envelope.get("priority") in ("normal", "high", "urgent")
             else "normal",
             domain_hint=payload_data.get("domain_hint", "general")
-            if payload_data.get("domain_hint") in ("security", "market", "technical", "competitive", "general")
+            if payload_data.get("domain_hint")
+            in ("security", "market", "technical", "competitive", "general")
             else "general",
         ),
         depth=payload_data.get("depth", "standard")
@@ -852,9 +866,7 @@ async def get_friday_research_findings(
                     source_url=src.location if src else "internal://source",
                     source_title=src.title if src and src.title else "Source Document",
                     publisher=src.publisher if src else None,
-                    retrieved_at=src.retrieved_at.isoformat()
-                    if src and src.retrieved_at
-                    else None,
+                    retrieved_at=src.retrieved_at.isoformat() if src and src.retrieved_at else None,
                 )
             ]
             items.append(

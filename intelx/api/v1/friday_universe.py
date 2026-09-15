@@ -5,7 +5,6 @@ for intelligence collected specifically for that agent.
 """
 
 import logging
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -13,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.core.auth import get_current_api_key
-from intelx.db.models import ApiKey, Chunk, Document, Source
+from intelx.db.models import ApiKey, Document, Source
 from intelx.db.session import get_sessionmaker
 
 logger = logging.getLogger("intelx.api.friday_universe")
@@ -106,16 +105,18 @@ async def get_agent_intelligence(
         summary_lines = [l for l in lines[4:] if l.strip() and not l.startswith("[")]
         summary = " ".join(summary_lines)[:500]
 
-        items.append(IntelligenceItem(
-            title=source.title or "Untitled",
-            url=source.location,
-            publisher=source.publisher or "",
-            agent=doc_agent.lower(),
-            category=doc_category.lower(),
-            published_at=source.published_at.isoformat() if source.published_at else None,
-            summary=summary,
-            retrieved_at=source.retrieved_at.isoformat(),
-        ))
+        items.append(
+            IntelligenceItem(
+                title=source.title or "Untitled",
+                url=source.location,
+                publisher=source.publisher or "",
+                agent=doc_agent.lower(),
+                category=doc_category.lower(),
+                published_at=source.published_at.isoformat() if source.published_at else None,
+                summary=summary,
+                retrieved_at=source.retrieved_at.isoformat(),
+            )
+        )
 
     return IntelligenceFeed(agent=agent, total_items=len(items), items=items)
 
@@ -131,7 +132,7 @@ async def get_ingestion_status(
     """Returns count of ingested intelligence items per agent."""
     total_stmt = select(Source).order_by(Source.retrieved_at.desc()).limit(1)
     total_count_stmt = select(Source)
-    
+
     result = await session.execute(total_count_stmt)
     all_sources = result.scalars().all()
     total = len(all_sources)
@@ -140,10 +141,7 @@ async def get_ingestion_status(
     agent_counts: dict[str, int] = {}
     for ag in ["stratex", "futuris", "sentinel", "friday", "cortex", "forge", "inference"]:
         tag = f"[FRIDAY_AGENT:{ag.upper()}]"
-        count_stmt = (
-            select(Document)
-            .where(Document.text.contains(tag))
-        )
+        count_stmt = select(Document).where(Document.text.contains(tag))
         r = await session.execute(count_stmt)
         agent_counts[ag] = len(r.scalars().all())
 
@@ -160,16 +158,21 @@ async def get_ingestion_status(
     summary="Trigger an autonomous research investigation immediately",
 )
 async def trigger_autonomous_research(
-    agent: str = Query(default="all", description="Target agent: stratex | sentinel | friday | futuris | all"),
+    agent: str = Query(
+        default="all", description="Target agent: stratex | sentinel | friday | futuris | all"
+    ),
     session: AsyncSession = Depends(get_db_session),
     _: ApiKey = Depends(get_current_api_key),
 ) -> dict:
     """Manually dispatch an autonomous intelligence research investigation."""
-    from intelx.orchestration.autonomous_researcher import AUTONOMOUS_RESEARCH_TOPICS
     from intelx.db.repos import RunRepo
+    from intelx.orchestration.autonomous_researcher import AUTONOMOUS_RESEARCH_TOPICS
 
     agent = agent.lower().strip()
-    topic = next((t for t in AUTONOMOUS_RESEARCH_TOPICS if t["agent"] == agent), AUTONOMOUS_RESEARCH_TOPICS[0])
+    topic = next(
+        (t for t in AUTONOMOUS_RESEARCH_TOPICS if t["agent"] == agent),
+        AUTONOMOUS_RESEARCH_TOPICS[0],
+    )
 
     scope = {
         "domain": topic["domain"],
@@ -206,12 +209,18 @@ async def post_agent_intelligence(
 ) -> dict:
     """Accepts TaskEnvelope or research payload and returns intelligence with citations."""
     import time
+
     t0 = time.time()
-    
+
     task_id = body.get("task_id", f"intelx_{int(time.time())}")
     action = body.get("action", "research")
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else body
-    query = payload.get("query") or payload.get("prompt") or payload.get("topic") or "Macro market intelligence"
+    query = (
+        payload.get("query")
+        or payload.get("prompt")
+        or payload.get("topic")
+        or "Macro market intelligence"
+    )
     caller = body.get("source_agent", "friday")
 
     # Fetch recent items from knowledge base
@@ -226,12 +235,14 @@ async def post_agent_intelligence(
 
     items = []
     for source, doc in rows:
-        items.append({
-            "title": source.title or "Intelligence Report",
-            "url": source.url or "",
-            "summary": doc.text[:200].strip() if doc.text else "",
-            "publisher": source.publisher or "IntelX Ingestion Engine",
-        })
+        items.append(
+            {
+                "title": source.title or "Intelligence Report",
+                "url": source.url or "",
+                "summary": doc.text[:200].strip() if doc.text else "",
+                "publisher": source.publisher or "IntelX Ingestion Engine",
+            }
+        )
 
     lat = int((time.time() - t0) * 1000)
     summary_text = f"IntelX synthesized intelligence for '{query}' with {len(items)} cited sources."

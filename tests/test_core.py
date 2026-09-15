@@ -73,4 +73,3 @@ def test_length_preserving_redaction():
     assert len(redacted) == len(text)
     assert "my_secret_token_1234567890" not in redacted
     assert len(items) > 0
-

@@ -345,22 +345,23 @@ class SourceRepo:
                     + ("..." if end < len(text_body) else "")
                 )
             else:
-                snippet = (
-                    text_body[:140].replace("\n", " ")
-                    + ("..." if len(text_body) > 140 else "")
+                snippet = text_body[:140].replace("\n", " ") + (
+                    "..." if len(text_body) > 140 else ""
                 )
 
-            matches.append({
-                "id": src.id,
-                "title": src.title or src.domain or "Indexed Source Document",
-                "location": src.location,
-                "trust_tier": (
-                    src.trust_tier.value
-                    if hasattr(src.trust_tier, "value")
-                    else str(src.trust_tier)
-                ),
-                "snippet": snippet,
-            })
+            matches.append(
+                {
+                    "id": src.id,
+                    "title": src.title or src.domain or "Indexed Source Document",
+                    "location": src.location,
+                    "trust_tier": (
+                        src.trust_tier.value
+                        if hasattr(src.trust_tier, "value")
+                        else str(src.trust_tier)
+                    ),
+                    "snippet": snippet,
+                }
+            )
         return matches
 
     @staticmethod

@@ -1,6 +1,8 @@
 from __future__ import annotations
-from dataclasses import dataclass
+
 import time
+from dataclasses import dataclass
+
 
 @dataclass(frozen=True, slots=True)
 class Checkpoint:
@@ -10,7 +12,13 @@ class Checkpoint:
     state_hash: str
     created_at: float = time.time()
 
+
 class CheckpointManager:
-    def __init__(self): self.latest={}
-    def save(self, checkpoint): self.latest[checkpoint.research_id]=checkpoint
-    def load(self, research_id): return self.latest.get(research_id)
+    def __init__(self):
+        self.latest = {}
+
+    def save(self, checkpoint):
+        self.latest[checkpoint.research_id] = checkpoint
+
+    def load(self, research_id):
+        return self.latest.get(research_id)

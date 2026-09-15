@@ -51,7 +51,7 @@ class OrchestrationWorker:
     async def run_once(self, session_factory: Any | None = None) -> bool:
         """Attempt to claim and execute a single research job."""
         factory = session_factory or get_sessionmaker()
-        
+
         # 1. Claim job in its own transaction
         async with factory() as session:
             run = await self.claim_next_job(session)
@@ -62,7 +62,7 @@ class OrchestrationWorker:
             objective = run.objective
 
         logger.info(f"Worker claimed research run {run_id} ('{objective[:40]}...')")
-        
+
         # 2. Execute job in a separate transaction
         async with factory() as session:
             try:
@@ -72,21 +72,22 @@ class OrchestrationWorker:
             except Exception as e:
                 logger.exception(f"Worker caught error processing run {run_id}: {e}")
                 await session.rollback()
-                
+
                 # Mark as FAILED
                 try:
                     from intelx.core.enums import RunOutcome
+
                     await RunRepo.set_status(
                         session=session,
                         run_id=run_id,
                         status=RunStatus.FAILED,
                         outcome=RunOutcome.FAILED,
-                        error_json={"error": str(e), "type": type(e).__name__}
+                        error_json={"error": str(e), "type": type(e).__name__},
                     )
                     await session.commit()
                 except Exception as inner_e:
                     logger.error(f"Failed to update run status to FAILED for {run_id}: {inner_e}")
-                    
+
             return True
 
     async def start(self) -> None:

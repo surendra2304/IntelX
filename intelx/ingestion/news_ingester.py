@@ -40,131 +40,308 @@ logger = logging.getLogger("intelx.ingester")
 # ---------------------------------------------------------------------------
 
 FRIDAY_UNIVERSE_FEEDS: list[dict[str, str]] = [
-
     # ── STRATEX: Crypto & Algorithmic Trading ──────────────────────────────
     # Stratex runs Binance Futures 24/7. Needs price movements, whale alerts,
     # exchange news, regulatory actions, upcoming token events.
-    {"url": "https://cointelegraph.com/rss",
-     "publisher": "CoinTelegraph", "agent": "stratex", "category": "crypto_trading"},
-    {"url": "https://coindesk.com/arc/outboundfeeds/rss/",
-     "publisher": "CoinDesk", "agent": "stratex", "category": "crypto_trading"},
-    {"url": "https://cryptopanic.com/news/rss/",
-     "publisher": "CryptoPanic", "agent": "stratex", "category": "crypto_trading"},
-    {"url": "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=json",
-     "publisher": "CoinDesk Markets", "agent": "stratex", "category": "crypto_trading"},
-    {"url": "https://decrypt.co/feed",
-     "publisher": "Decrypt", "agent": "stratex", "category": "crypto_trading"},
-    {"url": "https://bitcoinmagazine.com/.rss/full/",
-     "publisher": "Bitcoin Magazine", "agent": "stratex", "category": "crypto_trading"},
-    {"url": "https://www.theblock.co/rss.xml",
-     "publisher": "The Block", "agent": "stratex", "category": "crypto_trading"},
-
+    {
+        "url": "https://cointelegraph.com/rss",
+        "publisher": "CoinTelegraph",
+        "agent": "stratex",
+        "category": "crypto_trading",
+    },
+    {
+        "url": "https://coindesk.com/arc/outboundfeeds/rss/",
+        "publisher": "CoinDesk",
+        "agent": "stratex",
+        "category": "crypto_trading",
+    },
+    {
+        "url": "https://cryptopanic.com/news/rss/",
+        "publisher": "CryptoPanic",
+        "agent": "stratex",
+        "category": "crypto_trading",
+    },
+    {
+        "url": "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=json",
+        "publisher": "CoinDesk Markets",
+        "agent": "stratex",
+        "category": "crypto_trading",
+    },
+    {
+        "url": "https://decrypt.co/feed",
+        "publisher": "Decrypt",
+        "agent": "stratex",
+        "category": "crypto_trading",
+    },
+    {
+        "url": "https://bitcoinmagazine.com/.rss/full/",
+        "publisher": "Bitcoin Magazine",
+        "agent": "stratex",
+        "category": "crypto_trading",
+    },
+    {
+        "url": "https://www.theblock.co/rss.xml",
+        "publisher": "The Block",
+        "agent": "stratex",
+        "category": "crypto_trading",
+    },
     # ── FUTURIS: Forecasting & Market Macro ───────────────────────────────
     # Futuris builds probabilistic forecasts. Needs economic data, earnings
     # calendars, macro shifts, analyst forecasts, upcoming events.
-    {"url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
-     "publisher": "CNBC Markets", "agent": "futuris", "category": "macro_economics"},
-    {"url": "https://www.marketwatch.com/rss/topstories",
-     "publisher": "MarketWatch", "agent": "futuris", "category": "macro_economics"},
-    {"url": "https://feeds.finance.yahoo.com/rss/2.0/headline",
-     "publisher": "Yahoo Finance", "agent": "futuris", "category": "macro_economics"},
-    {"url": "https://www.economist.com/finance-and-economics/rss.xml",
-     "publisher": "The Economist", "agent": "futuris", "category": "macro_economics"},
-    {"url": "https://www.ft.com/rss/home",
-     "publisher": "Financial Times", "agent": "futuris", "category": "macro_economics"},
-    {"url": "https://feeds.bloomberg.com/markets/news.rss",
-     "publisher": "Bloomberg", "agent": "futuris", "category": "macro_economics"},
-    {"url": "https://www.investing.com/rss/news.rss",
-     "publisher": "Investing.com", "agent": "futuris", "category": "macro_economics"},
-
+    {
+        "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+        "publisher": "CNBC Markets",
+        "agent": "futuris",
+        "category": "macro_economics",
+    },
+    {
+        "url": "https://www.marketwatch.com/rss/topstories",
+        "publisher": "MarketWatch",
+        "agent": "futuris",
+        "category": "macro_economics",
+    },
+    {
+        "url": "https://feeds.finance.yahoo.com/rss/2.0/headline",
+        "publisher": "Yahoo Finance",
+        "agent": "futuris",
+        "category": "macro_economics",
+    },
+    {
+        "url": "https://www.economist.com/finance-and-economics/rss.xml",
+        "publisher": "The Economist",
+        "agent": "futuris",
+        "category": "macro_economics",
+    },
+    {
+        "url": "https://www.ft.com/rss/home",
+        "publisher": "Financial Times",
+        "agent": "futuris",
+        "category": "macro_economics",
+    },
+    {
+        "url": "https://feeds.bloomberg.com/markets/news.rss",
+        "publisher": "Bloomberg",
+        "agent": "futuris",
+        "category": "macro_economics",
+    },
+    {
+        "url": "https://www.investing.com/rss/news.rss",
+        "publisher": "Investing.com",
+        "agent": "futuris",
+        "category": "macro_economics",
+    },
     # ── SENTINEL: Cybersecurity Threat Intelligence ────────────────────────
     # Sentinel is the security shield. Needs CVE alerts, breach reports,
     # malware campaigns, zero-days, threat actor activities.
-    {"url": "https://feeds.feedburner.com/TheHackersNews",
-     "publisher": "The Hacker News", "agent": "sentinel", "category": "cybersecurity"},
-    {"url": "https://www.bleepingcomputer.com/feed/",
-     "publisher": "BleepingComputer", "agent": "sentinel", "category": "cybersecurity"},
-    {"url": "https://krebsonsecurity.com/feed/",
-     "publisher": "Krebs on Security", "agent": "sentinel", "category": "cybersecurity"},
-    {"url": "https://www.darkreading.com/rss.xml",
-     "publisher": "Dark Reading", "agent": "sentinel", "category": "cybersecurity"},
-    {"url": "https://www.securityweek.com/feed",
-     "publisher": "SecurityWeek", "agent": "sentinel", "category": "cybersecurity"},
-    {"url": "https://isc.sans.edu/rssfeed_full.xml",
-     "publisher": "SANS ISC", "agent": "sentinel", "category": "cybersecurity"},
-    {"url": "https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-recent.meta",
-     "publisher": "NIST NVD CVEs", "agent": "sentinel", "category": "cybersecurity"},
-
+    {
+        "url": "https://feeds.feedburner.com/TheHackersNews",
+        "publisher": "The Hacker News",
+        "agent": "sentinel",
+        "category": "cybersecurity",
+    },
+    {
+        "url": "https://www.bleepingcomputer.com/feed/",
+        "publisher": "BleepingComputer",
+        "agent": "sentinel",
+        "category": "cybersecurity",
+    },
+    {
+        "url": "https://krebsonsecurity.com/feed/",
+        "publisher": "Krebs on Security",
+        "agent": "sentinel",
+        "category": "cybersecurity",
+    },
+    {
+        "url": "https://www.darkreading.com/rss.xml",
+        "publisher": "Dark Reading",
+        "agent": "sentinel",
+        "category": "cybersecurity",
+    },
+    {
+        "url": "https://www.securityweek.com/feed",
+        "publisher": "SecurityWeek",
+        "agent": "sentinel",
+        "category": "cybersecurity",
+    },
+    {
+        "url": "https://isc.sans.edu/rssfeed_full.xml",
+        "publisher": "SANS ISC",
+        "agent": "sentinel",
+        "category": "cybersecurity",
+    },
+    {
+        "url": "https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-recent.meta",
+        "publisher": "NIST NVD CVEs",
+        "agent": "sentinel",
+        "category": "cybersecurity",
+    },
     # ── FRIDAY (Master Orchestrator): AI, World, Tech Announcements ────────
     # FRIDAY is the central OS assistant. Needs general AI news, product
     # launches, world events, government actions, upcoming announcements.
-    {"url": "https://feeds.feedburner.com/TechCrunch",
-     "publisher": "TechCrunch", "agent": "friday", "category": "ai_tech"},
-    {"url": "https://www.theverge.com/rss/index.xml",
-     "publisher": "The Verge", "agent": "friday", "category": "ai_tech"},
-    {"url": "https://venturebeat.com/feed/",
-     "publisher": "VentureBeat AI", "agent": "friday", "category": "ai_tech"},
-    {"url": "https://www.wired.com/feed/rss",
-     "publisher": "Wired", "agent": "friday", "category": "ai_tech"},
-    {"url": "http://feeds.bbci.co.uk/news/rss.xml",
-     "publisher": "BBC News", "agent": "friday", "category": "world_events"},
-    {"url": "https://feeds.reuters.com/reuters/topNews",
-     "publisher": "Reuters", "agent": "friday", "category": "world_events"},
-    {"url": "https://timesofindia.indiatimes.com/rssfeeds/296589292.cms",
-     "publisher": "Times of India", "agent": "friday", "category": "world_events"},
-    {"url": "https://www.gsmarena.com/rss-news-reviews.php3",
-     "publisher": "GSMArena", "agent": "friday", "category": "product_launches"},
-    {"url": "https://www.91mobiles.com/feed/",
-     "publisher": "91Mobiles", "agent": "friday", "category": "product_launches"},
-    {"url": "https://www.engadget.com/rss.xml",
-     "publisher": "Engadget", "agent": "friday", "category": "product_launches"},
-
+    {
+        "url": "https://feeds.feedburner.com/TechCrunch",
+        "publisher": "TechCrunch",
+        "agent": "friday",
+        "category": "ai_tech",
+    },
+    {
+        "url": "https://www.theverge.com/rss/index.xml",
+        "publisher": "The Verge",
+        "agent": "friday",
+        "category": "ai_tech",
+    },
+    {
+        "url": "https://venturebeat.com/feed/",
+        "publisher": "VentureBeat AI",
+        "agent": "friday",
+        "category": "ai_tech",
+    },
+    {
+        "url": "https://www.wired.com/feed/rss",
+        "publisher": "Wired",
+        "agent": "friday",
+        "category": "ai_tech",
+    },
+    {
+        "url": "http://feeds.bbci.co.uk/news/rss.xml",
+        "publisher": "BBC News",
+        "agent": "friday",
+        "category": "world_events",
+    },
+    {
+        "url": "https://feeds.reuters.com/reuters/topNews",
+        "publisher": "Reuters",
+        "agent": "friday",
+        "category": "world_events",
+    },
+    {
+        "url": "https://timesofindia.indiatimes.com/rssfeeds/296589292.cms",
+        "publisher": "Times of India",
+        "agent": "friday",
+        "category": "world_events",
+    },
+    {
+        "url": "https://www.gsmarena.com/rss-news-reviews.php3",
+        "publisher": "GSMArena",
+        "agent": "friday",
+        "category": "product_launches",
+    },
+    {
+        "url": "https://www.91mobiles.com/feed/",
+        "publisher": "91Mobiles",
+        "agent": "friday",
+        "category": "product_launches",
+    },
+    {
+        "url": "https://www.engadget.com/rss.xml",
+        "publisher": "Engadget",
+        "agent": "friday",
+        "category": "product_launches",
+    },
     # ── CORTEX: Web Intelligence & Trends ─────────────────────────────────
     # Cortex does web operations and lead qualification.
     # Needs digital marketing trends, SEO changes, business news.
-    {"url": "https://searchengineland.com/feed",
-     "publisher": "Search Engine Land", "agent": "cortex", "category": "web_intelligence"},
-    {"url": "https://techcrunch.com/startups/feed/",
-     "publisher": "TechCrunch Startups", "agent": "cortex", "category": "web_intelligence"},
-    {"url": "https://www.producthunt.com/feed",
-     "publisher": "Product Hunt", "agent": "cortex", "category": "web_intelligence"},
-
+    {
+        "url": "https://searchengineland.com/feed",
+        "publisher": "Search Engine Land",
+        "agent": "cortex",
+        "category": "web_intelligence",
+    },
+    {
+        "url": "https://techcrunch.com/startups/feed/",
+        "publisher": "TechCrunch Startups",
+        "agent": "cortex",
+        "category": "web_intelligence",
+    },
+    {
+        "url": "https://www.producthunt.com/feed",
+        "publisher": "Product Hunt",
+        "agent": "cortex",
+        "category": "web_intelligence",
+    },
     # ── FORGE: Software Engineering & Dev Tools ────────────────────────────
     # Forge builds software autonomously. Needs framework releases,
     # language updates, GitHub trending, dev tools, API changes.
-    {"url": "https://feeds.arstechnica.com/arstechnica/index",
-     "publisher": "Ars Technica", "agent": "forge", "category": "software_dev"},
-    {"url": "https://github.blog/feed/",
-     "publisher": "GitHub Blog", "agent": "forge", "category": "software_dev"},
-    {"url": "https://www.infoq.com/feed/?variant=rss",
-     "publisher": "InfoQ", "agent": "forge", "category": "software_dev"},
-    {"url": "https://feeds.feedburner.com/ThePythonRange",
-     "publisher": "Python News", "agent": "forge", "category": "software_dev"},
-    {"url": "https://simonwillison.net/atom/everything/",
-     "publisher": "Simon Willison", "agent": "forge", "category": "software_dev"},
-
+    {
+        "url": "https://feeds.arstechnica.com/arstechnica/index",
+        "publisher": "Ars Technica",
+        "agent": "forge",
+        "category": "software_dev",
+    },
+    {
+        "url": "https://github.blog/feed/",
+        "publisher": "GitHub Blog",
+        "agent": "forge",
+        "category": "software_dev",
+    },
+    {
+        "url": "https://www.infoq.com/feed/?variant=rss",
+        "publisher": "InfoQ",
+        "agent": "forge",
+        "category": "software_dev",
+    },
+    {
+        "url": "https://feeds.feedburner.com/ThePythonRange",
+        "publisher": "Python News",
+        "agent": "forge",
+        "category": "software_dev",
+    },
+    {
+        "url": "https://simonwillison.net/atom/everything/",
+        "publisher": "Simon Willison",
+        "agent": "forge",
+        "category": "software_dev",
+    },
     # ── INFERENCE: AI Research & Model Updates ─────────────────────────────
     # Inference is the LLM gateway. Needs model releases, benchmarks,
     # provider changes, pricing updates, new API capabilities.
-    {"url": "https://openai.com/blog/rss.xml",
-     "publisher": "OpenAI Blog", "agent": "inference", "category": "ai_research"},
-    {"url": "https://www.anthropic.com/news/rss.xml",
-     "publisher": "Anthropic News", "agent": "inference", "category": "ai_research"},
-    {"url": "https://blog.google/technology/ai/rss/",
-     "publisher": "Google AI Blog", "agent": "inference", "category": "ai_research"},
-    {"url": "https://huggingface.co/blog/feed.xml",
-     "publisher": "Hugging Face Blog", "agent": "inference", "category": "ai_research"},
-    {"url": "https://feeds.feedburner.com/aiweekly",
-     "publisher": "AI Weekly", "agent": "inference", "category": "ai_research"},
-    {"url": "https://export.arxiv.org/rss/cs.AI",
-     "publisher": "ArXiv CS.AI", "agent": "inference", "category": "ai_research"},
-    {"url": "https://export.arxiv.org/rss/cs.LG",
-     "publisher": "ArXiv ML", "agent": "inference", "category": "ai_research"},
+    {
+        "url": "https://openai.com/blog/rss.xml",
+        "publisher": "OpenAI Blog",
+        "agent": "inference",
+        "category": "ai_research",
+    },
+    {
+        "url": "https://www.anthropic.com/news/rss.xml",
+        "publisher": "Anthropic News",
+        "agent": "inference",
+        "category": "ai_research",
+    },
+    {
+        "url": "https://blog.google/technology/ai/rss/",
+        "publisher": "Google AI Blog",
+        "agent": "inference",
+        "category": "ai_research",
+    },
+    {
+        "url": "https://huggingface.co/blog/feed.xml",
+        "publisher": "Hugging Face Blog",
+        "agent": "inference",
+        "category": "ai_research",
+    },
+    {
+        "url": "https://feeds.feedburner.com/aiweekly",
+        "publisher": "AI Weekly",
+        "agent": "inference",
+        "category": "ai_research",
+    },
+    {
+        "url": "https://export.arxiv.org/rss/cs.AI",
+        "publisher": "ArXiv CS.AI",
+        "agent": "inference",
+        "category": "ai_research",
+    },
+    {
+        "url": "https://export.arxiv.org/rss/cs.LG",
+        "publisher": "ArXiv ML",
+        "agent": "inference",
+        "category": "ai_research",
+    },
 ]
 
-CRAWL_INTERVAL_SECONDS = 300   # Every 5 minutes
+CRAWL_INTERVAL_SECONDS = 300  # Every 5 minutes
 MAX_ITEMS_PER_FEED = 25
-MAX_ARTICLE_BYTES = 400_000    # 400 KB
+MAX_ARTICLE_BYTES = 400_000  # 400 KB
 CHUNK_SIZE = 600
 CHUNK_OVERLAP = 80
 
@@ -172,6 +349,7 @@ CHUNK_OVERLAP = 80
 # ---------------------------------------------------------------------------
 # Utility functions
 # ---------------------------------------------------------------------------
+
 
 def _strip_html(text: str) -> str:
     # First unwrap CDATA sections so content inside is preserved
@@ -214,7 +392,7 @@ def _chunk_text(text: str) -> list[str]:
     words = text.split()
     chunks, i = [], 0
     while i < len(words):
-        chunk_words = words[i:i + CHUNK_SIZE]
+        chunk_words = words[i : i + CHUNK_SIZE]
         chunks.append(" ".join(chunk_words))
         i += CHUNK_SIZE - CHUNK_OVERLAP
     return chunks or [text[:CHUNK_SIZE]]
@@ -223,6 +401,7 @@ def _chunk_text(text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # RSS / Atom parser
 # ---------------------------------------------------------------------------
+
 
 def _parse_feed(xml_text: str, feed_config: dict[str, str]) -> list[dict[str, Any]]:
     publisher = feed_config["publisher"]
@@ -241,23 +420,31 @@ def _parse_feed(xml_text: str, feed_config: dict[str, str]) -> list[dict[str, An
                 link_m = re.search(r"<link[^>]*>(.*?)</link>", entry, re.DOTALL)
             if not link_m:
                 link_m = re.search(r"<id[^>]*>(.*?)</id>", entry, re.DOTALL)
-            summary_m = re.search(r"<summary[^>]*>(.*?)</summary>", entry, re.DOTALL) or \
-                        re.search(r"<content[^>]*>(.*?)</content>", entry, re.DOTALL)
-            date_m = re.search(r"<published[^>]*>(.*?)</published>", entry, re.DOTALL) or \
-                     re.search(r"<updated[^>]*>(.*?)</updated>", entry, re.DOTALL)
+            summary_m = re.search(r"<summary[^>]*>(.*?)</summary>", entry, re.DOTALL) or re.search(
+                r"<content[^>]*>(.*?)</content>", entry, re.DOTALL
+            )
+            date_m = re.search(r"<published[^>]*>(.*?)</published>", entry, re.DOTALL) or re.search(
+                r"<updated[^>]*>(.*?)</updated>", entry, re.DOTALL
+            )
 
             url = _strip_html(link_m.group(1) if link_m else "").strip()
             if not url or not url.startswith("http"):
                 continue
-            items.append({
-                "url": url,
-                "title": _strip_html(title_m.group(1)) if title_m else "Untitled",
-                "summary": _strip_html(summary_m.group(1)) if summary_m else "",
-                "published_at": _parse_iso_date(date_m.group(1) if date_m else None),
-                "publisher": publisher, "agent": agent, "category": category,
-            })
+            items.append(
+                {
+                    "url": url,
+                    "title": _strip_html(title_m.group(1)) if title_m else "Untitled",
+                    "summary": _strip_html(summary_m.group(1)) if summary_m else "",
+                    "published_at": _parse_iso_date(date_m.group(1) if date_m else None),
+                    "publisher": publisher,
+                    "agent": agent,
+                    "category": category,
+                }
+            )
     else:
-        for item in re.findall(r"<item[^>]*>(.*?)</item>", xml_text, re.DOTALL)[:MAX_ITEMS_PER_FEED]:
+        for item in re.findall(r"<item[^>]*>(.*?)</item>", xml_text, re.DOTALL)[
+            :MAX_ITEMS_PER_FEED
+        ]:
             title_m = re.search(r"<title[^>]*>(.*?)</title>", item, re.DOTALL)
             link_m = re.search(r"<link[^>]*>(.*?)</link>", item, re.DOTALL)
             if not link_m:
@@ -270,13 +457,17 @@ def _parse_feed(xml_text: str, feed_config: dict[str, str]) -> list[dict[str, An
             url = _strip_html(link_m.group(1) if link_m else "").strip()
             if not url or not url.startswith("http"):
                 continue
-            items.append({
-                "url": url,
-                "title": _strip_html(title_m.group(1)) if title_m else "Untitled",
-                "summary": _strip_html(desc_m.group(1)) if desc_m else "",
-                "published_at": _parse_rss_date(date_m.group(1) if date_m else None),
-                "publisher": publisher, "agent": agent, "category": category,
-            })
+            items.append(
+                {
+                    "url": url,
+                    "title": _strip_html(title_m.group(1)) if title_m else "Untitled",
+                    "summary": _strip_html(desc_m.group(1)) if desc_m else "",
+                    "published_at": _parse_rss_date(date_m.group(1) if date_m else None),
+                    "publisher": publisher,
+                    "agent": agent,
+                    "category": category,
+                }
+            )
 
     return items
 
@@ -356,12 +547,15 @@ async def _ingest_article(session: Any, article: dict[str, Any], full_text: str)
 # Main crawl cycle
 # ---------------------------------------------------------------------------
 
+
 async def crawl_once(session_factory: Any | None = None) -> dict[str, Any]:
     factory = session_factory or get_sessionmaker()
     stats: dict[str, Any] = {
-        "feeds_crawled": 0, "articles_new": 0,
-        "articles_skipped": 0, "errors": 0,
-        "by_agent": {}
+        "feeds_crawled": 0,
+        "articles_new": 0,
+        "articles_skipped": 0,
+        "errors": 0,
+        "by_agent": {},
     }
 
     headers = {
@@ -402,9 +596,7 @@ async def crawl_once(session_factory: Any | None = None) -> dict[str, Any]:
                         if is_new:
                             stats["articles_new"] += 1
                             stats["by_agent"][agent] = stats["by_agent"].get(agent, 0) + 1
-                            logger.info(
-                                f"[{agent.upper()}] Ingested: {article['title'][:70]}"
-                            )
+                            logger.info(f"[{agent.upper()}] Ingested: {article['title'][:70]}")
                         else:
                             stats["articles_skipped"] += 1
 
@@ -427,6 +619,7 @@ async def crawl_once(session_factory: Any | None = None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Background Loop
 # ---------------------------------------------------------------------------
+
 
 class NewsIngester:
     """Continuously crawls FRIDAY Universe targeted feeds."""

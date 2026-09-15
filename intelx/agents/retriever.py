@@ -94,6 +94,7 @@ class RetrieverAgent(BaseAgent):
 
         # Instant cache bypass: check if source was already ingested into database
         from sqlalchemy import select
+
         stmt_s = select(Source).where(Source.location == location)
         existing_src = (await session.execute(stmt_s)).scalar_one_or_none()
         if existing_src:
@@ -131,9 +132,15 @@ class RetrieverAgent(BaseAgent):
                     domain = None
                 else:
                     fetch_res = await self.http_connector.fetch(location)
-                    if (not fetch_res.robots_ok or not fetch_res.content) and candidate.snippet and len(candidate.snippet.strip()) >= 15:
-                        logger.info(f"Using snippet fallback for {location} (robots/empty response)")
-                        raw_bytes = f"{candidate.title}\n\n{candidate.snippet.strip()}".encode("utf-8")
+                    if (
+                        (not fetch_res.robots_ok or not fetch_res.content)
+                        and candidate.snippet
+                        and len(candidate.snippet.strip()) >= 15
+                    ):
+                        logger.info(
+                            f"Using snippet fallback for {location} (robots/empty response)"
+                        )
+                        raw_bytes = f"{candidate.title}\n\n{candidate.snippet.strip()}".encode()
                         content_type = "text/plain; format=snippet"
                         kind = SourceKind.WEB
                         domain = parsed.hostname

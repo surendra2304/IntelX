@@ -76,13 +76,15 @@ class AIUniverseProvider(BaseLLMProvider):
                     cid = c.get("id") or ""
                     conf = float(c.get("confidence", 0.85) or 0.85)
                     if txt:
-                        evidence_list.append({
-                            "claim_id": cid,
-                            "claim": txt,
-                            "verbatim_span": txt,
-                            "document_source": "intelx_verified_source",
-                            "credibility_score": min(max(conf, 0.0), 1.0),
-                        })
+                        evidence_list.append(
+                            {
+                                "claim_id": cid,
+                                "claim": txt,
+                                "verbatim_span": txt,
+                                "document_source": "intelx_verified_source",
+                                "credibility_score": min(max(conf, 0.0), 1.0),
+                            }
+                        )
             except Exception as ex:
                 logger.debug(f"Could not parse evidence claims JSON from prompt: {ex}")
 
@@ -200,6 +202,7 @@ class AIUniverseProvider(BaseLLMProvider):
         stripped = text_output.strip()
         if stripped.startswith("```"):
             import re
+
             m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", stripped)
             if m:
                 text_output = m.group(1).strip()
@@ -239,7 +242,9 @@ class AIUniverseProvider(BaseLLMProvider):
     async def _execute_ask_bypass(
         self,
         messages: list[dict[str, str]],
-        headers: dict[str, str],  # kept for API compat; ignored — we build dedicated ask headers below
+        headers: dict[
+            str, str
+        ],  # kept for API compat; ignored — we build dedicated ask headers below
         schema_model: type[BaseModel] | None = None,
     ) -> str | None:
         """Query Inference live multi-model LLM reasoning endpoint to produce genuine intelligence."""
@@ -277,7 +282,9 @@ class AIUniverseProvider(BaseLLMProvider):
         ask_url = f"{self.base_url}/ask"
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                logger.info(f"[AI-Universe] Calling /ask bypass at {ask_url} with key={inference_key[:8]}...")
+                logger.info(
+                    f"[AI-Universe] Calling /ask bypass at {ask_url} with key={inference_key[:8]}..."
+                )
                 resp = await client.post(ask_url, json=ask_payload, headers=ask_headers)
                 if resp.status_code == 404:
                     alt = f"{self.base_url}/v1/ask"

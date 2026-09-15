@@ -1,7 +1,10 @@
 from __future__ import annotations
+
+import hashlib
+import re
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
-import hashlib, re
+
 
 @dataclass(frozen=True, slots=True)
 class NormalizedSource:
@@ -9,6 +12,7 @@ class NormalizedSource:
     canonical_url: str
     domain: str
     content_hash: str
+
 
 class EvidenceNormalizer:
     def normalize_url(self, url: str) -> str:
@@ -24,11 +28,17 @@ class EvidenceNormalizer:
     def make_source(self, url: str, content: str) -> NormalizedSource:
         canonical = self.normalize_url(url)
         domain = urlsplit(canonical).hostname or ""
-        return NormalizedSource(canonical, canonical, domain,
-                                hashlib.sha256(content.encode("utf-8", "replace")).hexdigest())
+        return NormalizedSource(
+            canonical,
+            canonical,
+            domain,
+            hashlib.sha256(content.encode("utf-8", "replace")).hexdigest(),
+        )
 
-    def exact_span(self, document: str, quote: str, hint: int | None = None) -> tuple[int, int] | None:
-        if hint is not None and document[hint:hint+len(quote)] == quote:
-            return hint, hint+len(quote)
+    def exact_span(
+        self, document: str, quote: str, hint: int | None = None
+    ) -> tuple[int, int] | None:
+        if hint is not None and document[hint : hint + len(quote)] == quote:
+            return hint, hint + len(quote)
         idx = document.find(quote)
-        return None if idx < 0 else (idx, idx+len(quote))
+        return None if idx < 0 else (idx, idx + len(quote))

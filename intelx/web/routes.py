@@ -225,6 +225,7 @@ async def trigger_autonomous_web(
 ):
     """Trigger an autonomous investigation on demand from the web dashboard."""
     import random
+
     from intelx.orchestration.autonomous_researcher import AUTONOMOUS_RESEARCH_TOPICS
 
     topic = random.choice(AUTONOMOUS_RESEARCH_TOPICS)

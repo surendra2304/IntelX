@@ -174,9 +174,16 @@ class ExtractorAgent(BaseAgent):
 
         for chunk in chunks:
             from intelx.connectors.context_firewall import ContextFirewall
-            firewall_res = ContextFirewall().inspect(trusted="Extract structured claims, entities, and events", external=chunk.text, source_id=source_id)
+
+            firewall_res = ContextFirewall().inspect(
+                trusted="Extract structured claims, entities, and events",
+                external=chunk.text,
+                source_id=source_id,
+            )
             if firewall_res.injection_signals:
-                logger.warning(f"ContextFirewall detected potential injection signals in chunk {chunk.id}: {firewall_res.injection_signals}")
+                logger.warning(
+                    f"ContextFirewall detected potential injection signals in chunk {chunk.id}: {firewall_res.injection_signals}"
+                )
 
             doc_block = format_external_document(document.id, source_id, chunk.text)
             user_prompt = (
@@ -312,6 +319,7 @@ class ExtractorAgent(BaseAgent):
         # Resilient fallback: If upstream LLM emitted 0 claims, extract factual declarative statements directly
         if total_attempted == 0 and chunks:
             from intelx.models.providers import MockProvider
+
             for chunk in chunks:
                 doc_claims = MockProvider._mock_extract_claims([{"content": chunk.text}])
                 for cd in doc_claims.get("claims", []):

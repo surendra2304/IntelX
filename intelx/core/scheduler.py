@@ -15,7 +15,13 @@ class RetryPolicy:
     attempts: int = 2
     base_delay: float = 0.25
     max_delay: float = 5.0
-    retryable_errors: tuple[str, ...] = ("timeout", "429", "503", "connection reset", "temporarily unavailable")
+    retryable_errors: tuple[str, ...] = (
+        "timeout",
+        "429",
+        "503",
+        "connection reset",
+        "temporarily unavailable",
+    )
 
 
 def retryable(exc: Exception, policy: RetryPolicy = RetryPolicy()) -> bool:

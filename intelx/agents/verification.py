@@ -38,8 +38,12 @@ class ClaimVerifier:
             doc = documents.get(source_id, "")
             if hasattr(ev, "validate_against") and ev.validate_against(doc):
                 checked += 1
-            elif hasattr(ev, "verbatim_quote") and hasattr(ev, "start_char") and hasattr(ev, "end_char"):
-                if doc and doc[ev.start_char:ev.end_char] == ev.verbatim_quote:
+            elif (
+                hasattr(ev, "verbatim_quote")
+                and hasattr(ev, "start_char")
+                and hasattr(ev, "end_char")
+            ):
+                if doc and doc[ev.start_char : ev.end_char] == ev.verbatim_quote:
                     checked += 1
 
         if checked == 0:

@@ -1,8 +1,9 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-from urllib.parse import urlparse
 from ipaddress import ip_address
-import socket
+from urllib.parse import urlparse
+
 
 @dataclass(frozen=True, slots=True)
 class DomainPolicy:
@@ -13,7 +14,10 @@ class DomainPolicy:
     max_fetches: int = 60
     max_cost_usd: float = 10.0
 
-class PolicyViolation(ValueError): pass
+
+class PolicyViolation(ValueError):
+    pass
+
 
 class ResearchPolicy:
     def __init__(self, config: DomainPolicy):
