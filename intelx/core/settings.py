@@ -27,6 +27,16 @@ class Settings(BaseSettings):
         default="sqlite+aiosqlite:///./data/intelx.db",
         description="Async SQLAlchemy database URL (SQLite or PostgreSQL)",
     )
+    TURSO_DATABASE_URL: str | None = Field(
+        default="https://intelx-db-surendra2304.aws-ap-south-1.turso.io",
+        validation_alias=AliasChoices("TURSO_DATABASE_URL", "INTELX_TURSO_DATABASE_URL"),
+        description="Turso LibSQL cloud database URL",
+    )
+    TURSO_AUTH_TOKEN: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("TURSO_AUTH_TOKEN", "INTELX_TURSO_AUTH_TOKEN"),
+        description="Turso LibSQL cloud database auth token",
+    )
     SECRET_KEY: str = Field(
         default="intelx-super-secret-key-change-in-production",
         description="Secret key used for crypto and session signing",

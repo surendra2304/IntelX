@@ -16,6 +16,10 @@ services:
         value: "/app/data"
       - key: INTELX_DB_URL
         value: "sqlite+aiosqlite:////app/data/intelx.db"
+      - key: TURSO_DATABASE_URL
+        value: "https://intelx-db-surendra2304.aws-ap-south-1.turso.io"
+      - key: TURSO_AUTH_TOKEN
+        sync: false
       - key: INTELX_API_KEY
         value: "intelx_api"
       # Live Mesh Interconnects
