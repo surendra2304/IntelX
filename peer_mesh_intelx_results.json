@@ -35,7 +35,7 @@
       "status": 200,
       "latency_ms": 2022.11,
       "endpoint_used": "/health",
-      "full_url": "http://localhost:8003/health",
+      "full_url": "https://sentinel-a861.onrender.com/health",
       "response_snippet": "{\"status\":\"HEALTHY\",\"service\":\"SENTINEL\",\"version\":\"1.0.0\",\"environment\":\"development\",\"kill_switch_",
       "success": true,
       "error": null,
