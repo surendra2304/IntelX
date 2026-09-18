@@ -39,7 +39,7 @@ class AIUniverseProvider(BaseLLMProvider):
     ) -> None:
         settings = get_settings()
         self.base_url = (
-            base_url or settings.AI_UNIVERSE_BASE_URL or "http://localhost:9000"
+            base_url or settings.AI_UNIVERSE_BASE_URL or "https://friday-zw59.onrender.com"
         ).rstrip("/")
         self.api_key = api_key or settings.AI_UNIVERSE_API_KEY
         self.timeout_seconds = timeout_seconds

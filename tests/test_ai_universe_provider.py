@@ -32,7 +32,7 @@ def test_ai_universe_role_persona_mappings():
 @respx.mock
 async def test_ai_universe_provider_successful_completion():
     """Verify AIUniverseProvider sends request and receives structured multi-agent response."""
-    endpoint_url = "http://localhost:9000/v1/intelx/research"
+    endpoint_url = "https://friday-zw59.onrender.com/v1/intelx/research"
     mock_response = {
         "response": json.dumps({"summary": "Debated and verified claim.", "confidence": 0.95}),
         "confidence": 0.95,
@@ -47,7 +47,7 @@ async def test_ai_universe_provider_successful_completion():
 
     respx.post(endpoint_url).mock(return_value=httpx.Response(200, json=mock_response))
 
-    provider = AIUniverseProvider(base_url="http://localhost:9000", api_key="aiu-secret-key")
+    provider = AIUniverseProvider(base_url="https://friday-zw59.onrender.com", api_key="aiu-secret-key")
     messages = [{"role": "user", "content": "Verify claim regarding quantum coherence time."}]
 
     text, usage = await provider.complete(
@@ -70,8 +70,8 @@ async def test_ai_universe_provider_successful_completion():
 @respx.mock
 async def test_ai_universe_provider_endpoint_fallback():
     """Verify provider falls back to /intelx/research if /v1/intelx/research returns 404."""
-    v1_url = "http://localhost:9000/v1/intelx/research"
-    alt_url = "http://localhost:9000/intelx/research"
+    v1_url = "https://friday-zw59.onrender.com/v1/intelx/research"
+    alt_url = "https://friday-zw59.onrender.com/intelx/research"
 
     respx.post(v1_url).mock(return_value=httpx.Response(404))
     respx.post(alt_url).mock(
@@ -80,7 +80,7 @@ async def test_ai_universe_provider_endpoint_fallback():
         )
     )
 
-    provider = AIUniverseProvider(base_url="http://localhost:9000")
+    provider = AIUniverseProvider(base_url="https://friday-zw59.onrender.com")
     text, _ = await provider.complete(
         messages=[{"role": "user", "content": "Test fallback"}],
         model="ai-universe-v1",
@@ -93,8 +93,8 @@ async def test_ai_universe_provider_endpoint_fallback():
 @respx.mock
 async def test_gateway_fallback_chain_from_ai_universe_to_mock():
     """Verify ModelGateway falls back gracefully to MockProvider when AI-Universe is offline."""
-    v1_url = "http://localhost:9000/v1/intelx/research"
-    alt_url = "http://localhost:9000/intelx/research"
+    v1_url = "https://friday-zw59.onrender.com/v1/intelx/research"
+    alt_url = "https://friday-zw59.onrender.com/intelx/research"
 
     # Simulate connection failure to AI-Universe
     respx.post(v1_url).mock(side_effect=httpx.ConnectError("Connection refused"))
@@ -103,7 +103,7 @@ async def test_gateway_fallback_chain_from_ai_universe_to_mock():
     custom_settings = Settings(
         MOCK_MODE=False,
         LLM_PROVIDER="ai_universe",
-        AI_UNIVERSE_BASE_URL="http://localhost:9000",
+        AI_UNIVERSE_BASE_URL="https://friday-zw59.onrender.com",
         LLM_API_KEY=None,
     )
     gateway = ModelGateway(settings=custom_settings)
@@ -150,8 +150,8 @@ def test_confidence_formula_with_ai_universe_multiplier():
 @respx.mock
 async def test_ai_universe_provider_canned_mock_bypass():
     """Verify that when endpoint returns a canned mock template, provider automatically bypasses via /ask."""
-    v1_url = "http://localhost:9000/v1/intelx/research"
-    ask_url = "http://localhost:9000/ask"
+    v1_url = "https://friday-zw59.onrender.com/v1/intelx/research"
+    ask_url = "https://friday-zw59.onrender.com/ask"
 
     canned_resp = {
         "response": {
@@ -170,7 +170,7 @@ async def test_ai_universe_provider_canned_mock_bypass():
     respx.post(v1_url).mock(return_value=httpx.Response(200, json=canned_resp))
     respx.post(ask_url).mock(return_value=httpx.Response(200, json=real_ask_resp))
 
-    provider = AIUniverseProvider(base_url="http://localhost:9000", api_key="test-key")
+    provider = AIUniverseProvider(base_url="https://friday-zw59.onrender.com", api_key="test-key")
     messages = [{"role": "user", "content": "RESEARCH OBJECTIVE: free fire release date"}]
 
     text, usage = await provider.complete(

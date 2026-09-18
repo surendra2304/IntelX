@@ -81,7 +81,7 @@ class Settings(BaseSettings):
 
     # Inference Multi-Agent Gateway Provider
     INFERENCE_URL: str = Field(
-        default="https://inference-3i2b.onrender.com",
+        default="https://inference-r1sn.onrender.com",
         validation_alias=AliasChoices(
             "INTELX_INFERENCE_URL",
             "INFERENCE_URL",
@@ -112,7 +112,7 @@ class Settings(BaseSettings):
 
     # Memora Cloud Memory Integration
     MEMORA_URL: str = Field(
-        default="https://memora-9zr9.onrender.com",
+        default="https://memora-cavc.onrender.com",
         validation_alias=AliasChoices("INTELX_MEMORA_URL", "MEMORA_URL", "MEMORA_BASE_URL"),
         description="Base URL for Memora persistent memory server",
     )
@@ -124,7 +124,7 @@ class Settings(BaseSettings):
 
     # Futuris Forecasting Integration
     FUTURIS_BASE_URL: str = Field(
-        default="https://futuris-x4f4.onrender.com",
+        default="https://futuris-th6f.onrender.com",
         validation_alias=AliasChoices("INTELX_FUTURIS_BASE_URL", "FUTURIS_BASE_URL", "FUTURIS_URL"),
         description="Base URL for Futuris predictive forecasting engine",
     )
@@ -134,14 +134,14 @@ class Settings(BaseSettings):
         description="API key for Futuris integration",
     )
     FUTURIS_WEBHOOK_URL: str | None = Field(
-        default="https://futuris-x4f4.onrender.com/api/v1/webhooks/research-finding-relevant",
+        default="https://futuris-th6f.onrender.com/api/v1/webhooks/research-finding-relevant",
         validation_alias=AliasChoices("INTELX_FUTURIS_WEBHOOK_URL", "FUTURIS_WEBHOOK_URL"),
         description="Webhook URL on Futuris for research-triggered notifications",
     )
 
     # StrateX Algorithmic Trading Integration
     STRATEX_BASE_URL: str = Field(
-        default="https://stratex-ucjz.onrender.com",
+        default="https://stratex-8wj1.onrender.com",
         validation_alias=AliasChoices("INTELX_STRATEX_BASE_URL", "STRATEX_BASE_URL", "STRATEX_URL"),
         description="Base URL for StrateX trading engine",
     )
@@ -151,7 +151,7 @@ class Settings(BaseSettings):
         description="API key for StrateX integration",
     )
     STRATEX_WEBHOOK_URL: str | None = Field(
-        default="https://stratex-ucjz.onrender.com/api/v1/webhooks/intelx-signal",
+        default="https://stratex-8wj1.onrender.com/api/v1/webhooks/intelx-signal",
         validation_alias=AliasChoices("INTELX_STRATEX_WEBHOOK_URL", "STRATEX_WEBHOOK_URL"),
         description="Webhook URL on StrateX for automated trade execution triggers",
     )

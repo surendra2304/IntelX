@@ -24,7 +24,7 @@ async def main():
     print("Client: intelx.models.ai_universe_provider.AIUniverseProvider")
     print("=" * 80)
 
-    url = os.getenv("INFERENCE_URL", "https://inference-3i2b.onrender.com")
+    url = os.getenv("INFERENCE_URL", "https://inference-r1sn.onrender.com")
     key = os.getenv("INFERENCE_API_KEY", "inference_api")
     provider = AIUniverseProvider(base_url=url, api_key=key, timeout_seconds=45.0)
     print(f"Target URL: {provider.base_url}")

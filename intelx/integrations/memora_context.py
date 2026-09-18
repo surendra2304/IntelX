@@ -18,7 +18,7 @@ class MemoraMemoryClient:
 
     def __init__(self, base_url: str | None = None, api_key: str | None = None) -> None:
         settings = get_settings()
-        self.base_url = base_url or settings.MEMORA_URL or "https://memora-9zr9.onrender.com"
+        self.base_url = base_url or settings.MEMORA_URL or "https://memora-cavc.onrender.com"
         self.api_key = api_key or settings.MEMORA_API_KEY
 
     async def store_research_memory(
