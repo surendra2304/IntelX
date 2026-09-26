@@ -32,6 +32,7 @@ from sqlalchemy import select
 from intelx.core.enums import SourceKind, TrustTier
 from intelx.db.models import Chunk, Document, Source
 from intelx.db.session import get_sessionmaker
+from intelx.integrations.memora_events import publish_research_notice
 
 logger = logging.getLogger("intelx.ingester")
 
@@ -557,6 +558,7 @@ async def crawl_once(session_factory: Any | None = None) -> dict[str, Any]:
         "errors": 0,
         "by_agent": {},
     }
+    new_articles_by_agent: dict[str, list[dict[str, Any]]] = {}
 
     headers = {
         "User-Agent": "IntelX-FRIDAY-Bot/2.0 (FRIDAY Universe Intelligence Engine)",
@@ -596,6 +598,7 @@ async def crawl_once(session_factory: Any | None = None) -> dict[str, Any]:
                         if is_new:
                             stats["articles_new"] += 1
                             stats["by_agent"][agent] = stats["by_agent"].get(agent, 0) + 1
+                            new_articles_by_agent.setdefault(agent, []).append(article)
                             logger.info(f"[{agent.upper()}] Ingested: {article['title'][:70]}")
                         else:
                             stats["articles_skipped"] += 1
@@ -607,6 +610,58 @@ async def crawl_once(session_factory: Any | None = None) -> dict[str, Any]:
             except Exception as ex:
                 logger.warning(f"Feed error {feed_url}: {ex}")
                 stats["errors"] += 1
+
+    # Send one bounded digest per agent category, rather than flooding each
+    # subscriber with a separate event for every crawled headline.
+    for agent, agent_articles in new_articles_by_agent.items():
+        for batch_start in range(0, len(agent_articles), 20):
+            articles = agent_articles[batch_start : batch_start + 20]
+            sources = [
+                {
+                    "title": article["title"],
+                    "url": article["url"],
+                    "domain": urlparse(article["url"]).netloc,
+                    "publisher": article["publisher"],
+                    "published_at": (
+                        article["published_at"].isoformat()
+                        if article.get("published_at")
+                        else None
+                    ),
+                    "trust_tier": "LIKELY_RELIABLE",
+                }
+                for article in articles
+            ]
+            notice_id = hashlib.sha256(
+                "\n".join(sorted(_fingerprint(article["url"]) for article in articles)).encode()
+            ).hexdigest()
+            summary = (
+                "New feed items collected by IntelX; claims have not been independently verified.\n"
+            )
+            summary += "\n".join(
+                f"- {article['title']}: {(article.get('summary') or '')[:160]}"
+                for article in articles
+            )
+            try:
+                notice = await publish_research_notice(
+                    target_agent="all",
+                    run_id=f"news-{agent}-{notice_id}",
+                    finding_summary=summary,
+                    category=articles[0]["category"],
+                    domain="intelx.news",
+                    # Neutral relevance placeholder; not a truth probability.
+                    confidence=0.5,
+                    recommended_targets=[agent],
+                    sources=sources,
+                )
+                if notice.get("status") != "accepted":
+                    logger.warning(
+                        "[NewsIngester] Memora digest for %s was not accepted: %s",
+                        agent,
+                        notice.get("status", "unknown"),
+                    )
+            except Exception:
+                # A temporary mesh outage must not roll back stored articles or halt crawling.
+                logger.exception("[NewsIngester] Failed to publish Memora digest for %s", agent)
 
     logger.info(
         f"[NewsIngester] Cycle done — "
