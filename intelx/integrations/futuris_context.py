@@ -552,6 +552,15 @@ class ResearchTriggeredForecasting:
             "data": data_block,
         }
 
+        from intelx.integrations.memora_events import publish_research_notice
+        memora_event = await publish_research_notice(
+            # Publish one idempotent Universe notice; Memora's recipient filter
+            # makes it available to every agent, including FRIDAY's supervisor.
+            target_agent="all", run_id=run_id, finding_summary=finding_text,
+            category=category, domain=domain, confidence=confidence,
+            recommended_targets=targets,
+        )
+
         # If in Mock Mode or URL is unconfigured, return simulated success
         if settings.MOCK_MODE or not target_url:
             logger.info(
@@ -562,6 +571,7 @@ class ResearchTriggeredForecasting:
                 "event": "research_finding_relevant",
                 "category": category,
                 "payload": payload,
+                "memora_event": memora_event,
             }
 
         try:
@@ -587,6 +597,7 @@ class ResearchTriggeredForecasting:
                 "event": "research_finding_relevant",
                 "category": category,
                 "payload": payload,
+                "memora_event": memora_event,
             }
         except Exception as ex:
             logger.warning(f"Failed to deliver Futuris webhook to {target_url}: {ex}")
@@ -596,6 +607,7 @@ class ResearchTriggeredForecasting:
                 "event": "research_finding_relevant",
                 "category": category,
                 "payload": payload,
+                "memora_event": memora_event,
             }
 
 

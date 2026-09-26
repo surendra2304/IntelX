@@ -68,7 +68,7 @@ async def test_production_mock_mode_and_seeded_keys_rejected(db_session_factory)
         LLM_PROVIDER="ai_universe",
         SECRET_KEY="intelx-super-secret-key-change-in-production",
     )
-    with pytest.raises(RuntimeError, match="Insecure default SECRET_KEY detected in production"):
+    with pytest.raises(RuntimeError, match="Production signing/API secrets must be unique"):
         validate_production_security(prod_dev_secret)
 
     # 3. Seeding demo keys in production is rejected
@@ -78,6 +78,7 @@ async def test_production_mock_mode_and_seeded_keys_rejected(db_session_factory)
         LLM_MODEL="google/gemini-2.5-flash",
         LLM_PROVIDER="ai_universe",
         SECRET_KEY="secure-production-secret-for-intelx",
+        INTELX_API_KEY="intelx_production_test_key_0123456789abcdef",
         API_KEYS=["dev-admin-key"],
     )
     async with db_session_factory() as session:

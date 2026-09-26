@@ -83,14 +83,21 @@ async function syncWithFuturis(runId) {
   const btn = document.getElementById('btn-sync-futuris');
   const statusEl = document.getElementById('status-futuris');
   if (btn) btn.disabled = true;
+  const findingText = document.getElementById('sync-finding')?.value?.trim();
+  if (!findingText) {
+    if (statusEl) statusEl.textContent = 'Select a saved research finding first.';
+    if (btn) btn.disabled = false;
+    return;
+  }
   if (statusEl) statusEl.innerHTML = '<span style="color:var(--color-blue);">Triggering forecast recalibration on Futuris...</span>';
 
   try {
     const res = await fetch('/api/v1/futuris/trigger-forecast', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-API-Key': 'intelx_api' },
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        finding_text: 'Manual operator catalyst synchronization from IntelX research',
+        finding_text: findingText,
         run_id: runId,
         domain: 'market',
         confidence: 0.90
@@ -113,14 +120,21 @@ async function syncWithStratex(runId) {
   const btn = document.getElementById('btn-sync-stratex');
   const statusEl = document.getElementById('status-stratex');
   if (btn) btn.disabled = true;
+  const findingText = document.getElementById('sync-finding')?.value?.trim();
+  if (!findingText) {
+    if (statusEl) statusEl.textContent = 'Select a saved research finding first.';
+    if (btn) btn.disabled = false;
+    return;
+  }
   if (statusEl) statusEl.innerHTML = '<span style="color:var(--color-blue);">Dispatching market trade signal to StrateX...</span>';
 
   try {
     const res = await fetch('/api/v1/stratex/trigger-signal', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-API-Key': 'intelx_api' },
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        finding_text: 'Manual operator trade signal dispatch: Bullish accumulation catalyst verified',
+        finding_text: findingText,
         run_id: runId,
         domain: 'market',
         confidence: 0.90

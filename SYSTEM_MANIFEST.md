@@ -13,8 +13,8 @@
 | :--- | :--- |
 | **Live Production URL** | [https://intelx-mygl.onrender.com](https://intelx-mygl.onrender.com) |
 | **Health Check Endpoint** | https://intelx-mygl.onrender.com/health |
-| **Master API Key Variable** | INTELX_API_KEY=intelx_api |
-| **Authentication Header** | Authorization: Bearer intelx_api |
+| **Master API Key Variable** | `INTELX_API_KEY` (configure a unique secret outside source control) |
+| **Authentication Header** | Authorization: Bearer `<configured INTELX_API_KEY>` |
 | **Database Topology** | Turso LibSQL Cloud DB (9 GB Free Tier) |
 | **Database Connection** | https://intelx-db-surendra2304.aws-ap-south-1.turso.io |
 | **Hosting Platform** | Render Docker Web Service (Singapore / AWS Mumbai) |
@@ -42,41 +42,41 @@ Every agent in the universe communicates using standard environment variables:
 #               FRIDAY UNIVERSE MASTER ECOSYSTEM CONFIGURATION                  #
 # ============================================================================== #
 
-# 1. ⚡ Inference AI Multi-Model Gateway (25 Keys)
+# 1. ⚡ Inference AI Multi-Model Gateway (configured provider pool)
 INFERENCE_URL=https://inference-r1sn.onrender.com
-INFERENCE_API_KEY=inference_api
+INFERENCE_API_KEY=<configure locally; do not commit>
 
 # 2. 🧠 Memora Cloud Persistent Memory (9 GB Turso AWS Mumbai)
 MEMORA_URL=https://memora-cavc.onrender.com
-MEMORA_API_KEY=memora_api
+MEMORA_API_KEY=<configure locally; do not commit>
 
 # 3. 📈 Stratex 24/7 Algorithmic Trading Platform (Binance Futures)
 STRATEX_URL=https://stratex-8wj1.onrender.com
-STRATEX_API_KEY=stratex_api
+STRATEX_API_KEY=<configure locally; do not commit>
 
 # 4. 🧠 IntelX Evidence & Intelligence Research Engine (Turso AWS Mumbai)
 INTELX_URL=https://intelx-mygl.onrender.com
-INTELX_API_KEY=intelx_api
+INTELX_API_KEY=<configure locally; do not commit>
 
 # 5. 🔮 Futuris Calibrated Predictive Forecasting Engine
 FUTURIS_URL=https://futuris-th6f.onrender.com
-FUTURIS_API_KEY=futuris_api
+FUTURIS_API_KEY=<configure locally; do not commit>
 
 # 6. 🌐 Cortex Autonomous Web Operations & Intelligence
 CORTEX_URL=https://cortex-0m7c.onrender.com
-CORTEX_API_KEY=cortex_api
+CORTEX_API_KEY=<configure locally; do not commit>
 
 # 7. 🛠️ Forge Local Software Engineering Engine
 FORGE_URL=https://forge-e9kl.onrender.com
-FORGE_API_KEY=forge_api
+FORGE_API_KEY=<configure locally; do not commit>
 
 # 8. 🛡️ Sentinel Local Cybersecurity & Threat Defense Shield
 SENTINEL_URL=https://sentinel-a861.onrender.com
-SENTINEL_API_KEY=sentinel_api
+SENTINEL_API_KEY=<configure locally; do not commit>
 
 # 9. 🤖 FRIDAY Central Desktop Operating System
 FRIDAY_URL=https://friday-zw59.onrender.com
-FRIDAY_API_KEY=friday_api
+FRIDAY_API_KEY=<configure locally; do not commit>
 `
 
 ---
@@ -86,6 +86,6 @@ FRIDAY_API_KEY=friday_api
 When opening this directory in **Antigravity AI**:
 * **Identity:** You are working inside **IntelX** (d:\FRIDAY Universe\IntelX).
 * **Live Service:** This service is deployed live at https://intelx-mygl.onrender.com.
-* **Authentication:** Incoming requests use INTELX_API_KEY=intelx_api.
+* **Authentication:** Incoming requests require the configured `INTELX_API_KEY`; set separate, strong secrets for each service.
 * **Never Fake Tests:** All tests and verifications must be executed against real code and real endpoints.
 * **No Unapproved Git Pushes:** Keep modifications local unless explicitly instructed to push.

@@ -173,12 +173,20 @@
       IntelX empirical research directly drives predictive probabilistic forecasting in <strong>Futuris</strong> and algorithmic market execution in <strong>StrateX</strong>. Trigger on-demand synchronization below or verify automated signal delivery.
     </p>
 
+    <label for="sync-finding" style="display:block; margin:12px 0 6px;">Select a finding from this research run</label>
+    <select id="sync-finding" required style="width:100%; margin-bottom:16px;">
+      <option value="">Choose a saved finding…</option>
+      {% for finding in findings %}
+      <option value="{{ finding.conclusion }}">{{ finding.conclusion[:180] }}</option>
+      {% endfor %}
+    </select>
+
     <div class="ecosystem-grid">
       <!-- Futuris Card -->
       <div class="ecosystem-card">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <h4 style="font-size: 15px; font-weight: 700; color: var(--text-main);">📈 Futuris Forecasting</h4>
-          <span class="ecosystem-status-badge badge-online">● Connected</span>
+          <span class="ecosystem-status-badge">Status not checked</span>
         </div>
         <p style="font-size: 13px; color: var(--text-muted);">
           Exchanges qualitative exogenous findings, temporal event sequence, and source credibility metrics to trigger automatic recalibration of forecast models.
@@ -195,7 +203,7 @@
       <div class="ecosystem-card">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <h4 style="font-size: 15px; font-weight: 700; color: var(--text-main);">⚡ StrateX Quant Execution</h4>
-          <span class="ecosystem-status-badge badge-online">● Connected</span>
+          <span class="ecosystem-status-badge">Status not checked</span>
         </div>
         <p style="font-size: 13px; color: var(--text-muted);">
           Extracts sentiment drivers, regulatory catalysts, and macroeconomic shifts to inform Binance futures algorithmic strategies and risk overlays.

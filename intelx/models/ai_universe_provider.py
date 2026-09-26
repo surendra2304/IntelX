@@ -252,12 +252,13 @@ class AIUniverseProvider(BaseLLMProvider):
 
         settings = get_settings()
         # Build dedicated headers for the /ask endpoint — Inference requires X-API-Key
-        inference_key = settings.INFERENCE_API_KEY or "inference_api"
+        inference_key = settings.INFERENCE_API_KEY
         ask_headers = {
             "Content-Type": "application/json",
             "User-Agent": "INTELX-Engine/1.0",
-            "X-API-Key": inference_key,
         }
+        if inference_key:
+            ask_headers["X-API-Key"] = inference_key
 
         prompt_parts = []
         for m in messages:

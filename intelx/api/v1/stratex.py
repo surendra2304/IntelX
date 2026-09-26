@@ -17,6 +17,7 @@ from intelx.connectors.search import GoogleNewsSearchConnector
 from intelx.db.models import Claim, Finding, ResearchRun
 from intelx.db.session import get_db_session
 from intelx.integrations.stratex_context import StratexConnector
+from intelx.api.v1.futuris import verify_futuris_auth
 
 logger = logging.getLogger("intelx.api.v1.stratex")
 
@@ -267,6 +268,7 @@ async def query_stratex_market_research(
 @router.post(
     "/stratex/trigger-signal",
     summary="Dispatch Research Trade Signal to StrateX",
+    dependencies=[Depends(verify_futuris_auth)],
 )
 async def trigger_stratex_signal(
     req: StratexSignalTriggerRequest,

@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,6 +59,7 @@ class IntelXResearchReportItem(BaseModel):
 
 
 async def verify_futuris_auth(
+    request: Request,
     x_api_key: str | None = Header(None, alias="X-API-Key"),
     authorization: str | None = Header(None),
 ) -> None:
@@ -73,6 +74,10 @@ async def verify_futuris_auth(
         token = authorization.split(" ", 1)[1]
 
     if not token:
+        from intelx.web.auth import get_web_user
+
+        if await get_web_user(request):
+            return
         if settings.is_dev_or_test():
             return
         raise HTTPException(
@@ -86,9 +91,11 @@ async def verify_futuris_auth(
         valid_keys.add(settings.FUTURIS_API_KEY)
     if settings.FRIDAY_API_KEY:
         valid_keys.add(settings.FRIDAY_API_KEY)
-    valid_keys.add("intelx_api")
-    valid_keys.add("futuris_api")
-    valid_keys.add("intelx_default_token")
+    if settings.is_production() and not valid_keys:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="IntelX service authentication is not configured.",
+        )
 
     if valid_keys and token not in valid_keys:
         raise HTTPException(

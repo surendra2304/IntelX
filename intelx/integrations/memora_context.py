@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -19,7 +20,42 @@ class MemoraMemoryClient:
     def __init__(self, base_url: str | None = None, api_key: str | None = None) -> None:
         settings = get_settings()
         self.base_url = base_url or settings.MEMORA_URL or "https://memora-cavc.onrender.com"
-        self.api_key = api_key or settings.MEMORA_API_KEY
+        self.api_key = api_key or settings.INTELX_API_KEY
+
+    async def _store_cloud_memory(
+        self,
+        *,
+        namespace: str,
+        content: dict[str, Any],
+        provenance: dict[str, Any],
+        importance: float = 0.8,
+    ) -> dict[str, Any]:
+        if not self.api_key:
+            return {"status": "blocked_missing_credentials", "cloud": False}
+        payload = {
+            "content_text": json.dumps(content, ensure_ascii=False, sort_keys=True),
+            "memory_type": "semantic",
+            "source": "agent:intelx",
+            "target_namespace_path": namespace,
+            "importance": importance,
+            "confidence": 1.0,
+            "provenance": provenance,
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "X-Agent-Name": "intelx",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(f"{self.base_url}/v1/memories", json=payload, headers=headers)
+            if resp.status_code in (200, 201):
+                return {"status": "stored", "cloud": True, "response": resp.json()}
+            logger.warning("Memora rejected IntelX memory write with HTTP %s", resp.status_code)
+            return {"status": "failed_upstream", "cloud": False, "status_code": resp.status_code}
+        except Exception as exc:
+            logger.warning("Memora IntelX write failed (%s)", type(exc).__name__)
+            return {"status": "error", "cloud": False, "error": type(exc).__name__}
 
     async def store_research_memory(
         self,
@@ -37,40 +73,23 @@ class MemoraMemoryClient:
         # Enforce non-destructive secret scrubber before memory export
         redacted_summary, _ = redact_document_text_preserving_length(summary)
 
-        payload = {
-            "namespace": namespace,
-            "key": f"research_run_{run_id}",
-            "content": {
+        content = {
                 "run_id": run_id,
                 "objective": objective,
                 "summary": redacted_summary,
                 "evidence_count": evidence_count,
                 "claims_count": claims_count,
                 "tags": tags or ["intelx", "research", "evidence"],
-            },
         }
 
-        if settings.MOCK_MODE or not self.api_key:
+        if settings.MOCK_MODE:
             logger.info(f"[Memora Mock] Stored research memory for run {run_id} in {namespace}")
             return {"status": "stored_mock", "namespace": namespace, "run_id": run_id}
-
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    f"{self.base_url}/api/v1/memory/items", json=payload, headers=headers
-                )
-                if resp.status_code < 300:
-                    logger.info(f"Successfully published research memory to Memora: {run_id}")
-                    return resp.json()
-                logger.warning(f"Memora returned status {resp.status_code}: {resp.text}")
-                return {"status": "failed_upstream", "status_code": resp.status_code}
-        except Exception as e:
-            logger.warning(f"Failed to communicate with Memora: {e}")
-            return {"status": "error", "error": str(e)}
+        return await self._store_cloud_memory(
+            namespace=namespace,
+            content=content,
+            provenance={"run_id": run_id, "objective": objective, "kind": "research_summary", "tags": tags or []},
+        )
 
     async def store_verified_findings_to_memora(
         self,
@@ -227,19 +246,15 @@ class MemoraMemoryClient:
                 "namespace": namespace,
             }
 
-        payload = {
-            "namespace": namespace,
-            "key": f"research_verified_{run_id}",
-            "content": {
+        content = {
                 "run_id": run_id,
                 "objective": objective,
                 "verified_facts_count": len(verified_facts),
                 "facts": verified_facts,
                 "tags": tags or ["intelx", "verified_evidence", "provenance_locked"],
-            },
         }
 
-        if settings.MOCK_MODE or not self.api_key:
+        if settings.MOCK_MODE:
             logger.info(
                 f"[Memora Mock] Stored {len(verified_facts)} verified facts for run {run_id} in {namespace}"
             )
@@ -251,30 +266,15 @@ class MemoraMemoryClient:
                 "facts": verified_facts,
             }
 
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    f"{self.base_url}/api/v1/memory/items", json=payload, headers=headers
-                )
-                if resp.status_code < 300:
-                    logger.info(
-                        f"Successfully published {len(verified_facts)} verified facts to Memora: {run_id}"
-                    )
-                    return {
-                        "status": "stored",
-                        "accepted_count": len(verified_facts),
-                        "run_id": run_id,
-                        "response": resp.json(),
-                    }
-                logger.warning(f"Memora returned status {resp.status_code}: {resp.text}")
-                return {"status": "failed_upstream", "status_code": resp.status_code}
-        except Exception as e:
-            logger.warning(f"Failed to communicate with Memora: {e}")
-            return {"status": "error", "error": str(e)}
+        result = await self._store_cloud_memory(
+            namespace=namespace,
+            content=content,
+            provenance={"run_id": run_id, "objective": objective, "kind": "verified_findings", "tags": tags or []},
+            importance=0.95,
+        )
+        result.setdefault("accepted_count", len(verified_facts) if result.get("status") == "stored" else 0)
+        result.setdefault("run_id", run_id)
+        return result
 
 
 async def store_verified_findings_to_memora(

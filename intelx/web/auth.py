@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import secrets
 from typing import Any
 
 from fastapi import HTTPException, Request, status
@@ -11,11 +12,16 @@ from fastapi import HTTPException, Request, status
 from intelx.core.settings import get_settings
 
 COOKIE_NAME = "intelx_session"
+_DEVELOPMENT_SESSION_SECRET = secrets.token_bytes(32)
 
 
 def _get_signing_secret() -> bytes:
     settings = get_settings()
-    secret = settings.API_KEYS[0] if settings.API_KEYS else "intelx_secret_default_signing_key"
+    secret = settings.SECRET_KEY
+    if not secret or len(secret) < 32:
+        if settings.is_production():
+            raise RuntimeError("Configure a unique INTELX_SECRET_KEY of at least 32 characters before signing web sessions.")
+        return _DEVELOPMENT_SESSION_SECRET
     return secret.encode("utf-8")
 
 

@@ -37,8 +37,8 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("TURSO_AUTH_TOKEN", "INTELX_TURSO_AUTH_TOKEN"),
         description="Turso LibSQL cloud database auth token",
     )
-    SECRET_KEY: str = Field(
-        default="intelx-super-secret-key-change-in-production",
+    SECRET_KEY: str | None = Field(
+        default=None,
         description="Secret key used for crypto and session signing",
     )
     DATA_DIR: str = Field(
@@ -92,7 +92,7 @@ class Settings(BaseSettings):
         description="Base URL for Inference multi-agent intelligence server",
     )
     INFERENCE_API_KEY: str | None = Field(
-        default="inference_api",
+        default=None,
         validation_alias=AliasChoices(
             "INTELX_INFERENCE_API_KEY",
             "INFERENCE_API_KEY",
@@ -129,7 +129,7 @@ class Settings(BaseSettings):
         description="Base URL for Futuris predictive forecasting engine",
     )
     FUTURIS_API_KEY: str | None = Field(
-        default="futuris_api",
+        default=None,
         validation_alias=AliasChoices("INTELX_FUTURIS_API_KEY", "FUTURIS_API_KEY"),
         description="API key for Futuris integration",
     )
@@ -146,7 +146,7 @@ class Settings(BaseSettings):
         description="Base URL for StrateX trading engine",
     )
     STRATEX_API_KEY: str | None = Field(
-        default="stratex_api",
+        default=None,
         validation_alias=AliasChoices("INTELX_STRATEX_API_KEY", "STRATEX_API_KEY"),
         description="API key for StrateX integration",
     )
@@ -253,12 +253,12 @@ class Settings(BaseSettings):
 
     # Auth & Storage
     INTELX_API_KEY: str = Field(
-        default="intelx_api",
+        default="",
         validation_alias=AliasChoices("INTELX_API_KEY", "API_KEY"),
         description="Master API authentication key for IntelX service",
     )
     API_KEYS: list[str] = Field(
-        default_factory=lambda: ["intelx_api"],
+        default_factory=list,
         description="Comma-separated API keys allowed for client access",
     )
     FRIDAY_API_KEY: str | None = Field(
@@ -320,22 +320,20 @@ class Settings(BaseSettings):
                 "CRITICAL SECURITY VIOLATION: Mock LLM models cannot be used in production. "
                 "Configure a valid production LLM provider and model."
             )
-        if self.SECRET_KEY in (
-            "intelx-super-secret-key-change-in-production",
-            "change-me",
-            "secret",
-        ):
+        if any(k in {"dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin"} for k in (self.API_KEYS or [])):
             raise RuntimeError(
-                "CRITICAL SECURITY VIOLATION: Insecure default SECRET_KEY detected in production! "
-                "Please set INTELX_SECRET_KEY in your deployment environment variables immediately."
+                "CRITICAL SECURITY VIOLATION: Insecure development API keys configured in production."
             )
+        secret_values = [self.SECRET_KEY or "", self.INTELX_API_KEY or "", *(self.API_KEYS or [])]
         if any(
-            k in ("dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin")
-            for k in (self.API_KEYS or [])
+            len(value) < 32
+            or value.strip().lower() in {"change-me", "changeme", "secret", "password", "intelx_api"}
+            or len(set(value)) < 2
+            for value in secret_values
         ):
             raise RuntimeError(
-                "CRITICAL SECURITY VIOLATION: Insecure development API keys configured in production! "
-                "Please remove default demo keys from INTELX_API_KEYS immediately."
+                "CRITICAL SECURITY VIOLATION: Production signing/API secrets must be unique values of at least 32 characters. "
+                "Configure INTELX_SECRET_KEY, INTELX_API_KEY, and API_KEYS in the deployment environment."
             )
 
     @field_validator("DOMAIN_ALLOWLIST", "DOMAIN_DENYLIST", "API_KEYS", mode="before")

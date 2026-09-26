@@ -25,10 +25,12 @@ async def main():
     print("=" * 80)
 
     url = os.getenv("INFERENCE_URL", "https://inference-r1sn.onrender.com")
-    key = os.getenv("INFERENCE_API_KEY", "inference_api")
+    key = os.getenv("INFERENCE_API_KEY")
+    if not key:
+        print("Requests not sent: configure INFERENCE_API_KEY first.")
+        return
     provider = AIUniverseProvider(base_url=url, api_key=key, timeout_seconds=45.0)
     print(f"Target URL: {provider.base_url}")
-    print(f"API Key:    {provider.api_key[:4]}...")
 
     results = []
     for i, q in enumerate(questions, 1):
@@ -38,10 +40,11 @@ async def main():
                 messages=[{"role": "user", "content": q}], model="auto", role="analyst"
             )
             lat = (time.perf_counter() - t0) * 1000
-            cost = usage.cost_usd if hasattr(usage, "cost_usd") else 0.00034
+            cost = usage.cost_usd if hasattr(usage, "cost_usd") else None
             ans_snip = content[:120].replace("\n", " ")
+            cost_label = f"${cost:.6f}" if cost is not None else "unknown"
             print(
-                f"[INTELX Q{i}/5] HTTP 200 | {lat:>7.1f}ms | Cost: ${cost:.6f} | Ans: {ans_snip}..."
+                f"[INTELX Q{i}/5] HTTP 200 | {lat:>7.1f}ms | Cost: {cost_label} | Ans: {ans_snip}..."
             )
             results.append(
                 {"q_num": i, "status": 200, "latency_ms": round(lat, 1), "answer": ans_snip}
