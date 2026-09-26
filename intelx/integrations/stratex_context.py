@@ -119,12 +119,18 @@ class StratexConnector:
         }
 
         from intelx.integrations.memora_events import publish_research_notice
+
         memora_event = await publish_research_notice(
             # This shares the same event ID as the Futuris path, so Memora's
             # idempotency makes it a single Universe-wide news notice.
-            target_agent="all", run_id=run_id, finding_summary=finding_text,
-            category=category, domain=domain, confidence=confidence,
+            target_agent="all",
+            run_id=run_id,
+            finding_summary=finding_text,
+            category=category,
+            domain=domain,
+            confidence=confidence,
             recommended_targets=targets,
+            sources=(extra_context or {}).get("sources", []),
         )
 
         if settings.MOCK_MODE or not target_url:

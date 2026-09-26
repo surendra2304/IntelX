@@ -595,6 +595,21 @@ class OrchestrationEngine:
                         if syn
                         else "Moderate",
                         "sources_count": len(all_ingested),
+                        "sources": [
+                            {
+                                "title": source.title or "",
+                                "url": source.location,
+                                "domain": source.domain or "",
+                                "publisher": source.publisher or "",
+                                "published_at": source.published_at.isoformat()
+                                if source.published_at
+                                else "",
+                                "trust_tier": getattr(
+                                    source.trust_tier, "value", source.trust_tier
+                                ),
+                            }
+                            for source, _document, _chunks in all_ingested[:20]
+                        ],
                         "claims_count": len(claims),
                         "usd_cost": round(run.usd_cost or 0, 6),
                         "completed_at": datetime.now(UTC).isoformat(),

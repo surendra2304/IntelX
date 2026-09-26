@@ -553,12 +553,18 @@ class ResearchTriggeredForecasting:
         }
 
         from intelx.integrations.memora_events import publish_research_notice
+
         memora_event = await publish_research_notice(
             # Publish one idempotent Universe notice; Memora's recipient filter
             # makes it available to every agent, including FRIDAY's supervisor.
-            target_agent="all", run_id=run_id, finding_summary=finding_text,
-            category=category, domain=domain, confidence=confidence,
+            target_agent="all",
+            run_id=run_id,
+            finding_summary=finding_text,
+            category=category,
+            domain=domain,
+            confidence=confidence,
             recommended_targets=targets,
+            sources=(extra_context or {}).get("sources", []),
         )
 
         # If in Mock Mode or URL is unconfigured, return simulated success
