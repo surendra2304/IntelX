@@ -2,7 +2,7 @@
 
 > **Official Subsystem Name:** IntelX  
 > **Role in Ecosystem:** Multi-Source Evidence Research, Fact Extraction & Contradiction Resolution Engine  
-> **Repository:** [surendra2304/IntelX](https://github.com/surendra2304/IntelX) (Branch: master)  
+> **Repository:** [surendra2304/IntelX](https://github.com/surendra2304/IntelX) (Branch: main)
 > **Workspace Path:** d:\FRIDAY Universe\IntelX  
 
 ---
