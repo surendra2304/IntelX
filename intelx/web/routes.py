@@ -124,6 +124,14 @@ async def dashboard_page(
     stmt = select(ResearchRun).order_by(ResearchRun.created_at.desc()).limit(20)
     res = await session.execute(stmt)
     runs = list(res.scalars().all())
+    recent_active_runs = sum(
+        1
+        for run in runs
+        if run.status
+        not in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED)
+    )
+    recent_completed_runs = sum(1 for run in runs if run.status == RunStatus.COMPLETED)
+    recent_failed_runs = sum(1 for run in runs if run.status == RunStatus.FAILED)
 
     # Calculate metrics
     stmt_total = select(func.count(ResearchRun.id))
@@ -134,10 +142,30 @@ async def dashboard_page(
     )
     completed_runs = (await session.execute(stmt_completed)).scalar_one() or 0
 
-    stmt_cost = select(func.avg(ResearchRun.usd_cost))
-    avg_cost = (await session.execute(stmt_cost)).scalar_one() or 0.0
+    active_statuses = (
+        RunStatus.QUEUED,
+        RunStatus.PLANNING,
+        RunStatus.DISCOVERING,
+        RunStatus.RETRIEVING,
+        RunStatus.EXTRACTING,
+        RunStatus.VERIFYING,
+        RunStatus.ANALYZING,
+        RunStatus.SYNTHESIZING,
+        RunStatus.REVIEW_REQUIRED,
+    )
+    stmt_active = select(func.count(ResearchRun.id)).where(ResearchRun.status.in_(active_statuses))
+    active_runs = (await session.execute(stmt_active)).scalar_one() or 0
 
-    completion_rate = round((completed_runs / total_runs) * 100, 1) if total_runs > 0 else 100.0
+    stmt_failed = select(func.count(ResearchRun.id)).where(ResearchRun.status == RunStatus.FAILED)
+    failed_runs = (await session.execute(stmt_failed)).scalar_one() or 0
+
+    source_count = (await session.execute(select(func.count(Source.id)))).scalar_one() or 0
+    latest_source_at = (await session.execute(select(func.max(Source.retrieved_at)))).scalar_one()
+
+    stmt_cost = select(func.avg(ResearchRun.usd_cost))
+    avg_cost = (await session.execute(stmt_cost)).scalar_one()
+
+    completion_rate = round((completed_runs / total_runs) * 100, 1) if total_runs > 0 else None
 
     return templates.TemplateResponse(
         request=request,
@@ -146,8 +174,15 @@ async def dashboard_page(
             "user": user,
             "active_page": "dashboard",
             "runs": runs,
+            "recent_active_runs": recent_active_runs,
+            "recent_completed_runs": recent_completed_runs,
+            "recent_failed_runs": recent_failed_runs,
             "total_runs": total_runs,
             "completed_runs": completed_runs,
+            "active_runs": active_runs,
+            "failed_runs": failed_runs,
+            "source_count": source_count,
+            "latest_source_at": latest_source_at,
             "avg_cost": avg_cost,
             "completion_rate": completion_rate,
         },
@@ -269,6 +304,37 @@ async def job_page(
             "events": events,
         },
     )
+
+
+@web_router.get("/workspace/jobs/{job_id}/updates")
+async def web_job_updates(
+    job_id: str,
+    after: int = 0,
+    user: dict[str, Any] = Depends(require_web_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Cookie-authenticated job polling for the server-rendered workspace."""
+    run = await RunRepo.get_run(session, job_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Job not found")
+    stmt = (
+        select(Event)
+        .where(Event.run_id == job_id, Event.id > after)
+        .order_by(Event.id.asc())
+    )
+    events = list((await session.execute(stmt)).scalars().all())
+    return {
+        "status": run.status.value,
+        "events": [
+            {
+                "id": event.id,
+                "type": event.type,
+                "payload": event.payload_json,
+                "created_at": event.created_at.isoformat(),
+            }
+            for event in events
+        ],
+    }
 
 
 @web_router.post("/research/{job_id}/cancel")

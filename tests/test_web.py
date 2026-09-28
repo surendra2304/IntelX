@@ -71,7 +71,8 @@ async def test_web_auth_flow_and_protection(web_client):
     web_client.cookies.set("intelx_session", res_login.cookies["intelx_session"])
     res_dash = await web_client.get("/")
     assert res_dash.status_code == 200
-    assert "Research Operations" in res_dash.text
+    assert "Research,<br><em>with receipts.</em>" in res_dash.text
+    assert "Workspace pulse" in res_dash.text
     assert "web-admin" in res_dash.text
     web_client.cookies.clear()
 

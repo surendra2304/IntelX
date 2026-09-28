@@ -153,3 +153,116 @@ async function syncWithStratex(runId) {
   }
 }
 
+// Dashboard filters only the run records rendered by the authenticated server.
+(() => {
+  const cards = [...document.querySelectorAll('[data-run-card]')];
+  if (!cards.length) return;
+
+  const search = document.getElementById('run-search');
+  const empty = document.getElementById('filter-empty');
+  const buttons = [...document.querySelectorAll('[data-run-filter]')];
+  let selectedStatus = 'all';
+
+  const applyFilters = () => {
+    const query = (search?.value || '').trim().toLocaleLowerCase();
+    let visible = 0;
+    cards.forEach((card) => {
+      const matchesStatus = selectedStatus === 'all' || card.dataset.status === selectedStatus;
+      const matchesQuery = !query || (card.dataset.search || '').includes(query);
+      card.hidden = !(matchesStatus && matchesQuery);
+      if (!card.hidden) visible += 1;
+    });
+    if (empty) empty.hidden = visible !== 0;
+  };
+
+  buttons.forEach((button) => button.addEventListener('click', () => {
+    selectedStatus = button.dataset.runFilter || 'all';
+    buttons.forEach((item) => {
+      const active = item === button;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-pressed', String(active));
+    });
+    applyFilters();
+  }));
+  search?.addEventListener('input', applyFilters);
+  document.querySelectorAll('[data-run-filter-link]').forEach((link) => link.addEventListener('click', () => {
+    const filter = link.dataset.runFilterLink;
+    buttons.find((button) => button.dataset.runFilter === filter)?.click();
+    document.getElementById('runs-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
+})();
+
+// This workspace endpoint authenticates with the existing signed web-session cookie.
+// The generic /api/v1 endpoints require an API key, which browser sessions do not expose.
+(() => {
+  const config = document.getElementById('job-poll-config');
+  if (!config || config.dataset.terminal === 'true') return;
+
+  const jobId = config.dataset.jobId;
+  let lastEventId = Number(config.dataset.lastEventId || 0);
+  const log = document.getElementById('eventLog');
+  const indicator = document.getElementById('pollIndicator');
+  const error = document.getElementById('event-error');
+  const statusChip = document.getElementById('job-status-chip');
+  const statusValue = document.getElementById('job-status-value');
+  let polling = false;
+
+  const appendEvent = (event) => {
+    const entry = document.createElement('article');
+    entry.className = 'event-entry';
+    const time = document.createElement('time');
+    const date = new Date(event.created_at);
+    time.textContent = Number.isNaN(date.getTime()) ? 'Time unavailable' : `${date.toLocaleTimeString()} · ${Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time'}`;
+    const type = document.createElement('strong');
+    type.textContent = event.type || 'Event';
+    const payload = document.createElement('pre');
+    payload.textContent = JSON.stringify(event.payload ?? {}, null, 2);
+    entry.append(time, type, payload);
+    log?.append(entry);
+  };
+
+  const poll = async () => {
+    if (polling) return;
+    polling = true;
+    try {
+      const response = await fetch(`/workspace/jobs/${encodeURIComponent(jobId)}/updates?after=${lastEventId}`, {
+        credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (!Array.isArray(data.events)) throw new Error('Unexpected job update response');
+
+      if (error) error.hidden = true;
+      if (indicator) {
+        indicator.dataset.state = 'online';
+        indicator.querySelector('span').textContent = 'Updates connected';
+      }
+      const emptyState = document.getElementById('event-empty');
+      data.events.forEach((event) => {
+        appendEvent(event);
+        lastEventId = Math.max(lastEventId, Number(event.id) || 0);
+      });
+      if (data.events.length && emptyState) emptyState.remove();
+      if (log) log.scrollTop = log.scrollHeight;
+
+      if (data.status && statusValue) statusValue.textContent = data.status.replaceAll('_', ' ');
+      if (data.status && statusChip) {
+        statusChip.textContent = data.status.replaceAll('_', ' ');
+        statusChip.className = `status-chip status-${data.status.toLowerCase()}`;
+      }
+      if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(data.status)) window.location.reload();
+    } catch (_) {
+      if (error) error.hidden = false;
+      if (indicator) {
+        indicator.dataset.state = 'error';
+        indicator.querySelector('span').textContent = 'Update check failed · retrying';
+      }
+    } finally {
+      polling = false;
+    }
+  };
+
+  poll();
+  window.setInterval(poll, 5000);
+})();
+

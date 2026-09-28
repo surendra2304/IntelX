@@ -1,59 +1,47 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}IntelX{% endblock %} — Intelligence Platform</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10131a">
+  <title>{% block title %}IntelX{% endblock %} · Evidence workspace</title>
+  <link rel="stylesheet" href="/static/style.css?v=2026.09.28">
 </head>
 <body>
-  <header class="navbar">
-    <a href="/" class="brand">
-      <span>INTELX</span>
-      <span class="brand-badge">EVIDENCE</span>
-    </a>
-    <nav>
-      <ul class="nav-links">
-        <li><a href="/" class="nav-link {% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a></li>
-        <li><a href="/research/new" class="nav-link {% if active_page == 'new' %}active{% endif %}">New Research</a></li>
-        <li><a href="/knowledge" class="nav-link {% if active_page == 'knowledge' %}active{% endif %}">Knowledge</a></li>
-        {% if user and (user.role == 'ADMIN' or user.role == 'admin') %}
-        <li><a href="/review" class="nav-link {% if active_page == 'review' %}active{% endif %}">Review Queue</a></li>
-        <li><a href="/admin/audit" class="nav-link {% if active_page == 'audit' %}active{% endif %}">Audit Trail</a></li>
+  <div class="app-frame">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <a href="/" class="brand-lockup" aria-label="IntelX workspace home"><span class="brand-symbol">IX</span><span class="brand-name">intel<span>x</span><small>RESEARCH WORKSPACE</small></span></a>
+      <div class="sidebar-label">WORKSPACE</div>
+      <nav class="sidebar-nav">
+        <a href="/" class="sidebar-link {% if active_page == 'dashboard' %}active{% endif %}"><span class="sidebar-icon">⌂</span>Research desk{% if active_page == 'dashboard' %}<i></i>{% endif %}</a>
+        <a href="/research/new" class="sidebar-link {% if active_page == 'new' %}active{% endif %}"><span class="sidebar-icon">＋</span>New investigation</a>
+        <a href="/knowledge" class="sidebar-link {% if active_page == 'knowledge' %}active{% endif %}"><span class="sidebar-icon">⌕</span>Knowledge base</a>
+        {% if user and user.role|upper == 'ADMIN' %}
+        <div class="sidebar-label sidebar-label-spaced">GOVERNANCE</div>
+        <a href="/review" class="sidebar-link {% if active_page == 'review' %}active{% endif %}"><span class="sidebar-icon">◇</span>Review queue</a>
+        <a href="/admin/audit" class="sidebar-link {% if active_page == 'audit' %}active{% endif %}"><span class="sidebar-icon">≋</span>Audit trail</a>
         {% endif %}
-        {% if user %}
-        <li style="margin-left: 16px; display: flex; align-items: center; gap: 8px;">
-          <span style="font-size: 12px; color: var(--text-muted);">{{ user.name }} ({{ user.role }})</span>
-          <a href="/logout" class="btn btn-secondary btn-sm">Logout</a>
-        </li>
-        {% else %}
-        <li><a href="/login" class="btn btn-primary btn-sm">Login</a></li>
-        {% endif %}
-      </ul>
-    </nav>
-  </header>
+      </nav>
+      <div class="sidebar-bottom"><span class="sidebar-kicker">EVIDENCE FIRST</span><p>Research records stay attached to their sources and job history.</p><span class="sidebar-version">INTELX <i>·</i> WEB WORKSPACE</span></div>
+    </aside>
 
-  <main class="container">
-    {% block content %}{% endblock %}
-  </main>
-
-  <!-- Side Citation Drawer -->
-  <div class="drawer-backdrop" id="drawerBackdrop" onclick="closeDrawer()"></div>
-  <div class="drawer-panel" id="citationDrawer">
-    <div class="drawer-header">
-      <h3 id="drawerTitle" style="font-size: 15px; font-weight: 700;">Citation Details</h3>
-      <button type="button" class="btn btn-secondary btn-sm" onclick="closeDrawer()">✕</button>
-    </div>
-    <div class="drawer-body" id="drawerBody">
-      <!-- Injected via JavaScript -->
+    <div class="main-shell">
+      <header class="topbar">
+        <div class="mobile-brand"><span class="brand-symbol">IX</span><strong>intel<span>x</span></strong></div>
+        <div class="crumbs"><a href="/">Workspace</a><span>/</span><strong>{% if active_page == 'new' %}New investigation{% elif active_page == 'knowledge' %}Knowledge base{% elif active_page == 'review' %}Review queue{% elif active_page == 'audit' %}Audit trail{% else %}Research desk{% endif %}</strong></div>
+        <div class="topbar-user">{% if user %}<span class="user-avatar">{{ user.name[:1]|upper }}</span><span class="user-meta"><strong>{{ user.name }}</strong><small>{{ user.role }}</small></span><a href="/logout" class="logout-link">Sign out <span aria-hidden="true">↗</span></a>{% else %}<a href="/login" class="logout-link">Sign in <span aria-hidden="true">↗</span></a>{% endif %}</div>
+      </header>
+      <main class="main-content">{% block content %}{% endblock %}</main>
+      <footer class="footer"><span>INTELX <i>·</i> EVIDENCE-DRIVEN RESEARCH</span><span>Workspace data is served from the configured IntelX database</span></footer>
     </div>
   </div>
 
-  <footer class="footer">
-    INTELX Evidence-Driven Research Platform &bull; Standalone Monolith &bull; v0.1.0
-  </footer>
-
-  <script src="/static/app.js"></script>
+  <div class="drawer-backdrop" id="drawerBackdrop" onclick="closeDrawer()"></div>
+  <aside class="drawer-panel" id="citationDrawer" aria-label="Citation details" aria-live="polite">
+    <div class="drawer-header"><h3 id="drawerTitle">Citation details</h3><button type="button" class="drawer-close" onclick="closeDrawer()" aria-label="Close citation details">×</button></div>
+    <div class="drawer-body" id="drawerBody"></div>
+  </aside>
+  <script src="/static/app.js?v=2026.09.28"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -1,93 +1,68 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — IntelX{% endblock %}
+{% block title %}Research desk — IntelX{% endblock %}
 {% block content %}
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-  <div>
-    <h1 style="font-size: 22px; font-weight: 800; color: var(--text-main);">Research Operations</h1>
-    <p style="color: var(--text-muted); font-size: 13px;">Autonomous evidence-backed intelligence synthesis for the FRIDAY Universe</p>
+<section class="workspace-hero">
+  <div class="hero-copy">
+    <div class="eyebrow"><span class="eyebrow-mark">IX</span> INTELLIGENCE WORKSPACE <span class="eyebrow-divider">/</span> RESEARCH DESK</div>
+    <h1>Research,<br><em>with receipts.</em></h1>
+    <p>One workspace for evidence-led investigations, source review, and research already recorded in IntelX.</p>
+    <div class="hero-actions">
+      <a href="/research/new" class="btn btn-primary"><span aria-hidden="true">＋</span> Start an investigation</a>
+      <a href="/knowledge" class="btn btn-quiet">Browse knowledge <span aria-hidden="true">↗</span></a>
+    </div>
   </div>
-  <div style="display: flex; gap: 8px;">
-    <form method="post" action="/research/trigger-autonomous" style="display: inline; margin: 0;">
-      <button type="submit" class="btn btn-secondary" style="border: 1px solid var(--accent-primary, #2563eb); font-weight: 600;">⚡ Run Autonomous Research</button>
-    </form>
-    <a href="/research/new" class="btn btn-primary">+ New Research Job</a>
-  </div>
-</div>
+  <div class="hero-mark" aria-hidden="true"><span class="orbit orbit-one"></span><span class="orbit orbit-two"></span><span class="orbit-core">IX</span><span class="orbit-point"></span></div>
+  <div class="hero-foot"><span>SESSION</span><strong>{{ user.name }} <i>·</i> {{ user.role }}</strong><span class="hero-foot-right">LOCAL DATA VIEW <b>●</b></span></div>
+</section>
 
-<!-- Stat Counters -->
-<div class="grid-3">
-  <div class="stat-widget">
-    <div class="stat-title">Total Investigations</div>
-    <div class="stat-val">{{ total_runs }}</div>
-    <div class="stat-sub">Lifetime submitted runs</div>
+<section class="workspace-summary" aria-label="Research summary">
+  <div class="summary-heading"><div><span class="section-kicker">AT A GLANCE</span><h2>Workspace pulse</h2></div><span class="summary-note">Counts from the IntelX research database</span></div>
+  <div class="pulse-grid">
+    <article class="pulse-card"><span class="pulse-label">All investigations</span><strong>{{ total_runs }}</strong><span class="pulse-caption">Recorded research runs</span><span class="pulse-glyph">↗</span></article>
+    <article class="pulse-card pulse-card-accent"><span class="pulse-label">In progress</span><strong>{{ active_runs }}</strong><span class="pulse-caption">Queued or in a research stage</span><span class="pulse-glyph">◌</span></article>
+    <article class="pulse-card"><span class="pulse-label">Completed</span><strong>{{ completed_runs }}</strong><span class="pulse-caption">{% if completion_rate is not none %}{{ completion_rate }}% of recorded runs{% else %}Rate unavailable · no runs recorded{% endif %}</span><span class="pulse-glyph">✓</span></article>
+    <article class="pulse-card"><span class="pulse-label">Sources stored</span><strong>{{ source_count }}</strong><span class="pulse-caption">{% if latest_source_at %}Latest retrieval {{ latest_source_at.strftime('%d %b · %H:%M UTC') }}{% else %}No source retrieval recorded{% endif %}</span><span class="pulse-glyph">⌕</span></article>
   </div>
-  <div class="stat-widget">
-    <div class="stat-title">Completion Rate</div>
-    <div class="stat-val">{{ completion_rate }}%</div>
-    <div class="stat-sub">{{ completed_runs }} answered runs</div>
-  </div>
-  <div class="stat-widget">
-    <div class="stat-title">Knowledge Base</div>
-    <div class="stat-val">Live</div>
-    <div class="stat-sub">Continuously ingesting news feeds</div>
-  </div>
-</div>
+</section>
 
-<!-- Recent Runs Table -->
-<div class="card">
-  <div class="card-header">
-    <h2 style="font-size: 16px; font-weight: 700;">Recent Research Jobs</h2>
+<section class="research-panel" aria-labelledby="runs-title">
+  <div class="panel-heading">
+    <div><span class="section-kicker">RESEARCH LEDGER</span><h2 id="runs-title">Recent investigations</h2><p>Most recent saved runs. Open a row to inspect its real status and events.</p></div>
+    <a href="/research/new" class="btn btn-outline">New investigation <span aria-hidden="true">↗</span></a>
+  </div>
+  <div class="ledger-tools">
+    <label class="search-box"><span aria-hidden="true">⌕</span><input type="search" id="run-search" placeholder="Search objectives or run IDs" autocomplete="off" aria-label="Search research runs"></label>
+    <div class="filter-list" role="group" aria-label="Filter research runs">
+      <button class="filter-chip active" type="button" data-run-filter="all" aria-pressed="true">All <span>{{ runs|length }}</span></button>
+      <button class="filter-chip" type="button" data-run-filter="active" aria-pressed="false">In progress <span>{{ recent_active_runs }}</span></button>
+      <button class="filter-chip" type="button" data-run-filter="completed" aria-pressed="false">Completed <span>{{ recent_completed_runs }}</span></button>
+      <button class="filter-chip" type="button" data-run-filter="failed" aria-pressed="false">Failed <span>{{ recent_failed_runs }}</span></button>
+    </div>
   </div>
 
-  <div class="table-container">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Status</th>
-          <th>Objective</th>
-          <th>Outcome</th>
-          <th>Submitted</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for run in runs %}
-        <tr>
-          <td>
-            <span class="status-chip status-{{ run.status.value.lower() }}">{{ run.status.value }}</span>
-          </td>
-          <td>
-            <a href="/research/{{ run.id }}" style="font-weight: 600; color: var(--text-main); text-decoration: none;">
-              {{ run.objective }}
-            </a>
-          </td>
-          <td>
-            {% if run.outcome %}
-            <span style="font-size: 12px; font-weight: 500; color: {% if run.outcome.value == 'ANSWERED' %}var(--color-green){% else %}var(--color-amber){% endif %};">
-              {{ run.outcome.value }}
-            </span>
-            {% else %}
-            <span style="color: var(--text-light);">&mdash;</span>
-            {% endif %}
-          </td>
-          <td style="color: var(--text-muted); font-size: 12px;">{{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-          <td>
-            {% if run.status.value == 'COMPLETED' %}
-            <a href="/research/{{ run.id }}/report" class="btn btn-secondary btn-sm">View Report</a>
-            {% else %}
-            <a href="/research/{{ run.id }}" class="btn btn-secondary btn-sm">Live Job</a>
-            {% endif %}
-          </td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 32px;">
-            No research investigations found. Submit your first research run above.
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  {% if runs %}
+  <div class="ledger-list" id="run-list">
+    {% for run in runs %}
+    {% set run_status = run.status.value %}
+    {% set filter_status = 'completed' if run_status == 'COMPLETED' else 'failed' if run_status == 'FAILED' else 'cancelled' if run_status == 'CANCELLED' else 'active' %}
+    <article class="ledger-row" data-run-card data-status="{{ filter_status }}" data-search="{{ run.objective|lower }} {{ run.id|lower }}">
+      <div class="ledger-status"><span class="status-marker status-marker-{{ run_status|lower }}"></span><span class="status-chip status-{{ run_status|lower }}">{{ run_status|replace('_', ' ') }}</span></div>
+      <div class="ledger-main"><a href="/research/{{ run.id }}" class="ledger-title">{{ run.objective }}</a><div class="ledger-meta"><code>{{ run.id[:8] }}</code><span>·</span><span>{{ run.created_at.strftime('%d %b %Y · %H:%M UTC') }}</span>{% if run.created_by %}<span>·</span><span>by {{ run.created_by }}</span>{% endif %}</div></div>
+      <div class="ledger-outcome"><span class="ledger-label">OUTCOME</span>{% if run.outcome %}<strong>{{ run.outcome.value|replace('_', ' ') }}</strong>{% else %}<span class="muted-value">Not available</span>{% endif %}</div>
+      <div class="ledger-cost"><span class="ledger-label">COST</span><strong>{% if run.usd_cost is not none %}${{ '%.4f'|format(run.usd_cost) }}{% else %}—{% endif %}</strong></div>
+      <a class="ledger-open" href="{% if run_status == 'COMPLETED' %}/research/{{ run.id }}/report{% else %}/research/{{ run.id }}{% endif %}" aria-label="Open investigation">{% if run_status == 'COMPLETED' %}Report{% else %}Inspect{% endif %}<span aria-hidden="true">↗</span></a>
+    </article>
+    {% endfor %}
+    <div class="ledger-empty-filter" id="filter-empty" hidden><span>⌕</span><strong>No runs match this view</strong><p>Clear the search or choose another status filter.</p></div>
   </div>
-</div>
+  {% else %}
+  <div class="ledger-empty"><div class="empty-art" aria-hidden="true"><span>IX</span></div><span class="section-kicker">NO RESEARCH RUNS YET</span><h3>Your ledger is ready.</h3><p>When you submit an investigation, its real job status, outcome, and cost will appear here.</p><a href="/research/new" class="btn btn-primary">Start the first investigation <span aria-hidden="true">↗</span></a></div>
+  {% endif %}
+  <div class="panel-foot"><span>Showing up to 20 latest runs</span><span><i class="foot-dot"></i> Data rendered from the research database</span></div>
+</section>
+
+<section class="lower-grid">
+  <article class="lower-card"><span class="lower-icon">⌕</span><div><span class="section-kicker">SOURCE LIBRARY</span><h3>{{ source_count }} sources on record</h3><p>{% if latest_source_at %}Most recent retrieval: {{ latest_source_at.strftime('%d %B %Y at %H:%M UTC') }}.{% else %}IntelX has no recorded source retrieval yet.{% endif %}</p><a href="/knowledge">Search stored knowledge <span aria-hidden="true">↗</span></a></div></article>
+  <article class="lower-card lower-card-warn"><span class="lower-icon">!</span><div><span class="section-kicker">NEEDS ATTENTION</span><h3>{{ failed_runs }} failed runs</h3><p>{% if failed_runs %}Open a failed run to inspect the error details saved with that job.{% else %}No failed research runs are currently recorded.{% endif %}</p>{% if failed_runs %}<button type="button" class="text-action" data-run-filter-link="failed">Review failed runs <span aria-hidden="true">↗</span></button>{% endif %}</div></article>
+</section>
 {% endblock %}
