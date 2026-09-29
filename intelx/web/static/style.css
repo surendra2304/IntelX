@@ -739,3 +739,46 @@ body { display: block; font-size: 14px; }
   .footer { align-items: flex-start; flex-direction: column; gap: 6px; padding: 14px; font-size: 7px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
+
+/* Run detail telemetry */
+.job-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:22px; margin:5px 0 23px; }
+.job-heading-copy { min-width:0; }
+.job-breadcrumb { display:flex; gap:9px; margin-bottom:18px; color:#7d887e; font-size:10px; }
+.job-breadcrumb a { color:#a8c781; text-decoration:none; }
+.job-status-line { display:flex; align-items:center; gap:9px; }
+.job-status-line code { margin-left:3px; overflow:hidden; color:#879187; font:9px var(--font-mono); text-overflow:ellipsis; }
+.job-heading h1 { max-width:960px; margin-top:13px; color:#eef0e9; font-size:clamp(23px,3vw,34px); font-weight:550; letter-spacing:-1.2px; line-height:1.2; overflow-wrap:anywhere; }
+.job-heading-copy>p { margin-top:10px; color:#899389; font-size:10px; }
+.job-actions { display:flex; flex:0 0 auto; gap:8px; }
+.job-actions form { margin:0; }
+.btn-danger { border-color:#61423b; background:#432b27; color:#f0a195; }
+.btn-danger:hover { background:#54332d; }
+.job-error { margin:0 0 15px; padding:14px 16px; border:1px solid #66443d; border-radius:10px; background:#2e211f; color:#f2a497; }
+.job-error strong { font-size:11px; }
+.job-error pre { max-height:190px; margin-top:8px; overflow:auto; color:#d9b0a8; font:9px/1.6 var(--font-mono); white-space:pre-wrap; overflow-wrap:anywhere; }
+.job-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:16px; }
+.job-metric { min-height:105px; padding:15px; border:1px solid #2c333c; border-radius:11px; background:#171b23; }
+.job-metric>span { display:block; color:#7d887d; font:700 8px var(--font-mono); letter-spacing:1px; }
+.job-metric>strong { display:block; margin-top:13px; color:#e6ece1; font:500 20px var(--font-mono); letter-spacing:-.8px; }
+.job-metric>strong i { color:#778177; font-style:normal; }
+.job-metric>small { display:block; margin-top:5px; color:#818b81; font-size:9px; }
+.job-events-panel { margin-top:0; }
+.poll-indicator { display:inline-flex; align-items:center; gap:7px; white-space:nowrap; color:#9aa69a; font-size:9px; }
+.poll-indicator i { width:6px; height:6px; border-radius:50%; background:#a7cb79; }
+.poll-indicator[data-state="connecting"] i { background:#efbd78; animation:pulse 1.4s infinite; }
+.poll-indicator[data-state="error"] i { background:#ef8f83; }
+.poll-indicator[data-state="stopped"] i { background:#7f8980; }
+@keyframes pulse { 50% { opacity:.35; } }
+.event-log { max-height:520px; min-height:170px; overflow:auto; padding:12px 18px; background:#12161d; }
+.event-entry { display:grid; grid-template-columns:102px 150px minmax(0,1fr); align-items:start; gap:11px; padding:11px 8px; border-bottom:1px solid #272e36; }
+.event-entry time { color:#778379; font:8px var(--font-mono); }
+.event-entry>strong { color:#c3e59a; font:600 9px var(--font-mono); overflow-wrap:anywhere; }
+.event-entry pre { color:#a8b2a7; font:8px/1.6 var(--font-mono); white-space:pre-wrap; overflow-wrap:anywhere; }
+.event-state { display:flex; flex-direction:column; align-items:center; padding:45px 15px; text-align:center; }
+.event-state>span { color:#a9cf79; font-size:22px; }
+.event-state strong { margin-top:8px; color:#d9e1d5; font-size:11px; font-weight:550; }
+.event-state p { margin-top:5px; color:#808b81; font-size:9px; }
+.event-error { padding:10px 16px; border-top:1px solid #584037; background:#30231f; color:#e9b28c; font-size:9px; }
+@media(max-width:780px) { .job-heading { align-items:flex-start; flex-direction:column; } .job-actions { flex-wrap:wrap; } .job-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .event-entry { grid-template-columns:90px 1fr; } .event-entry pre { grid-column:1/-1; padding-left:101px; } }
+@media(max-width:500px) { .job-metric { min-height:94px; padding:12px; } .job-metric>strong { font-size:16px; } .event-log { padding:9px; } .event-entry { grid-template-columns:1fr; gap:5px; } .event-entry pre { grid-column:auto; padding-left:0; } }
+[hidden] { display:none !important; }

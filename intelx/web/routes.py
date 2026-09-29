@@ -25,6 +25,7 @@ from intelx.db.models import (
     AuditEvent,
     Claim,
     Evidence,
+    Event,
     Finding,
     ResearchRun,
     ReviewDecision,
