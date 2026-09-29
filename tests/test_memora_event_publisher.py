@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from intelx.integrations import memora_events
+from intelx.integrations.ecosystem_dispatch import dispatch_sequentially
 
 
 @pytest.mark.asyncio
@@ -89,6 +90,38 @@ def test_public_source_refs_rejects_non_public_url_shapes_and_bounds_list():
     assert len(refs) == 18  # The input cap is 20, including two rejected entries.
     assert len(refs[0]["title"]) == 300
     assert all(ref["url"].startswith("https://news.example/") for ref in refs)
+
+
+@pytest.mark.asyncio
+async def test_ecosystem_deliveries_are_awaited_in_order_and_report_failures(caplog):
+    import logging
+
+    calls = []
+
+    async def stored():
+        calls.append("Memora")
+        return {"status": "stored"}
+
+    async def unavailable():
+        calls.append("Futuris")
+        raise TimeoutError("upstream timed out")
+
+    async def delivered():
+        calls.append("StrateX")
+        return {"status": "delivered", "status_code": 202}
+
+    result = await dispatch_sequentially(
+        [("Memora", stored), ("Futuris", unavailable), ("StrateX", delivered)],
+        logger=logging.getLogger("intelx.test.ecosystem"),
+    )
+
+    assert calls == ["Memora", "Futuris", "StrateX"]
+    assert result == {
+        "Memora": {"status": "stored"},
+        "Futuris": {"status": "error", "error": "TimeoutError"},
+        "StrateX": {"status": "delivered", "status_code": 202},
+    }
+    assert "delivery Futuris raised TimeoutError" in caplog.text
 
 
 @pytest.mark.asyncio

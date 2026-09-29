@@ -41,6 +41,63 @@ from intelx.orchestration.events import (
 
 logger = logging.getLogger(__name__)
 
+
+async def _dispatch_external_research(
+    *,
+    run_id: str,
+    objective: str,
+    finding_text: str,
+    domain: str,
+    evidence_count: int,
+    claims_count: int,
+    tags: list[str],
+    extra_context: dict | None = None,
+    confidence: float = 0.80,
+) -> dict:
+    """Await and report each cross-agent delivery instead of detaching tasks."""
+    from intelx.integrations.ecosystem_dispatch import dispatch_sequentially
+    from intelx.integrations.futuris_context import FuturisContextProvider
+    from intelx.integrations.memora_context import MemoraMemoryClient
+    from intelx.integrations.stratex_context import StratexConnector
+
+    memory = MemoraMemoryClient()
+    return await dispatch_sequentially(
+        [
+            (
+                "Memora",
+                lambda: memory.store_research_memory(
+                    run_id=run_id,
+                    objective=objective,
+                    summary=finding_text,
+                    evidence_count=evidence_count,
+                    claims_count=claims_count,
+                    namespace="memora://intelx/shared",
+                    tags=tags,
+                ),
+            ),
+            (
+                "Futuris",
+                lambda: FuturisContextProvider.notify_futuris_research_relevant(
+                    finding_text=finding_text,
+                    run_id=run_id,
+                    domain=domain,
+                    confidence=confidence,
+                    extra_context=extra_context,
+                ),
+            ),
+            (
+                "StrateX",
+                lambda: StratexConnector.notify_stratex_trade_signal(
+                    finding_text=finding_text,
+                    run_id=run_id,
+                    domain=domain,
+                    extra_context=extra_context,
+                ),
+            ),
+        ],
+        logger=logger,
+    )
+
 VALID_TRANSITIONS: dict[RunStatus, set[RunStatus]] = {
     RunStatus.QUEUED: {RunStatus.PLANNING, RunStatus.FAILED, RunStatus.CANCELLED},
     RunStatus.PLANNING: {RunStatus.DISCOVERING, RunStatus.FAILED, RunStatus.CANCELLED},
@@ -226,34 +283,21 @@ class OrchestrationEngine:
             # External Integrations (Futuris, StrateX)
             if run.outcome == RunOutcome.ANSWERED:
                 try:
-                    from intelx.integrations.futuris_context import FuturisContextProvider
-                    from intelx.integrations.memora_context import MemoraMemoryClient
-                    from intelx.integrations.stratex_context import StratexConnector
-
                     finding_text = f"{run.objective} (Post-Review Resolution)"
                     domain = scope.get("domain", "market")
-
-                    memora_client = MemoraMemoryClient()
-                    asyncio.create_task(
-                        memora_client.store_research_memory(
-                            run_id=run_id,
-                            objective=run.objective,
-                            summary=finding_text,
-                            evidence_count=1,
-                            claims_count=1,
-                            namespace="memora://intelx/shared",
-                            tags=["intelx", "research", domain, "review-resolved"],
-                        )
+                    delivery_outcomes = await _dispatch_external_research(
+                        run_id=run_id,
+                        objective=run.objective,
+                        finding_text=finding_text,
+                        domain=domain,
+                        evidence_count=1,
+                        claims_count=1,
+                        tags=["intelx", "research", domain, "review-resolved"],
                     )
-                    asyncio.create_task(
-                        FuturisContextProvider.notify_futuris_research_relevant(
-                            finding_text=finding_text, run_id=run_id, domain=domain
-                        )
-                    )
-                    asyncio.create_task(
-                        StratexConnector.notify_stratex_trade_signal(
-                            finding_text=finding_text, run_id=run_id, domain=domain
-                        )
+                    logger.info(
+                        "IntelX review-resolved ecosystem attempts completed for %s: %s",
+                        run_id,
+                        {name: value.get("status", "unknown") for name, value in delivery_outcomes.items()},
                     )
                 except Exception as ex:
                     logger.warning(f"Failed to dispatch external ecosystem webhooks: {ex}")
@@ -540,10 +584,6 @@ class OrchestrationEngine:
             # 11. External Integrations (Memora, Futuris, StrateX, FRIDAY Universe)
             if outcome == RunOutcome.ANSWERED:
                 try:
-                    from intelx.integrations.futuris_context import FuturisContextProvider
-                    from intelx.integrations.memora_context import MemoraMemoryClient
-                    from intelx.integrations.stratex_context import StratexConnector
-
                     domain = scope.get("domain", "general")
                     target_agent = scope.get("agent") or scope.get("target_agent") or "all"
 
@@ -628,46 +668,25 @@ class OrchestrationEngine:
                         f"EVIDENCE: {len(claims)} claims from {len(all_ingested)} sources"
                     )
 
-                    # 1. Store full research intel into Memora Cloud shared memory (all 9 FRIDAY agents)
-                    memora_client = MemoraMemoryClient()
-                    asyncio.create_task(
-                        memora_client.store_research_memory(
-                            run_id=run_id,
-                            objective=run.objective,
-                            summary=finding_text,
-                            evidence_count=len(all_ingested),
-                            claims_count=len(claims),
-                            namespace="memora://intelx/shared",
-                            tags=["intelx", "research", domain, str(target_agent).lower()],
-                        )
-                    )
-
-                    # 2. Dispatch to Futuris Predictive Forecasting (with full structured research context)
-                    asyncio.create_task(
-                        FuturisContextProvider.notify_futuris_research_relevant(
-                            finding_text=finding_text,
-                            run_id=run_id,
-                            domain=domain,
-                            confidence=rich_intel_payload.get("overall_confidence", 0.80)
+                    delivery_outcomes = await _dispatch_external_research(
+                        run_id=run_id,
+                        objective=run.objective,
+                        finding_text=finding_text,
+                        domain=domain,
+                        evidence_count=len(all_ingested),
+                        claims_count=len(claims),
+                        tags=["intelx", "research", domain, str(target_agent).lower()],
+                        extra_context=rich_intel_payload,
+                        confidence=(
+                            rich_intel_payload.get("overall_confidence", 0.80)
                             if isinstance(rich_intel_payload.get("overall_confidence"), float)
-                            else 0.80,
-                            extra_context=rich_intel_payload,
-                        )
-                    )
-
-                    # 3. Dispatch to StrateX — always send research intel; StrateX filters relevance internally
-                    asyncio.create_task(
-                        StratexConnector.notify_stratex_trade_signal(
-                            finding_text=finding_text,
-                            run_id=run_id,
-                            domain=domain,
-                            extra_context=rich_intel_payload,
-                        )
+                            else 0.80
+                        ),
                     )
                     logger.info(
-                        f"[IntelX→Ecosystem] Dispatched rich research intel for '{run.objective[:50]}' "
-                        f"({len(structured_findings)} findings, {len(claims)} claims) "
-                        f"→ Memora, Futuris, StrateX"
+                        "IntelX ecosystem attempts completed for run %s: %s",
+                        run_id,
+                        {name: value.get("status", "unknown") for name, value in delivery_outcomes.items()},
                     )
                 except Exception as ex:
                     logger.warning(
