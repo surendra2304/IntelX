@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import ipaddress
 import json
 import os
 import time
-import uuid
 from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
 
 from intelx.core.settings import get_settings
+
+_PUBLISH_ATTEMPTS = 3
+_PUBLISH_BASE_DELAY_SECONDS = 0.25
 
 
 def _public_source_refs(sources: list[dict[str, Any]] | None) -> list[dict[str, str]]:
@@ -98,7 +101,8 @@ async def publish_research_notice(
 
     envelope = {
         "message_id": event_id,
-        "correlation_id": f"corr_{uuid.uuid4().hex[:16]}",
+        # Keep retries byte-for-byte stable so the receiver can deduplicate them.
+        "correlation_id": f"corr_{hashlib.sha256(event_id.encode()).hexdigest()[:16]}",
         "from_agent": "intelx",
         "to_agent": target,
         "intent": "intelx.news",
@@ -116,19 +120,38 @@ async def publish_research_notice(
     envelope["signature"] = hmac.new(key.encode("utf-8"), signed, hashlib.sha256).hexdigest()
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     url = f"{settings.MEMORA_URL.rstrip('/')}/mesh/envelope"
+    async def post_once(http_client: httpx.AsyncClient) -> httpx.Response:
+        return await http_client.post(url, json=envelope, headers=headers, timeout=8.0)
+
+    async def deliver(http_client: httpx.AsyncClient) -> dict[str, Any]:
+        for attempt in range(_PUBLISH_ATTEMPTS):
+            try:
+                response = await post_once(http_client)
+            except httpx.TransportError as exc:
+                if attempt + 1 == _PUBLISH_ATTEMPTS:
+                    return {"status": "error", "error": type(exc).__name__}
+            else:
+                if response.status_code == 202:
+                    data = response.json()
+                    return {
+                        "status": data.get("status", "accepted"),
+                        "event_id": data.get("event_id"),
+                        "cursor": data.get("cursor"),
+                    }
+                # Retry transient throttling and server failures only. Auth, policy,
+                # validation, and other client errors need configuration changes.
+                if response.status_code not in {408, 425, 429, 500, 502, 503, 504}:
+                    return {"status": "failed_upstream", "status_code": response.status_code}
+                if attempt + 1 == _PUBLISH_ATTEMPTS:
+                    return {"status": "failed_upstream", "status_code": response.status_code}
+
+            await asyncio.sleep(_PUBLISH_BASE_DELAY_SECONDS * (2**attempt))
+        return {"status": "error", "error": "retry_exhausted"}
+
     try:
         if client:
-            response = await client.post(url, json=envelope, headers=headers, timeout=8.0)
-        else:
-            async with httpx.AsyncClient(timeout=8.0) as http_client:
-                response = await http_client.post(url, json=envelope, headers=headers)
-        if response.status_code == 202:
-            data = response.json()
-            return {
-                "status": data.get("status", "accepted"),
-                "event_id": data.get("event_id"),
-                "cursor": data.get("cursor"),
-            }
-        return {"status": "failed_upstream", "status_code": response.status_code}
+            return await deliver(client)
+        async with httpx.AsyncClient(timeout=8.0) as http_client:
+            return await deliver(http_client)
     except Exception as exc:
         return {"status": "error", "error": type(exc).__name__}

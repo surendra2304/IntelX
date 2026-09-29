@@ -77,6 +77,82 @@ async def test_intelx_publishes_signed_idempotent_recipient_notice(monkeypatch):
     ]
 
 
+@pytest.mark.asyncio
+async def test_intelx_retries_transient_memora_failure_with_stable_envelope(monkeypatch):
+    envelopes = []
+    sleeps = []
+    settings = SimpleNamespace(
+        ENV="development",
+        MOCK_MODE=False,
+        INTELX_API_KEY="intelx-test-key",
+        MEMORA_URL="https://memora.invalid",
+    )
+    monkeypatch.setattr(memora_events, "get_settings", lambda: settings)
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("INTELX_MEMORA_EVENTS_ENABLED", "true")
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(memora_events.asyncio, "sleep", fake_sleep)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        envelopes.append(json.loads(request.content))
+        if len(envelopes) == 1:
+            return httpx.Response(503)
+        return httpx.Response(202, json={"status": "accepted", "event_id": "same-event"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await memora_events.publish_research_notice(
+            target_agent="all",
+            run_id="retry-1",
+            finding_summary="New sourced item",
+            category="world_events",
+            domain="news",
+            confidence=0.5,
+            client=client,
+        )
+
+    assert result == {"status": "accepted", "event_id": "same-event", "cursor": None}
+    assert len(envelopes) == 2
+    assert envelopes[0] == envelopes[1]
+    assert envelopes[0]["correlation_id"] == envelopes[1]["correlation_id"]
+    assert sleeps == [memora_events._PUBLISH_BASE_DELAY_SECONDS]
+
+
+@pytest.mark.asyncio
+async def test_intelx_does_not_retry_memora_policy_denial(monkeypatch):
+    attempts = 0
+    settings = SimpleNamespace(
+        ENV="development",
+        MOCK_MODE=False,
+        INTELX_API_KEY="intelx-test-key",
+        MEMORA_URL="https://memora.invalid",
+    )
+    monkeypatch.setattr(memora_events, "get_settings", lambda: settings)
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("INTELX_MEMORA_EVENTS_ENABLED", "true")
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(403)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await memora_events.publish_research_notice(
+            target_agent="all",
+            run_id="denied-1",
+            finding_summary="New sourced item",
+            category="world_events",
+            domain="news",
+            confidence=0.5,
+            client=client,
+        )
+
+    assert result == {"status": "failed_upstream", "status_code": 403}
+    assert attempts == 1
+
+
 def test_public_source_refs_rejects_non_public_url_shapes_and_bounds_list():
     refs = memora_events._public_source_refs(
         [
