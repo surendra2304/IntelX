@@ -197,6 +197,12 @@ class AIUniverseProvider(BaseLLMProvider):
             if real_answer:
                 text_output = real_answer
                 logger.info(f"[AI-Universe] Live reasoning /ask bypass succeeded for role=[{role}]")
+            else:
+                raise ProviderError(
+                    f"AI-Universe returned a canned mock response for role=[{role}] and the "
+                    "live reasoning /ask bypass produced no genuine answer; refusing to emit "
+                    "canned content as intelligence."
+                )
 
         # Unwrap markdown code blocks if present
         stripped = text_output.strip()
@@ -284,7 +290,8 @@ class AIUniverseProvider(BaseLLMProvider):
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 logger.info(
-                    f"[AI-Universe] Calling /ask bypass at {ask_url} with key={inference_key[:8]}..."
+                    f"[AI-Universe] Calling /ask bypass at {ask_url} "
+                    f"with key={'present' if inference_key else 'absent'}"
                 )
                 resp = await client.post(ask_url, json=ask_payload, headers=ask_headers)
                 if resp.status_code == 404:

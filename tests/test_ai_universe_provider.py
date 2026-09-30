@@ -1,13 +1,16 @@
 """Tests for AI-Universe Multi-Agent Intelligence Provider Integration and Fallback Chain."""
 
 import json
+from unittest.mock import patch
 
 import httpx
 import pytest
 import respx
 from pydantic import BaseModel
 
+import intelx.models.ai_universe_provider as ai_universe_module
 from intelx.core.confidence import compute_confidence_score
+from intelx.core.errors import ProviderError
 from intelx.core.settings import Settings
 from intelx.models.ai_universe_provider import AI_UNIVERSE_ROLE_MAP, AIUniverseProvider
 from intelx.models.gateway import ModelGateway
@@ -186,3 +189,70 @@ async def test_ai_universe_provider_canned_mock_bypass():
     assert "Genuine LLM synthesized intelligence." in text
     data = json.loads(text)
     assert data["summary"] == "Genuine LLM synthesized intelligence."
+
+
+CANNED_RESEARCH_RESPONSE = {
+    "response": {
+        "research_synthesis_report": "Comprehensive Research Assessment on: 'free fire release date'\n"
+        "Key Finding: Strong convergence across 0 extracted verbatim spans.\n"
+        "Credibility Level: 80% weighted empirical reliability.",
+        "cited_spans": [],
+        "coherence_score": 0.95,
+    }
+}
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ai_universe_provider_without_key_bypasses_canned_mock():
+    """With no inference key configured, the bypass must still call /ask and use the genuine answer."""
+    v1_url = "https://friday-zw59.onrender.com/v1/intelx/research"
+    ask_url = "https://friday-zw59.onrender.com/ask"
+
+    real_ask_resp = {
+        "task_id": "task-real-456",
+        "answer": json.dumps({"summary": "Keyless genuine synthesis.", "confidence": 0.9}),
+    }
+
+    respx.post(v1_url).mock(return_value=httpx.Response(200, json=CANNED_RESEARCH_RESPONSE))
+    ask_route = respx.post(ask_url).mock(return_value=httpx.Response(200, json=real_ask_resp))
+
+    keyless = Settings(INFERENCE_API_KEY=None)
+    with patch.object(ai_universe_module, "get_settings", return_value=keyless):
+        provider = AIUniverseProvider(base_url="https://friday-zw59.onrender.com")
+        messages = [{"role": "user", "content": "RESEARCH OBJECTIVE: hermetic keyless run"}]
+        text, _ = await provider.complete(
+            messages=messages,
+            model="ai-universe-v1",
+            role="synthesizer",
+            schema_model=DummySchema,
+        )
+
+    assert ask_route.called
+    assert "Keyless genuine synthesis." in text
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ai_universe_provider_fails_loudly_when_bypass_yields_nothing():
+    """A canned response with no recoverable /ask answer must raise, never return canned content."""
+    v1_url = "https://friday-zw59.onrender.com/v1/intelx/research"
+    ask_url = "https://friday-zw59.onrender.com/ask"
+
+    respx.post(v1_url).mock(return_value=httpx.Response(200, json=CANNED_RESEARCH_RESPONSE))
+    respx.post(ask_url).mock(return_value=httpx.Response(404))
+    respx.post("https://friday-zw59.onrender.com/v1/ask").mock(return_value=httpx.Response(404))
+
+    keyless = Settings(INFERENCE_API_KEY=None)
+    with patch.object(ai_universe_module, "get_settings", return_value=keyless):
+        provider = AIUniverseProvider(base_url="https://friday-zw59.onrender.com")
+        messages = [{"role": "user", "content": "RESEARCH OBJECTIVE: loud failure"}]
+        with pytest.raises(ProviderError) as excinfo:
+            await provider.complete(
+                messages=messages,
+                model="ai-universe-v1",
+                role="synthesizer",
+                schema_model=DummySchema,
+            )
+
+    assert "canned mock" in str(excinfo.value)
