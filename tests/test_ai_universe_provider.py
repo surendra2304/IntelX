@@ -47,7 +47,9 @@ async def test_ai_universe_provider_successful_completion():
 
     respx.post(endpoint_url).mock(return_value=httpx.Response(200, json=mock_response))
 
-    provider = AIUniverseProvider(base_url="https://friday-zw59.onrender.com", api_key="aiu-secret-key")
+    provider = AIUniverseProvider(
+        base_url="https://friday-zw59.onrender.com", api_key="aiu-secret-key"
+    )
     messages = [{"role": "user", "content": "Verify claim regarding quantum coherence time."}]
 
     text, usage = await provider.complete(

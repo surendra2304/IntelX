@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from intelx.core.report import export_spoken_citations, export_text_citations
+
 
 @dataclass(frozen=True, slots=True)
 class CitationCheck:
@@ -69,9 +71,6 @@ class CitationValidator:
 
         return self.TOKEN_RE.sub(_replace_token, report_markdown)
 
-
-# Re-export from intelx.core.report to avoid circular dependencies
-from intelx.core.report import export_spoken_citations, export_text_citations
 
 __all__ = [
     "CitationCheck",

@@ -48,7 +48,9 @@ class MemoraMemoryClient:
         }
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(f"{self.base_url}/v1/memories", json=payload, headers=headers)
+                resp = await client.post(
+                    f"{self.base_url}/v1/memories", json=payload, headers=headers
+                )
             if resp.status_code in (200, 201):
                 return {"status": "stored", "cloud": True, "response": resp.json()}
             logger.warning("Memora rejected IntelX memory write with HTTP %s", resp.status_code)
@@ -74,12 +76,12 @@ class MemoraMemoryClient:
         redacted_summary, _ = redact_document_text_preserving_length(summary)
 
         content = {
-                "run_id": run_id,
-                "objective": objective,
-                "summary": redacted_summary,
-                "evidence_count": evidence_count,
-                "claims_count": claims_count,
-                "tags": tags or ["intelx", "research", "evidence"],
+            "run_id": run_id,
+            "objective": objective,
+            "summary": redacted_summary,
+            "evidence_count": evidence_count,
+            "claims_count": claims_count,
+            "tags": tags or ["intelx", "research", "evidence"],
         }
 
         if settings.MOCK_MODE:
@@ -88,7 +90,12 @@ class MemoraMemoryClient:
         return await self._store_cloud_memory(
             namespace=namespace,
             content=content,
-            provenance={"run_id": run_id, "objective": objective, "kind": "research_summary", "tags": tags or []},
+            provenance={
+                "run_id": run_id,
+                "objective": objective,
+                "kind": "research_summary",
+                "tags": tags or [],
+            },
         )
 
     async def store_verified_findings_to_memora(
@@ -247,11 +254,11 @@ class MemoraMemoryClient:
             }
 
         content = {
-                "run_id": run_id,
-                "objective": objective,
-                "verified_facts_count": len(verified_facts),
-                "facts": verified_facts,
-                "tags": tags or ["intelx", "verified_evidence", "provenance_locked"],
+            "run_id": run_id,
+            "objective": objective,
+            "verified_facts_count": len(verified_facts),
+            "facts": verified_facts,
+            "tags": tags or ["intelx", "verified_evidence", "provenance_locked"],
         }
 
         if settings.MOCK_MODE:
@@ -269,10 +276,17 @@ class MemoraMemoryClient:
         result = await self._store_cloud_memory(
             namespace=namespace,
             content=content,
-            provenance={"run_id": run_id, "objective": objective, "kind": "verified_findings", "tags": tags or []},
+            provenance={
+                "run_id": run_id,
+                "objective": objective,
+                "kind": "verified_findings",
+                "tags": tags or [],
+            },
             importance=0.95,
         )
-        result.setdefault("accepted_count", len(verified_facts) if result.get("status") == "stored" else 0)
+        result.setdefault(
+            "accepted_count", len(verified_facts) if result.get("status") == "stored" else 0
+        )
         result.setdefault("run_id", run_id)
         return result
 

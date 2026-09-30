@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class ProviderResultStatus(str, Enum):
+class ProviderResultStatus(StrEnum):
     """Explicit status classification for provider execution results."""
 
     SUCCESS_WITH_RESULTS = "SUCCESS_WITH_RESULTS"

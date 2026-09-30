@@ -38,10 +38,21 @@ async def test_new_feed_article_is_broadcast_once_after_successful_ingestion(mon
         "category": "crypto_trading",
     }
     captured = []
-    monkeypatch.setattr(news_ingester, "FRIDAY_UNIVERSE_FEEDS", [{"url": "https://feed.example/rss", **{k: article[k] for k in ("publisher", "agent", "category")}}])
+    monkeypatch.setattr(
+        news_ingester,
+        "FRIDAY_UNIVERSE_FEEDS",
+        [
+            {
+                "url": "https://feed.example/rss",
+                **{k: article[k] for k in ("publisher", "agent", "category")},
+            }
+        ],
+    )
     monkeypatch.setattr(news_ingester, "get_sessionmaker", lambda: lambda: _Session())
     monkeypatch.setattr(news_ingester, "_parse_feed", lambda *_args: [article])
-    monkeypatch.setattr(news_ingester, "_fetch_article_text", lambda *_args: _async_value("Fetched source text."))
+    monkeypatch.setattr(
+        news_ingester, "_fetch_article_text", lambda *_args: _async_value("Fetched source text.")
+    )
     monkeypatch.setattr(news_ingester, "_ingest_article", lambda *_args: _async_value(True))
 
     async def publish(**kwargs):

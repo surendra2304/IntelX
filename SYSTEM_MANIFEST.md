@@ -7,17 +7,17 @@
 
 ---
 
-## ☁️ 1. Live Cloud Infrastructure & Deployment
+## ☁️ 1. Configured service (runtime unverified)
 
-| Attribute | Production Configuration |
+| Attribute | Repository configuration |
 | :--- | :--- |
-| **Live Production URL** | [https://intelx-mygl.onrender.com](https://intelx-mygl.onrender.com) |
+| **Configured Service URL (deployment unverified)** | [https://intelx-mygl.onrender.com](https://intelx-mygl.onrender.com) |
 | **Health Check Endpoint** | https://intelx-mygl.onrender.com/health |
-| **Master API Key Variable** | `INTELX_API_KEY` (configure a unique secret outside source control) |
+| **API key variable (keep value in secret environment)** | `INTELX_API_KEY` (configure a unique secret outside source control) |
 | **Authentication Header** | Authorization: Bearer `<configured INTELX_API_KEY>` |
-| **Database Topology** | Turso LibSQL Cloud DB (9 GB Free Tier) |
-| **Database Connection** | https://intelx-db-surendra2304.aws-ap-south-1.turso.io |
-| **Hosting Platform** | Render Docker Web Service (Singapore / AWS Mumbai) |
+| **Configured database topology (runtime unverified)** | Turso LibSQL Cloud DB (Turso connector configured (active DB path and capacity unverified)) |
+| **Configured database URL or namespace (not a secret)** | https://intelx-db-surendra2304.aws-ap-south-1.turso.io |
+| **Configured host (plan, region, and runtime unverified)** | Render service configured (current plan, region, and deployment unverified) |
 
 ---
 
@@ -33,11 +33,11 @@
 
 ---
 
-## 🌐 3. Full Ecosystem Network Connectivity
+## 🌐 3. Ecosystem endpoint configuration
 
-Every agent in the universe communicates using standard environment variables:
+These variable names and URLs are references only; they do not prove live communication. Set real credentials in secret environments.
 
-`env
+```env
 # ============================================================================== #
 #               FRIDAY UNIVERSE MASTER ECOSYSTEM CONFIGURATION                  #
 # ============================================================================== #
@@ -46,15 +46,15 @@ Every agent in the universe communicates using standard environment variables:
 INFERENCE_URL=https://inference-r1sn.onrender.com
 INFERENCE_API_KEY=<configure locally; do not commit>
 
-# 2. 🧠 Memora Cloud Persistent Memory (9 GB Turso AWS Mumbai)
+# 2. Memora cloud memory service (active backend/capacity not verified)
 MEMORA_URL=https://memora-cavc.onrender.com
 MEMORA_API_KEY=<configure locally; do not commit>
 
-# 3. 📈 Stratex 24/7 Algorithmic Trading Platform (Binance Futures)
+# 3. 📈 Stratex Paper/Testnet Strategy Platform (Binance Futures)
 STRATEX_URL=https://stratex-8wj1.onrender.com
 STRATEX_API_KEY=<configure locally; do not commit>
 
-# 4. 🧠 IntelX Evidence & Intelligence Research Engine (Turso AWS Mumbai)
+# 4. IntelX research service (active storage backend not verified)
 INTELX_URL=https://intelx-mygl.onrender.com
 INTELX_API_KEY=<configure locally; do not commit>
 
@@ -77,15 +77,15 @@ SENTINEL_API_KEY=<configure locally; do not commit>
 # 9. 🤖 FRIDAY Central Desktop Operating System
 FRIDAY_URL=https://friday-zw59.onrender.com
 FRIDAY_API_KEY=<configure locally; do not commit>
-`
+```
 
 ---
 
-## 🤖 4. Antigravity AI Session Guide
+## 🤖 4. Repository guide
 
-When opening this directory in **Antigravity AI**:
+When opening this repository:
 * **Identity:** You are working inside **IntelX** (d:\FRIDAY Universe\IntelX).
-* **Live Service:** This service is deployed live at https://intelx-mygl.onrender.com.
+* **Configured URL (deployment unverified): https://intelx-mygl.onrender.com.
 * **Authentication:** Incoming requests require the configured `INTELX_API_KEY`; set separate, strong secrets for each service.
 * **Never Fake Tests:** All tests and verifications must be executed against real code and real endpoints.
 * **No Unapproved Git Pushes:** Keep modifications local unless explicitly instructed to push.

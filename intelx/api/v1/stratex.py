@@ -13,11 +13,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from intelx.api.v1.futuris import verify_futuris_auth
 from intelx.connectors.search import GoogleNewsSearchConnector
 from intelx.db.models import Claim, Finding, ResearchRun
 from intelx.db.session import get_db_session
 from intelx.integrations.stratex_context import StratexConnector
-from intelx.api.v1.futuris import verify_futuris_auth
 
 logger = logging.getLogger("intelx.api.v1.stratex")
 

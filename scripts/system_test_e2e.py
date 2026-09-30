@@ -10,23 +10,23 @@ import sys
 import time
 from pathlib import Path
 
-# Add project root to sys.path
+# Add project root and test environment before loading application settings.
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
 os.environ["INTELX_ENV"] = "test"
 os.environ["INTELX_MOCK_MODE"] = "true"
 
-import httpx
+import httpx  # noqa: E402
 
-from intelx.app.factory import create_app
-from intelx.core.auth import hash_api_key
-from intelx.db.base import Base
-from intelx.db.engine import get_async_engine
-from intelx.db.models import ApiKey
-from intelx.db.repos import AuditChain, RunRepo
-from intelx.db.session import get_sessionmaker
-from intelx.orchestration.worker import OrchestrationWorker
+from intelx.app.factory import create_app  # noqa: E402
+from intelx.core.auth import hash_api_key  # noqa: E402
+from intelx.db.base import Base  # noqa: E402
+from intelx.db.engine import get_async_engine  # noqa: E402
+from intelx.db.models import ApiKey  # noqa: E402
+from intelx.db.repos import AuditChain, RunRepo  # noqa: E402
+from intelx.db.session import get_sessionmaker  # noqa: E402
+from intelx.orchestration.worker import OrchestrationWorker  # noqa: E402
 
 
 class Colors:

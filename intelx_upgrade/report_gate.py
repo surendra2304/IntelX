@@ -23,7 +23,7 @@ class FinalReportGate:
         for cid, supported in claim_support.items():
             if not supported and cid in report:
                 unsupported.append(cid)
-        bad = sorted(set(x for x in tokens if x not in claim_support))
+        bad = sorted({x for x in tokens if x not in claim_support})
         unsupported.extend(bad)
         return ReportGate(
             not unsupported and not unresolved, unsupported, list(unresolved), len(tokens)

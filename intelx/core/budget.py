@@ -110,25 +110,25 @@ class BudgetController:
             ledger.cost_usd += max(0.0, actual_usd)
             self._check(ledger)
 
-    def _check(self, l: BudgetLedger) -> None:
+    def _check(self, ledger: BudgetLedger) -> None:
         """Check all ceilings and fail closed if exceeded."""
-        if l.queries > self.max_queries:
+        if ledger.queries > self.max_queries:
             raise BudgetExceeded(
-                f"research query limit exhausted: {l.queries} > {self.max_queries}"
+                f"research query limit exhausted: {ledger.queries} > {self.max_queries}"
             )
-        if l.fetches > self.max_fetches:
+        if ledger.fetches > self.max_fetches:
             raise BudgetExceeded(
-                f"research fetch limit exhausted: {l.fetches} > {self.max_fetches}"
+                f"research fetch limit exhausted: {ledger.fetches} > {self.max_fetches}"
             )
-        if l.sources > self.max_sources:
+        if ledger.sources > self.max_sources:
             raise BudgetExceeded(
-                f"research source limit exhausted: {l.sources} > {self.max_sources}"
+                f"research source limit exhausted: {ledger.sources} > {self.max_sources}"
             )
-        if l.cost_usd > self.max_cost:
+        if ledger.cost_usd > self.max_cost:
             raise BudgetExceeded(
-                f"research budget exhausted: ${l.cost_usd:.4f} > ${self.max_cost:.4f}"
+                f"research budget exhausted: ${ledger.cost_usd:.4f} > ${self.max_cost:.4f}"
             )
-        if l.runtime_seconds > self.max_runtime_seconds:
+        if ledger.runtime_seconds > self.max_runtime_seconds:
             raise BudgetExceeded(
-                f"research time limit exhausted: {l.runtime_seconds:.1f}s > {self.max_runtime_seconds:.1f}s"
+                f"research time limit exhausted: {ledger.runtime_seconds:.1f}s > {self.max_runtime_seconds:.1f}s"
             )

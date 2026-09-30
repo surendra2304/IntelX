@@ -98,6 +98,7 @@ async def _dispatch_external_research(
         logger=logger,
     )
 
+
 VALID_TRANSITIONS: dict[RunStatus, set[RunStatus]] = {
     RunStatus.QUEUED: {RunStatus.PLANNING, RunStatus.FAILED, RunStatus.CANCELLED},
     RunStatus.PLANNING: {RunStatus.DISCOVERING, RunStatus.FAILED, RunStatus.CANCELLED},
@@ -297,7 +298,10 @@ class OrchestrationEngine:
                     logger.info(
                         "IntelX review-resolved ecosystem attempts completed for %s: %s",
                         run_id,
-                        {name: value.get("status", "unknown") for name, value in delivery_outcomes.items()},
+                        {
+                            name: value.get("status", "unknown")
+                            for name, value in delivery_outcomes.items()
+                        },
                     )
                 except Exception as ex:
                     logger.warning(f"Failed to dispatch external ecosystem webhooks: {ex}")
@@ -686,7 +690,10 @@ class OrchestrationEngine:
                     logger.info(
                         "IntelX ecosystem attempts completed for run %s: %s",
                         run_id,
-                        {name: value.get("status", "unknown") for name, value in delivery_outcomes.items()},
+                        {
+                            name: value.get("status", "unknown")
+                            for name, value in delivery_outcomes.items()
+                        },
                     )
                 except Exception as ex:
                     logger.warning(

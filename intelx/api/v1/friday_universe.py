@@ -5,6 +5,7 @@ for intelligence collected specifically for that agent.
 """
 
 import logging
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -102,7 +103,7 @@ async def get_agent_intelligence(
 
         # Extract first meaningful paragraph as summary
         lines = doc.text.split("\n")
-        summary_lines = [l for l in lines[4:] if l.strip() and not l.startswith("[")]
+        summary_lines = [line for line in lines[4:] if line.strip() and not line.startswith("[")]
         summary = " ".join(summary_lines)[:500]
 
         items.append(
@@ -130,7 +131,6 @@ async def get_ingestion_status(
     _: ApiKey = Depends(get_current_api_key),
 ) -> dict:
     """Returns count of ingested intelligence items per agent."""
-    total_stmt = select(Source).order_by(Source.retrieved_at.desc()).limit(1)
     total_count_stmt = select(Source)
 
     result = await session.execute(total_count_stmt)
@@ -250,6 +250,8 @@ async def post_agent_intelligence(
     return {
         "task_id": task_id,
         "target_agent": "intelx",
+        "source_agent": caller,
+        "action": action,
         "status": "SUCCESS",
         "result": {
             "query": query,
@@ -266,6 +268,3 @@ def _extract_tag(text: str, tag_name: str) -> str | None:
     """Extract value from [TAG_NAME:VALUE] marker in document text."""
     m = re.search(rf"\[{tag_name}:([^\]]+)\]", text)
     return m.group(1) if m else None
-
-
-import re

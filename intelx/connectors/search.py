@@ -357,7 +357,7 @@ class WikipediaSearchConnector(BaseConnector):
                     urls = data[3]
                     results: list[SearchResult] = []
 
-                    for t, s, u in zip(titles, snippets, urls):
+                    for t, s, u in zip(titles, snippets, urls, strict=True):
                         if t and u:
                             results.append(SearchResult(url=u, title=t, snippet=s or t))
                     if results:

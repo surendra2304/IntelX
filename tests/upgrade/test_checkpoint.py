@@ -1,4 +1,4 @@
-from intelx_upgrade.checkpoint import *
+from intelx_upgrade.checkpoint import Checkpoint, CheckpointManager
 
 
 def test_checkpoint():

@@ -39,11 +39,11 @@ class BudgetController:
         ledger.cost_usd += max(0.0, usd)
         self._check(ledger)
 
-    def _check(self, l):
+    def _check(self, ledger):
         if (
-            l.queries > self.max_queries
-            or l.fetches > self.max_fetches
-            or l.sources > self.max_sources
-            or l.cost_usd > self.max_cost
+            ledger.queries > self.max_queries
+            or ledger.fetches > self.max_fetches
+            or ledger.sources > self.max_sources
+            or ledger.cost_usd > self.max_cost
         ):
             raise BudgetExceeded("research budget exhausted")

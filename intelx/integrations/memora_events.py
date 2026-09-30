@@ -120,6 +120,7 @@ async def publish_research_notice(
     envelope["signature"] = hmac.new(key.encode("utf-8"), signed, hashlib.sha256).hexdigest()
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     url = f"{settings.MEMORA_URL.rstrip('/')}/mesh/envelope"
+
     async def post_once(http_client: httpx.AsyncClient) -> httpx.Response:
         return await http_client.post(url, json=envelope, headers=headers, timeout=8.0)
 

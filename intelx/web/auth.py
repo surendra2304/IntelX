@@ -20,7 +20,9 @@ def _get_signing_secret() -> bytes:
     secret = settings.SECRET_KEY
     if not secret or len(secret) < 32:
         if settings.is_production():
-            raise RuntimeError("Configure a unique INTELX_SECRET_KEY of at least 32 characters before signing web sessions.")
+            raise RuntimeError(
+                "Configure a unique INTELX_SECRET_KEY of at least 32 characters before signing web sessions."
+            )
         return _DEVELOPMENT_SESSION_SECRET
     return secret.encode("utf-8")
 

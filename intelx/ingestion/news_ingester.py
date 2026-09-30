@@ -623,9 +623,7 @@ async def crawl_once(session_factory: Any | None = None) -> dict[str, Any]:
                     "domain": urlparse(article["url"]).netloc,
                     "publisher": article["publisher"],
                     "published_at": (
-                        article["published_at"].isoformat()
-                        if article.get("published_at")
-                        else None
+                        article["published_at"].isoformat() if article.get("published_at") else None
                     ),
                     "trust_tier": "LIKELY_RELIABLE",
                 }

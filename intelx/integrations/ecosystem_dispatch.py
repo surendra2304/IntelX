@@ -31,6 +31,9 @@ async def dispatch_sequentially(
         except Exception as exc:
             outcomes[recipient] = {"status": "error", "error": type(exc).__name__}
             logger.warning(
-                "IntelX ecosystem delivery %s raised %s", recipient, type(exc).__name__, exc_info=True
+                "IntelX ecosystem delivery %s raised %s",
+                recipient,
+                type(exc).__name__,
+                exc_info=True,
             )
     return outcomes

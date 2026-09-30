@@ -24,8 +24,8 @@ from intelx.db.models import (
     Artifact,
     AuditEvent,
     Claim,
-    Evidence,
     Event,
+    Evidence,
     Finding,
     ResearchRun,
     ReviewDecision,
@@ -128,8 +128,7 @@ async def dashboard_page(
     recent_active_runs = sum(
         1
         for run in runs
-        if run.status
-        not in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED)
+        if run.status not in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED)
     )
     recent_completed_runs = sum(1 for run in runs if run.status == RunStatus.COMPLETED)
     recent_failed_runs = sum(1 for run in runs if run.status == RunStatus.FAILED)
@@ -318,11 +317,7 @@ async def web_job_updates(
     run = await RunRepo.get_run(session, job_id)
     if not run:
         raise HTTPException(status_code=404, detail="Job not found")
-    stmt = (
-        select(Event)
-        .where(Event.run_id == job_id, Event.id > after)
-        .order_by(Event.id.asc())
-    )
+    stmt = select(Event).where(Event.run_id == job_id, Event.id > after).order_by(Event.id.asc())
     events = list((await session.execute(stmt)).scalars().all())
     return {
         "status": run.status.value,

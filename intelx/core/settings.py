@@ -320,14 +320,18 @@ class Settings(BaseSettings):
                 "CRITICAL SECURITY VIOLATION: Mock LLM models cannot be used in production. "
                 "Configure a valid production LLM provider and model."
             )
-        if any(k in {"dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin"} for k in (self.API_KEYS or [])):
+        if any(
+            k in {"dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin"}
+            for k in (self.API_KEYS or [])
+        ):
             raise RuntimeError(
                 "CRITICAL SECURITY VIOLATION: Insecure development API keys configured in production."
             )
         secret_values = [self.SECRET_KEY or "", self.INTELX_API_KEY or "", *(self.API_KEYS or [])]
         if any(
             len(value) < 32
-            or value.strip().lower() in {"change-me", "changeme", "secret", "password", "intelx_api"}
+            or value.strip().lower()
+            in {"change-me", "changeme", "secret", "password", "intelx_api"}
             or len(set(value)) < 2
             for value in secret_values
         ):

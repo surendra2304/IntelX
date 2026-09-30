@@ -1,4 +1,4 @@
-from intelx_upgrade.models import *
+from intelx_upgrade.models import ResearchIdentity, ResearchState, ResearchStatus
 from intelx_upgrade.research import ResearchController
 
 

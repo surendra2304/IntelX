@@ -5,9 +5,10 @@ import time
 
 from dotenv import load_dotenv
 
+from intelx.models.ai_universe_provider import AIUniverseProvider
+
 sys.stdout.reconfigure(encoding="utf-8")
 load_dotenv(".env")
-from intelx.models.ai_universe_provider import AIUniverseProvider
 
 questions = [
     "What source credibility ranking algorithm provides the highest resistance to coordinated misinformation campaigns?",
