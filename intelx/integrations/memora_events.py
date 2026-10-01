@@ -66,6 +66,7 @@ async def publish_research_notice(
     recommended_targets: list[str] | None = None,
     sources: list[dict[str, Any]] | None = None,
     client: httpx.AsyncClient | None = None,
+    correlation_id: str | None = None,
 ) -> dict[str, Any]:
     """Persist a small, idempotent IntelX notice; it does not claim task completion."""
     settings = get_settings()
@@ -102,7 +103,8 @@ async def publish_research_notice(
     envelope = {
         "message_id": event_id,
         # Keep retries byte-for-byte stable so the receiver can deduplicate them.
-        "correlation_id": f"corr_{hashlib.sha256(event_id.encode()).hexdigest()[:16]}",
+        # An explicit correlation_id lets one journey thread the same ID across hops.
+        "correlation_id": correlation_id or f"corr_{hashlib.sha256(event_id.encode()).hexdigest()[:16]}",
         "from_agent": "intelx",
         "to_agent": target,
         "intent": "intelx.news",

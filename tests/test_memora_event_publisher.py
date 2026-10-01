@@ -270,3 +270,37 @@ async def test_stratex_memora_notice_receives_research_source_provenance(monkeyp
     assert result["status"] == "delivered"
     assert captured["target_agent"] == "all"
     assert captured["sources"] == sources
+
+
+@pytest.mark.asyncio
+async def test_intelx_threads_explicit_correlation_id_into_envelope(monkeypatch):
+    captured = {}
+    settings = SimpleNamespace(
+        ENV="development",
+        MOCK_MODE=False,
+        INTELX_API_KEY="intelx-test-key",
+        MEMORA_URL="https://memora.invalid",
+    )
+    monkeypatch.setattr(memora_events, "get_settings", lambda: settings)
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("INTELX_MEMORA_EVENTS_ENABLED", "true")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["envelope"] = json.loads(request.content)
+        return httpx.Response(
+            202, json={"status": "accepted", "event_id": "intelx-run-9-all", "cursor": 1}
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await memora_events.publish_research_notice(
+            target_agent="all",
+            run_id="run-9",
+            finding_summary="Signal for one journey",
+            category="market_move",
+            domain="market",
+            confidence=0.5,
+            correlation_id="corr-journey-x",
+            client=client,
+        )
+
+    assert captured["envelope"]["correlation_id"] == "corr-journey-x"
