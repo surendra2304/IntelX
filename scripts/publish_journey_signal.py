@@ -7,6 +7,7 @@ with an explicit correlation_id so a single journey can thread every hop.
 Usage:
     python scripts/publish_journey_signal.py --correlation-id corrJ [--feed-index 0]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,8 +28,12 @@ from intelx.integrations.memora_events import publish_research_notice
 
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--correlation-id", required=True, help="Journey correlation ID threaded to every hop")
-    parser.add_argument("--feed-index", type=int, default=0, help="Index into NewsIngester's FRIDAY_UNIVERSE_FEEDS")
+    parser.add_argument(
+        "--correlation-id", required=True, help="Journey correlation ID threaded to every hop"
+    )
+    parser.add_argument(
+        "--feed-index", type=int, default=0, help="Index into NewsIngester's FRIDAY_UNIVERSE_FEEDS"
+    )
     args = parser.parse_args()
 
     # Non-production publishing requires the explicit events flag.
@@ -38,7 +43,15 @@ async def main() -> int:
     async with httpx.AsyncClient(follow_redirects=True) as client:
         response = await client.get(feed["url"], timeout=15.0)
         if response.status_code != 200:
-            print(json.dumps({"status": "feed_fetch_failed", "status_code": response.status_code, "feed": feed["url"]}))
+            print(
+                json.dumps(
+                    {
+                        "status": "feed_fetch_failed",
+                        "status_code": response.status_code,
+                        "feed": feed["url"],
+                    }
+                )
+            )
             return 1
         items = _parse_feed(response.text, feed)
 
@@ -63,7 +76,9 @@ async def main() -> int:
                 "url": item["url"],
                 "domain": urlparse(item["url"]).netloc,
                 "publisher": item["publisher"],
-                "published_at": item["published_at"].isoformat() if item.get("published_at") else None,
+                "published_at": item["published_at"].isoformat()
+                if item.get("published_at")
+                else None,
                 "trust_tier": "LIKELY_RELIABLE",
             }
         ],

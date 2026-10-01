@@ -104,7 +104,8 @@ async def publish_research_notice(
         "message_id": event_id,
         # Keep retries byte-for-byte stable so the receiver can deduplicate them.
         # An explicit correlation_id lets one journey thread the same ID across hops.
-        "correlation_id": correlation_id or f"corr_{hashlib.sha256(event_id.encode()).hexdigest()[:16]}",
+        "correlation_id": correlation_id
+        or f"corr_{hashlib.sha256(event_id.encode()).hexdigest()[:16]}",
         "from_agent": "intelx",
         "to_agent": target,
         "intent": "intelx.news",
