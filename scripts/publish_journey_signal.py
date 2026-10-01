@@ -21,8 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import httpx
 
-from intelx.integrations.memora_events import publish_research_notice
 from intelx.ingestion.news_ingester import FRIDAY_UNIVERSE_FEEDS, _parse_feed
+from intelx.integrations.memora_events import publish_research_notice
 
 
 async def main() -> int:
