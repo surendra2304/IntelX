@@ -17,6 +17,8 @@ async def test_healthz_endpoint(client: AsyncClient):
     assert data["version"] == __version__
     assert data["mock_mode"] is True
     assert data["database"] == "ok"
+    assert data["evidence_class"] == "process_liveness"
+    assert "observed_at" in data
     assert "timestamp" in data
 
     # Verify Request ID headers
@@ -33,6 +35,8 @@ async def test_readyz_endpoint(client: AsyncClient):
     assert data["status"] == "ready"
     assert data["ready"] is True
     assert data["database"] == "ok"
+    assert data["evidence_class"] == "dependency_readiness"
+    assert "observed_at" in data
 
 
 @pytest.mark.asyncio

@@ -22,13 +22,16 @@ async def healthz() -> dict[str, Any]:
     """Liveness probe: verifies process is running and accepting HTTP requests."""
     settings = get_settings()
     db_healthy = await check_database_health()
+    observed_at = datetime.now(UTC).isoformat()
     return {
         "status": "ok" if db_healthy else "degraded",
+        "evidence_class": "process_liveness",
+        "observed_at": observed_at,
         "service": PROJECT_NAME,
         "version": __version__,
         "mock_mode": settings.MOCK_MODE,
         "database": "ok" if db_healthy else "error",
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": observed_at,
     }
 
 
@@ -66,6 +69,8 @@ async def readyz() -> dict[str, Any]:
 
     payload = {
         "status": "ready" if all_ready else "not_ready",
+        "evidence_class": "dependency_readiness",
+        "observed_at": datetime.now(UTC).isoformat(),
         "ready": all_ready,
         "database": "ok" if db_healthy else "error",
         "storage": "ok" if storage_healthy else "error",
