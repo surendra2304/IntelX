@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.core.enums import ApiKeyRole
-from intelx.core.settings import Settings, get_settings
+from intelx.core.settings import Settings, get_settings, INSECURE_PRODUCTION_SECRETS
 from intelx.db.models import ApiKey
 from intelx.db.session import get_sessionmaker
 
@@ -102,13 +102,7 @@ def validate_production_secret(secret: str) -> bool:
     """Validate that production secrets satisfy length and complexity bounds."""
     if len(secret) < 16:
         return False
-    if secret.lower() in (
-        "secret",
-        "password",
-        "intelx-super-secret-key-change-in-production",
-        "change-me",
-        "dev-admin-key",
-    ):
+    if secret.strip().lower() in INSECURE_PRODUCTION_SECRETS:
         return False
     return True
 

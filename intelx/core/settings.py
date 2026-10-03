@@ -6,6 +6,24 @@ from typing import Any, Literal
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Credentials published in source, docs, .env.example, or seed scripts. They must
+# never authenticate a production deployment: anyone who can read the repository
+# already knows these values, so their length is irrelevant.
+INSECURE_PRODUCTION_SECRETS = frozenset(
+    {
+        "change-me",
+        "changeme",
+        "secret",
+        "password",
+        "intelx_api",
+        # Seed value shipped by intelx.core.auth and referenced in tests.
+        "intelx-super-secret-key-change-in-production",
+        "dev-admin-key",
+        "dev-member-key",
+        "intelx_dev_secret_key_admin",
+    }
+)
+
 
 class Settings(BaseSettings):
     """Central configuration for INTELX platform."""
@@ -330,8 +348,7 @@ class Settings(BaseSettings):
         secret_values = [self.SECRET_KEY or "", self.INTELX_API_KEY or "", *(self.API_KEYS or [])]
         if any(
             len(value) < 32
-            or value.strip().lower()
-            in {"change-me", "changeme", "secret", "password", "intelx_api"}
+            or value.strip().lower() in INSECURE_PRODUCTION_SECRETS
             or len(set(value)) < 2
             for value in secret_values
         ):
