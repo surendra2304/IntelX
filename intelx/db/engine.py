@@ -20,7 +20,11 @@ def configure_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> N
     cursor.execute("PRAGMA journal_mode = WAL;")
     cursor.execute("PRAGMA synchronous = NORMAL;")
     cursor.execute("PRAGMA foreign_keys = ON;")
-    cursor.execute("PRAGMA busy_timeout = 60000;")
+    # WAL lets readers proceed during a write but still permits only one writer.
+    # A 60s busy_timeout turned ordinary write contention into a 60-second stall that
+    # then surfaced as "database is locked" and a 500, so concurrent research
+    # submissions hung instead of being rejected or serialized promptly.
+    cursor.execute("PRAGMA busy_timeout = 5000;")
     cursor.close()
 
 
@@ -47,7 +51,9 @@ def get_async_engine(db_url: str | None = None) -> AsyncEngine:
     }
 
     if "sqlite" in url:
-        engine_kwargs["connect_args"] = {"timeout": 60.0, "check_same_thread": False}
+        # Matches the busy_timeout above; a long connect timeout just deferred the
+        # same stall to the moment a connection was first requested.
+        engine_kwargs["connect_args"] = {"timeout": 5.0, "check_same_thread": False}
         if ":memory:" in url:
             from sqlalchemy.pool import StaticPool
 

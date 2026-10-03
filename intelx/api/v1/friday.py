@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.agents.citations import export_spoken_citations, export_text_citations
@@ -352,6 +353,12 @@ def map_run_phase(run_status: RunStatus) -> str:
 # ============================================================================
 
 
+# Serializes research-run creation across concurrent delegations. SQLite allows a
+# single writer, so without this, simultaneous submissions collide on that lock.
+_RUN_WRITE_LOCK = asyncio.Lock()
+_RUN_WRITE_ATTEMPTS = 4
+
+
 @router.post(
     "/research",
     response_model=FridayDelegationResponse,
@@ -481,14 +488,32 @@ async def delegate_research_from_friday(
         "webhook_url": payload.webhook_url,
     }
 
-    run = await RunRepo.create_run(
-        session=session,
-        objective=payload.question,
-        scope_json=scope_data,
-        created_by=f"friday:{payload.context.requesting_system}",
-    )
-    run.idempotency_key = effective_idempotency_key
-    await session.commit()
+    # SQLite permits a single writer. Concurrent delegations previously collided at
+    # that lock, and with a 60s busy_timeout each loser stalled for a minute before
+    # failing. Serialize the write so submissions queue briefly instead, and retry
+    # within the deadline: background research jobs write to the same database and
+    # are not covered by this lock, so a submission can still meet one mid-flight.
+    async with _RUN_WRITE_LOCK:
+        for attempt in range(_RUN_WRITE_ATTEMPTS):
+            try:
+                run = await RunRepo.create_run(
+                    session=session,
+                    objective=payload.question,
+                    scope_json=scope_data,
+                    created_by=f"friday:{payload.context.requesting_system}",
+                )
+                run.idempotency_key = effective_idempotency_key
+                await session.commit()
+                break
+            except OperationalError as exc:
+                if "locked" not in str(exc).lower() or attempt + 1 == _RUN_WRITE_ATTEMPTS:
+                    raise
+                await session.rollback()
+                await asyncio.sleep(0.2 * (2**attempt))
+                logger.warning(
+                    "Research run write contended on the database lock; retry %d/%d",
+                    attempt + 1, _RUN_WRITE_ATTEMPTS,
+                )
 
     logger.info(
         f"[FRIDAY API] Enqueued research delegation run={run.id} "
