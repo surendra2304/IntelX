@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import bs4
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.connectors.sanitize import IngestionSanitizer
@@ -17,6 +18,51 @@ from intelx.db.models import Chunk, Document, Source
 from intelx.db.repos import SourceRepo
 
 logger = logging.getLogger(__name__)
+
+
+async def _adopt_existing(
+    session: AsyncSession,
+    fingerprint: str,
+    normalized_text: str,
+) -> tuple[Source, Document, list[Chunk]] | None:
+    """Return what is already stored for ``fingerprint``, or None if nothing is.
+
+    Every caller that finds an existing source has to adopt its document and chunks
+    rather than write a second copy, because the whole store is addressed as one
+    document per source. The most recent document wins, which is also what a run
+    that lost the race to insert the source needs to pick up the winner's work.
+    """
+    existing_source = await SourceRepo.get_source_by_fingerprint(session, fingerprint)
+    if not existing_source:
+        return None
+
+    stmt = (
+        select(Document)
+        .where(Document.source_id == existing_source.id)
+        .order_by(Document.created_at.desc())
+    )
+    doc = (await session.execute(stmt)).scalars().first()
+    if doc is None:
+        doc = await SourceRepo.create_document(
+            session=session, source_id=existing_source.id, text_content=normalized_text
+        )
+
+    stmt_chunks = select(Chunk).where(Chunk.document_id == doc.id).order_by(Chunk.idx.asc())
+    chunks = list((await session.execute(stmt_chunks)).scalars().all())
+    if not chunks:
+        for spec in chunk_text_with_offsets(doc.text):
+            chunks.append(
+                await SourceRepo.create_chunk(
+                    session=session,
+                    document_id=doc.id,
+                    idx=spec.idx,
+                    start_char=spec.start_char,
+                    end_char=spec.end_char,
+                    text_content=spec.text,
+                )
+            )
+
+    return existing_source, doc, chunks
 
 
 @dataclass
@@ -160,18 +206,9 @@ async def ingest_and_normalize(
     fingerprint = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
 
     # 2. Check for deduplication
-    existing_source = await SourceRepo.get_source_by_fingerprint(session, fingerprint)
-    if existing_source:
-        doc = await SourceRepo.get_document_by_source_id(session, existing_source.id)
-        if doc is None:
-            doc = await SourceRepo.create_document(
-                session=session, source_id=existing_source.id, text_content=normalized_text
-            )
-        from sqlalchemy import select
-
-        stmt_c = select(Chunk).where(Chunk.document_id == doc.id).order_by(Chunk.idx.asc())
-        existing_chunks = list((await session.execute(stmt_c)).scalars().all())
-        return existing_source, doc, existing_chunks, False
+    adopted = await _adopt_existing(session, fingerprint, normalized_text)
+    if adopted:
+        return (*adopted, False)
 
     # 2.5 Redact high-entropy secrets while preserving character offsets
     from intelx.core.security import redact_document_text_preserving_length
@@ -208,36 +245,10 @@ async def ingest_and_normalize(
         else:
             trust_tier = TrustTier.QUARANTINE
 
-    # 4.5 Check for existing source with same content fingerprint
-    existing_source = await SourceRepo.get_source_by_fingerprint(session, fingerprint)
-    if existing_source:
-        from sqlalchemy import select
-
-        stmt_d = (
-            select(Document)
-            .where(Document.source_id == existing_source.id)
-            .order_by(Document.created_at.desc())
-        )
-        existing_doc = (await session.execute(stmt_d)).scalars().first()
-        if existing_doc:
-            stmt_c = (
-                select(Chunk).where(Chunk.document_id == existing_doc.id).order_by(Chunk.idx.asc())
-            )
-            existing_chunks = list((await session.execute(stmt_c)).scalars().all())
-            if not existing_chunks:
-                chunks_spec = chunk_text_with_offsets(existing_doc.text)
-                for spec in chunks_spec:
-                    chunk = await SourceRepo.create_chunk(
-                        session=session,
-                        document_id=existing_doc.id,
-                        idx=spec.idx,
-                        start_char=spec.start_char,
-                        end_char=spec.end_char,
-                        text_content=spec.text,
-                    )
-                    existing_chunks.append(chunk)
-                await session.flush()
-            return existing_source, existing_doc, existing_chunks, False
+    # 4.5 A concurrent run may have inserted this fingerprint while we processed it.
+    adopted = await _adopt_existing(session, fingerprint, normalized_text)
+    if adopted:
+        return (*adopted, False)
 
     # 5. Persist raw bytes on disk
     ext = Path(location).suffix if Path(location).suffix else ".bin"
@@ -246,8 +257,10 @@ async def ingest_and_normalize(
     raw_path = raw_dir / f"{fingerprint}{ext}"
     raw_path.write_bytes(raw_bytes)
 
-    # 6. Create Source record
-    source = await SourceRepo.create_source(
+    # 6. Create the Source record. Two runs can be handed the same document at once
+    # and fingerprint is UNIQUE, so this defers to the index rather than trusting the
+    # dedup reads above, which cannot see another run's uncommitted row.
+    source, created = await SourceRepo.get_or_create_source(
         session=session,
         kind=kind,
         location=location,
@@ -263,6 +276,12 @@ async def ingest_and_normalize(
         raw_path=str(raw_path),
         created_by_run_id=created_by_run_id,
     )
+    if not created:
+        # Another run inserted this source between our dedup read and this insert.
+        # Adopt its document rather than adding a second one for the same source.
+        adopted = await _adopt_existing(session, fingerprint, normalized_text)
+        if adopted:
+            return (*adopted, False)
 
     # 7. Create Document record
     doc = await SourceRepo.create_document(

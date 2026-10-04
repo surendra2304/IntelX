@@ -199,13 +199,14 @@ def _competing_write(db_path, timeout: float = 30.0) -> float:
     return time.monotonic() - t0
 
 
-# These three run inside a loop where a flush() immediately precedes the slow call.
-# Ending that transaction fixes the hold, but measured against five concurrent
-# workers it destabilises test_five_simultaneous_jobs_concurrency: the extra write
-# transactions contend for SQLite's single writer and one times out, poisoning the
-# worker's session. Left as a known gap rather than half-fixed; strict xfail means
-# the marker fails loudly if the behaviour changes.
-LOOP_STAGES = {"scout", "retriever", "extractor"}
+# Scout, retriever and extractor used to sit in a loop that flushed a task row
+# immediately before its slow call, which took SQLite's single writer lock and held
+# it for the whole loop -- measured at 32s for the scout and retriever and 33s
+# across a seven-document extract batch. They no longer do: the engine leaves those
+# rows pending for the next stage boundary, the retriever fetches every candidate
+# before it ingests any of them, and the extractor runs every model call in the
+# batch before it persists any of them. All of that adds no write transactions, so
+# every stage is now held to the same bound with no exemption.
 
 
 @pytest.mark.asyncio
@@ -224,7 +225,10 @@ async def test_stage_does_not_hold_the_writer_lock(monkeypatch, stage, session):
 
     engine = OrchestrationEngine()
     agent = getattr(engine, stage)
-    original = agent.execute
+    # The engine calls the extractor in one batch, so the slow call to probe is the
+    # batch entry point rather than the single-document wrapper.
+    method = "execute_many" if stage == "extractor" else "execute"
+    original = getattr(agent, method)
     measured: list[float] = []
 
     async def slow_execute(*args, **kwargs):
@@ -240,7 +244,7 @@ async def test_stage_does_not_hold_the_writer_lock(monkeypatch, stage, session):
         measured.extend(holder)
         return await original(*args, **kwargs)
 
-    monkeypatch.setattr(agent, "execute", slow_execute)
+    monkeypatch.setattr(agent, method, slow_execute)
     run_id = await _fresh_run(session, f"lock hold probe {stage}")
 
     async with get_sessionmaker()() as s:
@@ -251,20 +255,8 @@ async def test_stage_does_not_hold_the_writer_lock(monkeypatch, stage, session):
             await s.rollback()
 
     assert measured, f"{stage} never ran"
-
-    if stage in LOOP_STAGES:
-        # Documented gap. This stage flushes immediately before its slow call, and
-        # committing there destabilises test_five_simultaneous_jobs_concurrency: the
-        # extra write transactions contend for SQLite's single writer and one times
-        # out. Asserting today's behaviour so that fixing it fails this test loudly
-        # and forces LOOP_STAGES to be updated rather than silently forgotten.
-        assert measured[0] >= 0.5, (
-            f"the {stage} stage now releases the lock; remove it from LOOP_STAGES"
-        )
-        return
-
-    assert measured[0] < 0.5, (
-        f"the {stage} stage held SQLite's writer lock for {measured[0]:.2f}s while "
+    assert max(measured) < 0.5, (
+        f"the {stage} stage held SQLite's writer lock for {max(measured):.2f}s while "
         "doing slow work; a competing submission would wait that long"
     )
 

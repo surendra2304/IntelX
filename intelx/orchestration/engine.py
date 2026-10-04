@@ -161,7 +161,20 @@ class OrchestrationEngine:
     async def transition_state(
         self, session: AsyncSession, run: ResearchRun, new_status: RunStatus
     ) -> ResearchRun:
-        """Enforce strict state machine transitions with live event emission."""
+        """Enforce strict state machine transitions with live event emission.
+
+        The commit at the end is load-bearing. set_status flushes but does not
+        end the transaction, so without it SQLite's single writer lock stayed
+        held from this transition until the next release_writer_lock -- which is
+        placed before the *next* stage's slow calls, so the lock spanned a whole
+        stage. Measured on the five-concurrent-run scenario: intra-transaction
+        gaps up to 5.92s, longest writer-lock hold 6.26s, all five workers
+        blocked together for ~5.5s until busy_timeout, with SQLITE_BUSY
+        (code 5) failing the run. Committing here ends the transaction the
+        moment its writes are done, so no transaction spans a stage. It adds no
+        writes: the same status UPDATE and event INSERT were already issued,
+        they are just committed at the point they are made.
+        """
         current_status = run.status
         if current_status == new_status:
             return run
@@ -173,8 +186,17 @@ class OrchestrationEngine:
                 f"Invalid state transition: '{current_status}' -> '{new_status}' is not permitted"
             )
 
+        # The commit and the two writes below are one write phase, so they share the
+        # block. The commit is inside it because it flushes whatever the stage
+        # left pending -- the scout task rows, for instance -- and that flush is
+        # itself a batched INSERT that must not be the first write of a deferred
+        # transaction. See db.engine.write_transaction: writing on a stale read
+        # snapshot is refused outright under concurrency and "database is locked"
+        # then poisons the session. Same writes as before, only the transaction
+        # opener changes.
         updated_run = await RunRepo.set_status(session, run.id, new_status)
         await emit_stage_changed(session, run.id, current_status, new_status)
+        await session.commit()
         return updated_run
 
     async def _check_gates(self, session: AsyncSession, run_id: str) -> ResearchRun:
@@ -332,6 +354,10 @@ class OrchestrationEngine:
             )
             await session.execute(stmt)
             await session.flush()
+            # Same reason transition_state commits: this is the last write of the
+            # planning stage, so end the transaction here rather than letting it
+            # run on into the discovering transition below.
+            await session.commit()
             run = await self._check_gates(session, run_id)
 
             # Subquestion discovery & retrieval loop (with potential replan)
@@ -348,37 +374,42 @@ class OrchestrationEngine:
                     for sq in plan.subquestions
                     if sq.strip().lower() != run.objective.strip().lower()
                 ]
-                for idx, subq in enumerate(scouting_targets):
-                    scout_task = Task(
-                        run_id=run_id,
-                        type=TaskType.SCOUT,
-                        status=TaskStatus.RUNNING,
-                        payload_json={"subquestion": subq, "branch": idx},
-                        started_at=datetime.now(UTC),
-                    )
-                    session.add(scout_task)
-                    await session.flush()
-
-                    try:
-                        scout_res = await self.scout.execute(
-                            subquestion=subq,
-                            plan=plan,
-                            session=session,
+                # The scout task rows stay pending through the loop and are written by
+                # the RETRIEVING boundary below. Flushing them here would take SQLite's
+                # single writer lock on the first iteration and hold it across every
+                # scout's network calls; committing per iteration instead trades that
+                # for extra write transactions, which is what made five concurrent
+                # workers collide. no_autoflush stops the SELECTs the scout runs from
+                # forcing the pending rows out early.
+                with session.no_autoflush:
+                    for idx, subq in enumerate(scouting_targets):
+                        scout_task = Task(
                             run_id=run_id,
+                            type=TaskType.SCOUT,
+                            status=TaskStatus.RUNNING,
+                            payload_json={"subquestion": subq, "branch": idx},
+                            started_at=datetime.now(UTC),
                         )
-                        scout_task.status = TaskStatus.SUCCEEDED
-                        scout_task.result_json = {"candidates_count": len(scout_res.candidates)}
-                        scout_task.finished_at = datetime.now(UTC)
-                        await session.flush()
-                        all_candidates.extend(scout_res.candidates)
-                    except Exception as e:
-                        logger.error(f"Scout task failed for '{subq}': {e}")
-                        scout_task.status = TaskStatus.FAILED
-                        scout_task.error_class = TaskErrorClass.LOGICAL
-                        scout_task.error_json = {"error": str(e)}
-                        scout_task.finished_at = datetime.now(UTC)
-                        degradations.append(f"Scout failed for subquestion: {subq}")
-                        await session.flush()
+                        session.add(scout_task)
+
+                        try:
+                            scout_res = await self.scout.execute(
+                                subquestion=subq,
+                                plan=plan,
+                                session=session,
+                                run_id=run_id,
+                            )
+                            scout_task.status = TaskStatus.SUCCEEDED
+                            scout_task.result_json = {"candidates_count": len(scout_res.candidates)}
+                            scout_task.finished_at = datetime.now(UTC)
+                            all_candidates.extend(scout_res.candidates)
+                        except Exception as e:
+                            logger.error(f"Scout task failed for '{subq}': {e}")
+                            scout_task.status = TaskStatus.FAILED
+                            scout_task.error_class = TaskErrorClass.LOGICAL
+                            scout_task.error_json = {"error": str(e)}
+                            scout_task.finished_at = datetime.now(UTC)
+                            degradations.append(f"Scout failed for subquestion: {subq}")
 
                 # 3. RETRIEVING STAGE
                 run = await self.transition_state(session, run, RunStatus.RETRIEVING)
@@ -401,8 +432,10 @@ class OrchestrationEngine:
                         payload_json={"candidates_count": len(unique_candidates)},
                         started_at=datetime.now(UTC),
                     )
+                    # Left pending: flushing here takes SQLite's single writer lock
+                    # before the retriever's first HTTP fetch and holds it for the
+                    # whole batch. The row is written by the EXTRACTING boundary.
                     session.add(ret_task)
-                    await session.flush()
 
                     ret_res = await self.retriever.execute(
                         candidates=unique_candidates,
@@ -422,7 +455,6 @@ class OrchestrationEngine:
                         "failures_count": len(ret_res.failures),
                     }
                     ret_task.finished_at = datetime.now(UTC)
-                    await session.flush()
 
                     for item in ret_res.retrieved:
                         source = await SourceRepo.get_source(session, item.source_id)
@@ -441,6 +473,8 @@ class OrchestrationEngine:
                 # 4. EXTRACTING STAGE
                 run = await self.transition_state(session, run, RunStatus.EXTRACTING)
                 run = await release_writer_lock(session, run)
+                extract_tasks: list[Task] = []
+                extract_documents: list[tuple[str, Document, list[Chunk]]] = []
                 for source, doc, chunks in all_ingested:
                     extract_task = Task(
                         run_id=run_id,
@@ -449,19 +483,23 @@ class OrchestrationEngine:
                         payload_json={"document_id": doc.id, "chunks_count": len(chunks)},
                         started_at=datetime.now(UTC),
                     )
+                    # Left pending for the same reason as the scout and retrieve
+                    # task rows; the write is the stage boundary below.
                     session.add(extract_task)
-                    await session.flush()
+                    extract_tasks.append(extract_task)
+                    extract_documents.append((source.id, doc, chunks))
 
-                    await self.extractor.execute(
-                        document=doc,
-                        chunks=chunks,
-                        run_id=run_id,
-                        source_id=source.id,
-                        session=session,
-                    )
+                # One batched call, not one per document: the extractor runs every
+                # model call for the whole batch before it writes anything, so the
+                # writer lock is not held across the batch's remaining model calls.
+                await self.extractor.execute_many(
+                    documents=extract_documents,
+                    run_id=run_id,
+                    session=session,
+                )
+                for extract_task in extract_tasks:
                     extract_task.status = TaskStatus.SUCCEEDED
                     extract_task.finished_at = datetime.now(UTC)
-                    await session.flush()
 
                 run = await self._check_gates(session, run_id)
 

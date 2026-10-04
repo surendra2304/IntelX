@@ -155,22 +155,15 @@ class ExtractorAgent(BaseAgent):
     def __init__(self, gateway: ModelGateway | None = None) -> None:
         super().__init__(role="extractor", name="ExtractorAgent", gateway=gateway)
 
-    async def execute(
+    async def _model_calls(
         self,
         document: Document,
         chunks: list[Chunk],
         run_id: str,
         source_id: str,
-        session: AsyncSession,
-        publisher: str | None = None,
-        **kwargs: Any,
-    ) -> ExtractionResult:
-        """Extract claims from chunks and enforce strict offset alignment and attribution invariants."""
-        all_saved_claims = []
-        all_entities = []
-        all_events = []
-        total_attempted = 0
-        total_accepted = 0
+    ) -> list[tuple[Chunk, ExtractionResult]]:
+        """Call the model for every chunk of one document. Writes nothing."""
+        extractions: list[tuple[Chunk, ExtractionResult]] = []
 
         for chunk in chunks:
             from intelx.connectors.context_firewall import ContextFirewall
@@ -204,7 +197,32 @@ class ExtractorAgent(BaseAgent):
                 run_id=run_id,
             )
 
-            extraction: ExtractionResult = result.parsed
+            extractions.append((chunk, result.parsed))
+
+        return extractions
+
+    async def _persist(
+        self,
+        document: Document,
+        chunks: list[Chunk],
+        extractions: list[tuple[Chunk, ExtractionResult]],
+        run_id: str,
+        source_id: str,
+        session: AsyncSession,
+        publisher: str | None = None,
+        **kwargs: Any,
+    ) -> ExtractionResult:
+        """Validate and store one document's extractions. Calls no model.
+
+        Enforces the strict offset alignment and attribution invariants.
+        """
+        all_saved_claims = []
+        all_entities = []
+        all_events = []
+        total_attempted = 0
+        total_accepted = 0
+
+        for chunk, extraction in extractions:
             all_entities.extend(extraction.entities)
             all_events.extend(extraction.events)
 
@@ -390,4 +408,77 @@ class ExtractorAgent(BaseAgent):
             claims=all_saved_claims,
             entities=all_entities,
             events=all_events,
+        )
+
+    async def execute_many(
+        self,
+        documents: list[tuple[str, Document, list[Chunk]]],
+        run_id: str,
+        session: AsyncSession,
+        **kwargs: Any,
+    ) -> list[ExtractionResult]:
+        """Extract a whole batch: every model call first, then every write.
+
+        SQLite permits one writer. Persisting each document as soon as its own model
+        calls return would hold that lock across every remaining document's model
+        calls -- measured at 33s across a seven-document batch, which is how a
+        concurrent research submission becomes a 500. Splitting the batch costs no
+        extra transactions: every row still leaves as the single commit at the next
+        stage boundary. Nothing in the validation reads another document's claims,
+        so running it after the model calls is equivalent.
+
+        The write phase goes back through self.execute with the extractions already
+        computed, so overriding execute still substitutes the agent's behaviour
+        instead of being silently bypassed.
+        """
+        prepared = [
+            (
+                source_id,
+                document,
+                chunks,
+                await self._model_calls(document, chunks, run_id, source_id),
+            )
+            for source_id, document, chunks in documents
+        ]
+
+        return [
+            await self.execute(
+                document=document,
+                chunks=chunks,
+                run_id=run_id,
+                source_id=source_id,
+                session=session,
+                extractions=extractions,
+                **kwargs,
+            )
+            for source_id, document, chunks, extractions in prepared
+        ]
+
+    async def execute(
+        self,
+        document: Document,
+        chunks: list[Chunk],
+        run_id: str,
+        source_id: str,
+        session: AsyncSession,
+        extractions: list[tuple[Chunk, ExtractionResult]] | None = None,
+        publisher: str | None = None,
+        **kwargs: Any,
+    ) -> ExtractionResult:
+        """Extract claims from one document's chunks and enforce alignment invariants.
+
+        ``extractions`` lets execute_many hand over model calls it already made, so
+        batching does not repeat them.
+        """
+        if extractions is None:
+            extractions = await self._model_calls(document, chunks, run_id, source_id)
+        return await self._persist(
+            document=document,
+            chunks=chunks,
+            extractions=extractions,
+            run_id=run_id,
+            source_id=source_id,
+            session=session,
+            publisher=publisher,
+            **kwargs,
         )

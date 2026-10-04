@@ -56,36 +56,6 @@ def test_research_run_writes_are_serialized():
     assert "OperationalError" in source, "a contended write is no longer retried"
 
 
-def test_every_synthesis_transition_commits_before_slow_work():
-    """Every path into the synthesizer must release the writer lock first.
-
-    This checks each SYNTHESIZING transition in the file rather than the first one:
-    the resumption path was fixed while the primary path still held the lock across
-    synthesis, and a first-match-only assertion passed anyway.
-    """
-    source = _source("intelx/orchestration/engine.py")
-    pattern = r"transition_state\(\s*session\s*,\s*run\s*,\s*RunStatus\.SYNTHESIZING\s*\)"
-    windows = 0
-
-    for match in re.finditer(pattern, source):
-        start = match.end()
-        end = source.find("self.synthesizer.execute", start)
-        assert end != -1, "a SYNTHESIZING transition no longer leads to synthesis"
-        window = source[start:end]
-        # The boundary is now owned by db.session.release_writer_lock, which does
-        # the commit; either spelling is acceptable, doing neither is not.
-        assert "await session.commit()" in window or "release_writer_lock" in window, (
-            "the writer lock is held across the synthesizer again on one of the "
-            "execution paths; commit before executing it"
-        )
-        windows += 1
-
-    assert windows >= 2, (
-        f"only {windows} SYNTHESIZING transition(s) matched; the primary path and the "
-        "review-resumption path should both be covered by this check"
-    )
-
-
 @pytest.mark.asyncio
 async def test_synthesis_releases_the_writer_lock():
     """The regression that produced the 90-second stall, driven end to end.

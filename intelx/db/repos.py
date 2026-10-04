@@ -4,8 +4,10 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import case, func, or_, select, text, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.core.enums import (
@@ -215,6 +217,43 @@ class SourceRepo:
     """Repository managing external sources, normalized documents, and text chunks."""
 
     @staticmethod
+    def _build_source(
+        kind: SourceKind,
+        location: str,
+        domain: str | None = None,
+        publisher: str | None = None,
+        title: str | None = None,
+        published_at: datetime | None = None,
+        content_type: str = "text/html",
+        fingerprint: str | None = None,
+        trust_tier: TrustTier | None = None,
+        robots_ok: bool = True,
+        license_note: str | None = None,
+        injection_risk: bool = False,
+        raw_path: str | None = None,
+        created_by_run_id: str | None = None,
+    ) -> Source:
+        """Build an unsaved Source. Shared by the create and upsert paths."""
+        default_tier = TrustTier.STANDARD if kind == SourceKind.FILE else TrustTier.QUARANTINE
+        return Source(
+            id=str(uuid4()),
+            kind=kind,
+            location=location,
+            domain=domain,
+            publisher=publisher,
+            title=title,
+            published_at=published_at,
+            content_type=content_type,
+            fingerprint=fingerprint or compute_sha256(location),
+            trust_tier=trust_tier or default_tier,
+            robots_ok=robots_ok,
+            license_note=license_note,
+            injection_risk=injection_risk,
+            raw_path=raw_path,
+            created_by_run_id=created_by_run_id,
+        )
+
+    @staticmethod
     async def create_source(
         session: AsyncSession,
         kind: SourceKind,
@@ -233,9 +272,7 @@ class SourceRepo:
         created_by_run_id: str | None = None,
     ) -> Source:
         """Create a new external source record."""
-        computed_fingerprint = fingerprint or compute_sha256(location)
-        default_tier = TrustTier.STANDARD if kind == SourceKind.FILE else TrustTier.QUARANTINE
-        source = Source(
+        source = SourceRepo._build_source(
             kind=kind,
             location=location,
             domain=domain,
@@ -243,8 +280,8 @@ class SourceRepo:
             title=title,
             published_at=published_at,
             content_type=content_type,
-            fingerprint=computed_fingerprint,
-            trust_tier=trust_tier or default_tier,
+            fingerprint=fingerprint,
+            trust_tier=trust_tier,
             robots_ok=robots_ok,
             license_note=license_note,
             injection_risk=injection_risk,
@@ -270,18 +307,46 @@ class SourceRepo:
         fingerprint: str,
         **kwargs: Any,
     ) -> tuple[Source, bool]:
-        """Atomically find existing source by fingerprint or create a new one."""
+        """Find the source for ``fingerprint`` or create it, atomically.
+
+        ``Source.fingerprint`` is UNIQUE and two runs can be handed the same URL at
+        the same time. Reading first does not settle it -- both callers see an empty
+        result -- so both insert and the loser is aborted by the index. That abort
+        arrives as either IntegrityError or SQLITE_BUSY_SNAPSHOT depending on timing
+        (a write cannot proceed on a read snapshot another connection has moved past),
+        and either one poisons the whole session. So the insert is a single statement
+        that lets the index decline: the loser inserts nothing, re-reads the row the
+        winner committed, and carries on. The id is generated up front so the re-read
+        can say which of the two callers actually created the row.
+        """
         existing = await SourceRepo.get_source_by_fingerprint(session, fingerprint)
         if existing:
             return existing, False
-        new_source = await SourceRepo.create_source(
-            session=session,
+
+        candidate = SourceRepo._build_source(
             kind=kind,
             location=location,
             fingerprint=fingerprint,
             **kwargs,
         )
-        return new_source, True
+        columns = Source.__table__.columns
+        values = {
+            column.key: getattr(candidate, column.key)
+            for column in columns
+            if getattr(candidate, column.key, None) is not None
+        }
+        await session.execute(
+            sqlite_insert(Source)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=[Source.fingerprint])
+        )
+
+        source = await SourceRepo.get_source_by_fingerprint(session, fingerprint)
+        if source is None:
+            raise IntegrityError(
+                f"source {fingerprint} neither created nor visible after insert"
+            )
+        return source, source.id == candidate.id
 
     @staticmethod
     async def get_source(session: AsyncSession, source_id: str) -> Source | None:

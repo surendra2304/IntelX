@@ -54,7 +54,20 @@ async def test_five_simultaneous_jobs_concurrency_and_state_isolation():
             await session.commit()
             return run
 
-    results = await asyncio.gather(*[_execute_single(rid) for rid in run_ids])
+    # return_exceptions=True so no worker is abandoned mid-flight. Plain gather
+    # re-raises the first failure immediately and leaves the other four still
+    # writing; the autouse clean_database_per_test fixture then drops the tables
+    # underneath them and the *next* test fails with "DROP TABLE evidence:
+    # database is locked" -- a failure in the harness that has nothing to do with
+    # the run that actually broke. Collecting the exceptions keeps every worker
+    # accounted for, and re-raising below still fails this test on any real error.
+    outcomes = await asyncio.gather(
+        *[_execute_single(rid) for rid in run_ids], return_exceptions=True
+    )
+    for rid, outcome in zip(run_ids, outcomes, strict=True):
+        if isinstance(outcome, BaseException):
+            raise AssertionError(f"run {rid} raised {type(outcome).__name__}: {outcome}") from outcome
+    results = outcomes
 
     # 3. Assert all 5 completed
     for run in results:
