@@ -290,6 +290,9 @@ class OrchestrationEngine:
                 try:
                     finding_text = f"{run.objective} (Post-Review Resolution)"
                     domain = scope.get("domain", "market")
+                    # Delivery is external HTTP with its own budget; the writer
+                    # lock must not span it.
+                    run = await release_writer_lock(session, run)
                     delivery_outcomes = await _dispatch_external_research(
                         run_id=run_id,
                         objective=run.objective,
@@ -316,6 +319,7 @@ class OrchestrationEngine:
             run = await self._check_gates(session, run_id)
             # 1. PLANNING STAGE
             run = await self.transition_state(session, run, RunStatus.PLANNING)
+            run = await release_writer_lock(session, run)
             plan = await self.planner.execute(
                 objective=run.objective,
                 scope=scope,
@@ -335,6 +339,7 @@ class OrchestrationEngine:
                 # 2. DISCOVERING STAGE
                 run = await self.transition_state(session, run, RunStatus.DISCOVERING)
                 run = await self._check_gates(session, run_id)
+                run = await release_writer_lock(session, run)
 
                 all_candidates: list[SourceCandidate] = []
                 # Ensure primary objective is scouted directly as the first high-priority target
@@ -377,6 +382,7 @@ class OrchestrationEngine:
 
                 # 3. RETRIEVING STAGE
                 run = await self.transition_state(session, run, RunStatus.RETRIEVING)
+                run = await release_writer_lock(session, run)
                 all_ingested: list[tuple[Source, Document, list[Chunk]]] = []
 
                 # Deduplicate candidates across subquestion discovery branches
@@ -434,6 +440,7 @@ class OrchestrationEngine:
 
                 # 4. EXTRACTING STAGE
                 run = await self.transition_state(session, run, RunStatus.EXTRACTING)
+                run = await release_writer_lock(session, run)
                 for source, doc, chunks in all_ingested:
                     extract_task = Task(
                         run_id=run_id,
@@ -463,6 +470,7 @@ class OrchestrationEngine:
 
                 # 5. VERIFYING STAGE
                 run = await self.transition_state(session, run, RunStatus.VERIFYING)
+                run = await release_writer_lock(session, run)
                 if claims:
                     await self.verifier.execute(
                         claims=claims,
@@ -475,8 +483,10 @@ class OrchestrationEngine:
 
                 # 6. ANALYZING STAGE
                 run = await self.transition_state(session, run, RunStatus.ANALYZING)
+                run = await release_writer_lock(session, run)
                 analysis = await self.analyst.execute(claims=claims, run_id=run_id)
                 run = await self._check_gates(session, run_id)
+                run = await release_writer_lock(session, run)
 
                 # 7. CRITIQUE STAGE
                 critique = await self.critic.execute(
@@ -679,6 +689,9 @@ class OrchestrationEngine:
                         f"EVIDENCE: {len(claims)} claims from {len(all_ingested)} sources"
                     )
 
+                    # Delivery is external HTTP with its own budget; the writer
+                    # lock must not span it.
+                    run = await release_writer_lock(session, run)
                     delivery_outcomes = await _dispatch_external_research(
                         run_id=run_id,
                         objective=run.objective,

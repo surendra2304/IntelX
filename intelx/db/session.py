@@ -1,9 +1,11 @@
 """Database Session Management and Dependencies."""
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from intelx.db.engine import get_async_engine
@@ -12,6 +14,9 @@ from intelx.db.models import ResearchRun
 logger = logging.getLogger(__name__)
 
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
+
+# A boundary commit is retried this many times before the run is failed.
+_RELEASE_ATTEMPTS = 4
 
 
 def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
@@ -65,7 +70,22 @@ async def release_writer_lock(session: AsyncSession, run: ResearchRun) -> Resear
     The orchestrator decides *when* a stage boundary is; this owns *how* the
     transaction ends, so the rule lives with the session rather than being restated
     at each call site.
+
+    Concurrency makes the commit itself a contention point: several workers
+    crossing boundaries at once contend for the same single writer, and a timeout
+    here poisons the whole session. The commit is therefore retried on a lock
+    error. Losing one uncommitted stage's worth of rows is acceptable; losing the
+    run is not.
     """
-    await session.commit()
+    for attempt in range(_RELEASE_ATTEMPTS):
+        try:
+            await session.commit()
+            break
+        except OperationalError:
+            await session.rollback()
+            if attempt == _RELEASE_ATTEMPTS - 1:
+                raise
+            await asyncio.sleep(0.1 * (2**attempt))
+
     await session.refresh(run)
     return run
