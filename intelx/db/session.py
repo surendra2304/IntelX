@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from intelx.db.engine import get_async_engine
+from intelx.db.models import ResearchRun
 
 logger = logging.getLogger(__name__)
 
@@ -51,3 +52,20 @@ async def check_database_health() -> bool:
     except Exception as e:
         logger.warning(f"Database health check failed: {e}")
         return False
+
+
+async def release_writer_lock(session: AsyncSession, run: ResearchRun) -> ResearchRun:
+    """End the open write transaction so SQLite's single writer lock is freed.
+
+    SQLite permits exactly one writer. A pipeline stage that performs external calls
+    -- model gateways, web fetches -- must not hold this transaction across them, or
+    every other writer (including concurrent research submissions) blocks for the
+    whole stage and then fails with "database is locked".
+
+    The orchestrator decides *when* a stage boundary is; this owns *how* the
+    transaction ends, so the rule lives with the session rather than being restated
+    at each call site.
+    """
+    await session.commit()
+    await session.refresh(run)
+    return run

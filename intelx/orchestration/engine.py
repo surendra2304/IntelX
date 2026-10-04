@@ -31,6 +31,7 @@ from intelx.core.errors import (
 from intelx.core.settings import Settings, get_settings
 from intelx.db.models import Chunk, Claim, Document, ResearchRun, Source, Task
 from intelx.db.repos import RunRepo, SourceRepo
+from intelx.db.session import release_writer_lock
 from intelx.orchestration.events import (
     emit_budget_warning,
     emit_event,
@@ -269,12 +270,9 @@ class OrchestrationEngine:
             stmt_claims = select(Claim).where(Claim.run_id == run_id)
             claims = list((await session.execute(stmt_claims)).scalars().all())
             run = await self.transition_state(session, run, RunStatus.SYNTHESIZING)
-            # Release the SQLite writer lock before the slow synthesis. The synthesizer
-            # performs external web fetches, and holding this transaction open across
-            # them locked every other writer out for the whole run, so concurrent
-            # research submissions stalled and then failed with "database is locked".
-            await session.commit()
-            await session.refresh(run)
+            # Release the writer lock before the slow synthesis; see
+            # db.session.release_writer_lock for why this boundary exists.
+            run = await release_writer_lock(session, run)
             await self.synthesizer.execute(
                 objective=run.objective,
                 claims=claims,
@@ -502,12 +500,9 @@ class OrchestrationEngine:
 
             # 8. SYNTHESIZING STAGE
             run = await self.transition_state(session, run, RunStatus.SYNTHESIZING)
-            # Release the SQLite writer lock before the slow synthesis, for the same
-            # reason as the resumption path above: the synthesizer performs external
-            # web fetches, and holding this transaction open across them locked every
-            # other writer out for the whole run.
-            await session.commit()
-            await session.refresh(run)
+            # Same boundary as the resumption path: the synthesizer performs
+            # external web fetches, so the writer lock must not span it.
+            run = await release_writer_lock(session, run)
             synthesis_res = await self.synthesizer.execute(
                 objective=run.objective,
                 claims=claims,

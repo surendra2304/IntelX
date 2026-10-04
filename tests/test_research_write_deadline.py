@@ -71,7 +71,10 @@ def test_every_synthesis_transition_commits_before_slow_work():
         start = match.end()
         end = source.find("self.synthesizer.execute", start)
         assert end != -1, "a SYNTHESIZING transition no longer leads to synthesis"
-        assert "await session.commit()" in source[start:end], (
+        window = source[start:end]
+        # The boundary is now owned by db.session.release_writer_lock, which does
+        # the commit; either spelling is acceptable, doing neither is not.
+        assert "await session.commit()" in window or "release_writer_lock" in window, (
             "the writer lock is held across the synthesizer again on one of the "
             "execution paths; commit before executing it"
         )
