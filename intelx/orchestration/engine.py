@@ -269,6 +269,12 @@ class OrchestrationEngine:
             stmt_claims = select(Claim).where(Claim.run_id == run_id)
             claims = list((await session.execute(stmt_claims)).scalars().all())
             run = await self.transition_state(session, run, RunStatus.SYNTHESIZING)
+            # Release the SQLite writer lock before the slow synthesis. The synthesizer
+            # performs external web fetches, and holding this transaction open across
+            # them locked every other writer out for the whole run, so concurrent
+            # research submissions stalled and then failed with "database is locked".
+            await session.commit()
+            await session.refresh(run)
             await self.synthesizer.execute(
                 objective=run.objective,
                 claims=claims,
@@ -496,6 +502,12 @@ class OrchestrationEngine:
 
             # 8. SYNTHESIZING STAGE
             run = await self.transition_state(session, run, RunStatus.SYNTHESIZING)
+            # Release the SQLite writer lock before the slow synthesis, for the same
+            # reason as the resumption path above: the synthesizer performs external
+            # web fetches, and holding this transaction open across them locked every
+            # other writer out for the whole run.
+            await session.commit()
+            await session.refresh(run)
             synthesis_res = await self.synthesizer.execute(
                 objective=run.objective,
                 claims=claims,
