@@ -18,6 +18,10 @@ _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 # A boundary commit is retried this many times before the run is failed.
 _RELEASE_ATTEMPTS = 4
 
+# The only fields a stage boundary mutates, and therefore the only ones a
+# rollback can lose. Restoring anything else would rewrite the whole row.
+_BOUNDARY_FIELDS = ("status", "outcome", "error_json", "completed_at")
+
 
 def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     """Get or initialize the async session maker."""
@@ -77,12 +81,24 @@ async def release_writer_lock(session: AsyncSession, run: ResearchRun) -> Resear
     error. Losing one uncommitted stage's worth of rows is acceptable; losing the
     run is not.
     """
+    # A rollback discards everything uncommitted, which at a stage boundary is the
+    # state transition the boundary exists to persist. Snapshot the run's columns
+    # so the retry can restore them instead of continuing with the database saying
+    # something the engine no longer believes.
+    pending = {
+        field: getattr(run, field)
+        for field in _BOUNDARY_FIELDS
+    }
+
     for attempt in range(_RELEASE_ATTEMPTS):
         try:
             await session.commit()
             break
         except OperationalError:
             await session.rollback()
+            for field, value in pending.items():
+                setattr(run, field, value)
+            await session.flush()
             if attempt == _RELEASE_ATTEMPTS - 1:
                 raise
             await asyncio.sleep(0.1 * (2**attempt))
