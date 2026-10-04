@@ -16,7 +16,7 @@ from intelx.agents.scout import ScoutAgent, ScoutOutput, SourceCandidate
 from intelx.core.enums import ClaimStatus, ClaimType, RunOutcome, RunStatus, SourceKind
 from intelx.core.errors import ValidationError
 from intelx.core.settings import Settings
-from intelx.db.models import Event, Finding
+from intelx.db.models import Event, Finding, ResearchRun
 from intelx.db.repos import ClaimRepo, RunRepo
 from intelx.db.session import get_sessionmaker
 from intelx.memory.normalize import ingest_and_normalize
@@ -192,6 +192,58 @@ async def test_orchestration_cancellation_gate(db_session_factory):
         engine = OrchestrationEngine()
         final_run = await engine.execute_run(session=session, run_id=run.id)
         assert final_run.status == RunStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_failed_run_reaches_failed_state_when_session_is_poisoned(db_session_factory):
+    """Verify a mid-DAG database error still leaves the run FAILED, not stranded.
+
+    Regression. The error handler used to write the terminal state on the same
+    session whose transaction SQLAlchemy had already deactivated, so its own write
+    raised PendingRollbackError from inside the handler. execute_run propagated,
+    the caller never reached its commit, and the run was left in whatever stage it
+    died in -- QUEUED here -- which nothing ever claims again. That is the orphan
+    mechanism: a non-terminal run holding a concurrency slot forever.
+    """
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(session, objective="Poisoned session regression")
+        run_id = run.id
+        # Commit first, exactly as the worker and the API do before handing the run
+        # to execute_run. Leaving it pending here would mean the rollback under test
+        # discards the run row itself rather than only the aborted attempt.
+        await session.commit()
+
+        engine = OrchestrationEngine()
+        original_gates = engine._check_gates
+        fired = False
+
+        async def gates(inner_session, inner_run_id):
+            nonlocal fired
+            if not fired:
+                fired = True
+                # A row missing its NOT NULL objective: fails during flush, which
+                # is what deactivates the transaction -- the same state the
+                # measured "database is locked" on INSERT INTO claims produced.
+                inner_session.add(ResearchRun(id="poisoned-row", status=RunStatus.QUEUED))
+                await inner_session.flush()
+            return await original_gates(inner_session, inner_run_id)
+
+        engine._check_gates = gates
+
+        final_run = await engine.execute_run(session=session, run_id=run_id)
+
+        assert final_run.status == RunStatus.FAILED
+        assert final_run.outcome == RunOutcome.FAILED
+        assert final_run.error_json, "a failed run must record why it failed"
+        assert final_run.completed_at is not None
+
+        # And the terminal state must be durable, not just visible in this session.
+        persisted = (
+            (await session.execute(select(ResearchRun).where(ResearchRun.id == run_id)))
+            .scalar_one()
+        )
+        assert persisted.status == RunStatus.FAILED
+        assert persisted.completed_at is not None
 
 
 @pytest.mark.asyncio

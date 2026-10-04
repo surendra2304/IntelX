@@ -3,8 +3,10 @@
 import asyncio
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import PendingRollbackError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.agents.analyst import AnalystAgent
@@ -267,6 +269,78 @@ class OrchestrationEngine:
                 raise TimeoutError(f"Run {run_id} exceeded max time limit ({elapsed_minutes:.1f}m)")
 
         return run
+
+    async def _settle_terminal_state(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        status: RunStatus,
+        outcome: RunOutcome,
+        error_json: dict[str, Any] | None = None,
+    ) -> ResearchRun | None:
+        """Persist a terminal state for a run whose own transaction has failed.
+
+        A database error inside the DAG -- the measured
+        `(sqlite3.OperationalError) database is locked` on `INSERT INTO claims` --
+        leaves the session's transaction deactivated. Writing the terminal state on
+        that session raises `PendingRollbackError` from inside the error handler
+        itself, so `execute_run` propagates, the caller never reaches its commit,
+        and the run is stranded in whatever stage it died in: not terminal, no
+        reason recorded, and never handed out by `get_or_claim_next_queued_job`
+        again.
+
+        The rollback is conditional. A stage can also fail while its session is
+        perfectly healthy -- the budget ceiling raises before anything goes wrong --
+        and that transaction may already hold writes worth keeping, such as the
+        `budget.exceeded` event. Rolling back unconditionally discarded those. So
+        the terminal write is attempted first and the rollback only happens if the
+        session refuses it.
+
+        The commit is deliberate -- the terminal state has to survive whatever the
+        caller does next, so it must not depend on the caller reaching its own
+        commit.
+        """
+
+        async def _write() -> ResearchRun:
+            updated = await RunRepo.set_status(
+                session=session,
+                run_id=run_id,
+                status=status,
+                outcome=outcome,
+                error_json=error_json,
+            )
+            await session.commit()
+            return updated
+
+        label = getattr(status, "value", status)
+        try:
+            return await _write()
+        except PendingRollbackError:
+            # The failure came out of the database itself, so SQLAlchemy has
+            # deactivated this session's transaction and every further write on it
+            # raises. Rolling back is the only way back to a usable transaction.
+            logger.warning(
+                "Session transaction poisoned by run failure; rolling back to "
+                "persist %s for run %s",
+                label,
+                run_id,
+            )
+        except Exception:
+            logger.exception(
+                "Could not persist %s for run %s; it remains non-terminal", label, run_id
+            )
+            return None
+
+        try:
+            await session.rollback()
+            return await _write()
+        except Exception:
+            logger.exception(
+                "Could not persist %s for run %s after rollback; it remains non-terminal",
+                label,
+                run_id,
+            )
+            return None
 
     async def execute_run(self, session: AsyncSession, run_id: str) -> ResearchRun:
         """Execute the end-to-end research DAG workflow."""
@@ -762,27 +836,36 @@ class OrchestrationEngine:
 
         except asyncio.CancelledError:
             logger.info(f"Run {run_id} cancellation acknowledged.")
-            run.status = RunStatus.CANCELLED
-            run.outcome = RunOutcome.CANCELLED
-            run.completed_at = datetime.now(UTC)
-            await session.flush()
-            await emit_stage_changed(session, run_id, run.status, RunStatus.CANCELLED)
+            previous_status = run.status
+            settled = await self._settle_terminal_state(
+                session, run_id, RunStatus.CANCELLED, RunOutcome.CANCELLED
+            )
+            if settled is not None:
+                await emit_stage_changed(session, run_id, previous_status, RunStatus.CANCELLED)
+                return settled
             return run
 
         except BudgetExceededError as e:
             logger.error(f"Run {run_id} aborted on budget constraint: {e}")
-            run.status = RunStatus.FAILED
-            run.outcome = RunOutcome.FAILED
-            run.completed_at = datetime.now(UTC)
-            await session.flush()
-            return run
+            settled = await self._settle_terminal_state(
+                session,
+                run_id,
+                RunStatus.FAILED,
+                RunOutcome.FAILED,
+                {"error": str(e), "type": type(e).__name__},
+            )
+            return settled if settled is not None else run
 
         except Exception as e:
             logger.exception(f"Unhandled error during run {run_id} execution: {e}")
-            run.status = RunStatus.FAILED
-            run.outcome = RunOutcome.FAILED
-            run.error_json = {"error": str(e), "type": type(e).__name__}
-            run.completed_at = datetime.now(UTC)
-            await session.flush()
+            settled = await self._settle_terminal_state(
+                session,
+                run_id,
+                RunStatus.FAILED,
+                RunOutcome.FAILED,
+                {"error": str(e), "type": type(e).__name__},
+            )
+            if settled is None:
+                return run
             await emit_event(session, run_id, "run.failed", {"error": str(e)})
-            return run
+            return settled
