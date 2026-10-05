@@ -99,7 +99,7 @@ class Settings(BaseSettings):
 
     # Inference Multi-Agent Gateway Provider
     INFERENCE_URL: str = Field(
-        default="https://inference-r1sn.onrender.com",
+        default="https://inference-h7bn.onrender.com",
         validation_alias=AliasChoices(
             "INTELX_INFERENCE_URL",
             "INFERENCE_URL",

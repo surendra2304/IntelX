@@ -25,7 +25,7 @@ async def main():
     print("Client: intelx.models.ai_universe_provider.AIUniverseProvider")
     print("=" * 80)
 
-    url = os.getenv("INFERENCE_URL", "https://inference-r1sn.onrender.com")
+    url = os.getenv("INFERENCE_URL", "https://inference-h7bn.onrender.com")
     key = os.getenv("INFERENCE_API_KEY")
     if not key:
         print("Requests not sent: configure INFERENCE_API_KEY first.")
