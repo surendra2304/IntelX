@@ -13,6 +13,7 @@ from intelx.agents.query_planner import QueryPortfolioPlanner
 from intelx.connectors.base import default_policy_guard
 from intelx.connectors.search import WebSearchConnector
 from intelx.connectors.source_quality import SourceQuality
+from intelx.core.errors import ProviderError
 from intelx.core.settings import get_settings
 from intelx.db.repos import ClaimRepo
 from intelx.models.gateway import ModelGateway
@@ -31,9 +32,10 @@ class SourceCandidate(BaseModel):
 
 
 class ScoutOutput(BaseModel):
-    """Collection of ranked source candidates for a subquestion."""
+    """Collection of ranked source candidates and partial search failures."""
 
     candidates: list[SourceCandidate] = Field(default_factory=list, max_length=8)
+    search_failures: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ScoutAgent(BaseAgent):
@@ -181,8 +183,20 @@ class ScoutAgent(BaseAgent):
         queries = self.portfolio_planner.build(plan_item_id=subquestion[:24], question=subquestion)
         query_terms = set(self.portfolio_planner.keywords(subquestion))
 
+        search_failures: list[dict[str, Any]] = []
         for q in queries[:3]:  # Execute top 3 prioritized portfolio queries
-            search_results = await self.search_connector.fetch(q.text, max_results=6)
+            try:
+                search_results = await self.search_connector.fetch(q.text, max_results=6)
+            except ProviderError as exc:
+                search_failures.append(
+                    {
+                        "source_angle": q.source_angle,
+                        "error": exc.message,
+                        "details": exc.details,
+                    }
+                )
+                continue
+
             for res in search_results:
                 loc = res.url.strip()
                 if not loc or loc in seen_set:
@@ -213,6 +227,15 @@ class ScoutAgent(BaseAgent):
                     )
                 )
 
+        if search_failures and not candidates:
+            raise ProviderError(
+                "Source discovery was incomplete: live search failed before any candidates were found.",
+                details={"search_failures": search_failures},
+            )
+
         # 3. Sort by computed quality score and cap at 8 candidates
         candidates.sort(key=lambda c: c.expected_relevance, reverse=True)
-        return ScoutOutput(candidates=candidates[:8])
+        return ScoutOutput(
+            candidates=candidates[:8],
+            search_failures=search_failures,
+        )

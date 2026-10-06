@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 
 from intelx.core.errors import ProviderError
-from intelx.core.settings import get_settings
+from intelx.core.settings import Settings, get_settings
 from intelx.models.types import Usage
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,9 @@ class MockProvider(BaseLLMProvider):
             chunk_text = messages[-1].get("content", "").strip()
         chunk_text = re.sub(r"</?untrusted_external_content[^>]*>", "", chunk_text).strip()
 
-        sentences = re.split(r"(?<=[.!?])\s+", chunk_text)
+        # Newlines also delimit metadata and title headers. Split them independently so an
+        # unpunctuated heading cannot cause the first body sentence to be discarded with it.
+        sentences = re.split(r"(?<=[.!?])\s+|\n+", chunk_text)
         claims: list[dict[str, Any]] = []
         entities_set: set[str] = set()
 
@@ -628,10 +630,15 @@ def compute_model_pricing(model: str, input_tokens: int, output_tokens: int) -> 
 class OpenAICompatibleProvider(BaseLLMProvider):
     """OpenAI and OpenAI-compatible gateway adapter (Groq, vLLM, Ollama, OpenRouter)."""
 
-    def __init__(self, base_url: str | None = None, api_key: str | None = None) -> None:
-        self.settings = get_settings()
+    def __init__(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        settings: Settings | None = None,
+    ) -> None:
+        self.settings = settings or get_settings()
         self.base_url = base_url or self.settings.LLM_BASE_URL
-        self.api_key = api_key or self.settings.LLM_API_KEY or "dummy-key"
+        self.api_key = api_key or self.settings.get_llm_api_key("openai_compatible") or "dummy-key"
         self._client: Any = None
 
     def _get_client(self) -> Any:
@@ -751,9 +758,9 @@ class OpenAICompatibleProvider(BaseLLMProvider):
 class AnthropicProvider(BaseLLMProvider):
     """Anthropic Claude API adapter with tool-forced structured outputs."""
 
-    def __init__(self, api_key: str | None = None) -> None:
-        self.settings = get_settings()
-        self.api_key = api_key or self.settings.LLM_API_KEY
+    def __init__(self, api_key: str | None = None, settings: Settings | None = None) -> None:
+        self.settings = settings or get_settings()
+        self.api_key = api_key or self.settings.get_llm_api_key("anthropic")
         self._client: Any = None
 
     def _get_client(self) -> Any:

@@ -26,9 +26,9 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
 from sqlalchemy import select
 
+from intelx.connectors.web import HttpFetchConnector
 from intelx.core.enums import SourceKind, TrustTier
 from intelx.db.models import Chunk, Document, Source
 from intelx.db.session import get_sessionmaker
@@ -473,12 +473,12 @@ def _parse_feed(xml_text: str, feed_config: dict[str, str]) -> list[dict[str, An
     return items
 
 
-async def _fetch_article_text(client: httpx.AsyncClient, url: str) -> str:
+async def _fetch_article_text(fetcher: HttpFetchConnector, url: str) -> str:
     try:
-        resp = await client.get(url, timeout=8.0, follow_redirects=True)
-        if resp.status_code != 200:
+        result = await fetcher.fetch(url, max_bytes=MAX_ARTICLE_BYTES)
+        if result.status_code != 200:
             return ""
-        content = resp.text[:MAX_ARTICLE_BYTES]
+        content = result.content.decode("utf-8", errors="replace")
         for tag in ("article", "main", "body"):
             m = re.search(rf"<{tag}[^>]*>(.*?)</{tag}>", content, re.DOTALL | re.IGNORECASE)
             if m:
@@ -560,56 +560,52 @@ async def crawl_once(session_factory: Any | None = None) -> dict[str, Any]:
     }
     new_articles_by_agent: dict[str, list[dict[str, Any]]] = {}
 
-    headers = {
-        "User-Agent": "IntelX-FRIDAY-Bot/2.0 (FRIDAY Universe Intelligence Engine)",
-        "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
-    }
-
-    async with httpx.AsyncClient(headers=headers, timeout=12.0, follow_redirects=True) as client:
-        for feed_config in FRIDAY_UNIVERSE_FEEDS:
-            agent = feed_config["agent"]
-            feed_url = feed_config["url"]
-            try:
-                resp = await client.get(feed_url)
-                if resp.status_code != 200:
-                    stats["errors"] += 1
-                    continue
-
-                articles = _parse_feed(resp.text, feed_config)
-                stats["feeds_crawled"] += 1
-
-                for article in articles:
-                    try:
-                        fp = _fingerprint(article["url"])
-                        async with factory() as session:
-                            existing = await session.execute(
-                                select(Source).where(Source.fingerprint == fp)
-                            )
-                            if existing.scalar_one_or_none():
-                                stats["articles_skipped"] += 1
-                                continue
-
-                        full_text = await _fetch_article_text(client, article["url"])
-
-                        async with factory() as session:
-                            is_new = await _ingest_article(session, article, full_text)
-                            await session.commit()
-
-                        if is_new:
-                            stats["articles_new"] += 1
-                            stats["by_agent"][agent] = stats["by_agent"].get(agent, 0) + 1
-                            new_articles_by_agent.setdefault(agent, []).append(article)
-                            logger.info(f"[{agent.upper()}] Ingested: {article['title'][:70]}")
-                        else:
-                            stats["articles_skipped"] += 1
-
-                    except Exception as ex:
-                        logger.debug(f"Article error: {ex}")
-                        stats["errors"] += 1
-
-            except Exception as ex:
-                logger.warning(f"Feed error {feed_url}: {ex}")
+    fetcher = HttpFetchConnector()
+    for feed_config in FRIDAY_UNIVERSE_FEEDS:
+        agent = feed_config["agent"]
+        feed_url = feed_config["url"]
+        try:
+            result = await fetcher.fetch(feed_url)
+            if result.status_code != 200:
                 stats["errors"] += 1
+                continue
+
+            feed_text = result.content.decode("utf-8", errors="replace")
+            articles = _parse_feed(feed_text, feed_config)
+            stats["feeds_crawled"] += 1
+
+            for article in articles:
+                try:
+                    fp = _fingerprint(article["url"])
+                    async with factory() as session:
+                        existing = await session.execute(
+                            select(Source).where(Source.fingerprint == fp)
+                        )
+                        if existing.scalar_one_or_none():
+                            stats["articles_skipped"] += 1
+                            continue
+
+                    full_text = await _fetch_article_text(fetcher, article["url"])
+
+                    async with factory() as session:
+                        is_new = await _ingest_article(session, article, full_text)
+                        await session.commit()
+
+                    if is_new:
+                        stats["articles_new"] += 1
+                        stats["by_agent"][agent] = stats["by_agent"].get(agent, 0) + 1
+                        new_articles_by_agent.setdefault(agent, []).append(article)
+                        logger.info(f"[{agent.upper()}] Ingested: {article['title'][:70]}")
+                    else:
+                        stats["articles_skipped"] += 1
+
+                except Exception as ex:
+                    logger.debug(f"Article error: {ex}")
+                    stats["errors"] += 1
+
+        except Exception as ex:
+            logger.warning(f"Feed error {feed_url}: {ex}")
+            stats["errors"] += 1
 
     # Send one bounded digest per agent category, rather than flooding each
     # subscriber with a separate event for every crawled headline.

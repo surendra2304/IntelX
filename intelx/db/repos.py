@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import case, func, or_, select, text, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -82,6 +83,14 @@ class RunRepo:
         settings = get_settings()
         limit = max_concurrent if max_concurrent is not None else settings.MAX_CONCURRENT_RUNS
 
+        # Serialize admission decisions across PostgreSQL worker processes so the
+        # active-run ceiling cannot be exceeded by simultaneous claims.
+        if session.get_bind().dialect.name == "postgresql":
+            await session.execute(select(func.pg_advisory_xact_lock(0x494E54454C58)))
+
+        if limit < 1:
+            return None
+
         active_statuses = [
             RunStatus.PLANNING,
             RunStatus.DISCOVERING,
@@ -92,12 +101,11 @@ class RunRepo:
             RunStatus.SYNTHESIZING,
             RunStatus.REVIEW_REQUIRED,
         ]
-        stmt_active = select(func.count(ResearchRun.id)).where(
-            ResearchRun.status.in_(active_statuses)
+        active_count = (
+            select(func.count(ResearchRun.id))
+            .where(ResearchRun.status.in_(active_statuses))
+            .scalar_subquery()
         )
-        active_count = (await session.execute(stmt_active)).scalar_one() or 0
-        if active_count >= limit:
-            return None
 
         priority_order = case(
             (ResearchRun.scope_json["priority"].as_string() == "urgent", 0),
@@ -106,21 +114,29 @@ class RunRepo:
             (ResearchRun.scope_json["context"]["priority"].as_string() == "high", 1),
             else_=2,
         )
-        stmt = (
-            select(ResearchRun)
-            .where(ResearchRun.status == RunStatus.QUEUED)
+        candidate_id = (
+            select(ResearchRun.id)
+            .where(
+                ResearchRun.status == RunStatus.QUEUED,
+                active_count < limit,
+            )
             .order_by(priority_order.asc(), ResearchRun.created_at.asc())
             .limit(1)
+            .with_for_update(skip_locked=True)
+            .scalar_subquery()
         )
-        result = await session.execute(stmt)
-        run = result.scalar_one_or_none()
-        if not run:
-            return None
-
-        run.status = RunStatus.PLANNING
-        run.started_at = datetime.now(UTC)
-        await session.flush()
-        return run
+        claim_stmt = (
+            update(ResearchRun)
+            .where(
+                ResearchRun.id == candidate_id,
+                ResearchRun.status == RunStatus.QUEUED,
+            )
+            .values(status=RunStatus.PLANNING, started_at=datetime.now(UTC))
+            .returning(ResearchRun)
+            .execution_options(synchronize_session="fetch")
+        )
+        result = await session.execute(claim_stmt)
+        return result.scalar_one_or_none()
 
     @classmethod
     async def claim_next_queued_run(cls, session: AsyncSession) -> ResearchRun | None:
@@ -335,17 +351,20 @@ class SourceRepo:
             for column in columns
             if getattr(candidate, column.key, None) is not None
         }
+        dialect_name = session.get_bind().dialect.name
+        if dialect_name == "sqlite":
+            insert_stmt = sqlite_insert(Source)
+        elif dialect_name == "postgresql":
+            insert_stmt = postgresql_insert(Source)
+        else:
+            raise IntegrityError(f"Unsupported database dialect for source upsert: {dialect_name}")
         await session.execute(
-            sqlite_insert(Source)
-            .values(**values)
-            .on_conflict_do_nothing(index_elements=[Source.fingerprint])
+            insert_stmt.values(**values).on_conflict_do_nothing(index_elements=[Source.fingerprint])
         )
 
         source = await SourceRepo.get_source_by_fingerprint(session, fingerprint)
         if source is None:
-            raise IntegrityError(
-                f"source {fingerprint} neither created nor visible after insert"
-            )
+            raise IntegrityError(f"source {fingerprint} neither created nor visible after insert")
         return source, source.id == candidate.id
 
     @staticmethod

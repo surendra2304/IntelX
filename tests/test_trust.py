@@ -6,6 +6,7 @@ from sqlalchemy import select
 from intelx.agents.analyst import AnalystAgent
 from intelx.agents.critic import CriticAgent
 from intelx.agents.retriever import RetrievedDoc, RetrieverAgent, RetrieverOutput
+from intelx.agents.scout import ScoutAgent, ScoutOutput, SourceCandidate
 from intelx.agents.verifier import VerificationVerdict, VerifierAgent
 from intelx.core.confidence import compute_confidence_score
 from intelx.core.enums import (
@@ -249,6 +250,18 @@ async def test_contradiction_handling_and_disputed_status(db_session_factory):
                     )()
                 return await super().complete(messages, **kwargs)
 
+        class MockScout(ScoutAgent):
+            async def execute(self, subquestion, **kwargs):
+                return ScoutOutput(
+                    candidates=[
+                        SourceCandidate(
+                            location=s2.location,
+                            title="Independent Audit",
+                            reason="Explicit contradiction-verification test fixture",
+                        )
+                    ]
+                )
+
         class MockRetriever(RetrieverAgent):
             async def execute(self, candidates, session, run_id=None, **kwargs):
                 return RetrieverOutput(
@@ -264,6 +277,7 @@ async def test_contradiction_handling_and_disputed_status(db_session_factory):
 
         verifier = VerifierAgent(
             gateway=ContradictingVerifierGateway(),
+            scout_agent=MockScout(),
             retriever_agent=MockRetriever(),
         )
         await verifier.execute(
@@ -284,6 +298,89 @@ async def test_contradiction_handling_and_disputed_status(db_session_factory):
         )
         contra_evi = (await session.execute(stmt_evi)).scalars().all()
         assert len(contra_evi) >= 1
+
+
+@pytest.mark.asyncio
+async def test_deterministic_conflict_records_two_sided_exact_evidence(db_session_factory):
+    """Independent incompatible measurements must create disputed claims and auditable spans."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(
+            session, objective="Independent silicon energy-density comparison"
+        )
+        statements = (
+            (
+                "Silicon-graphite composite anodes reached a gravimetric cell energy density of 420 Wh/kg.",
+                "https://nature.example/energy-density",
+                "nature.example",
+                "Springer Nature",
+            ),
+            (
+                "Silicon composite anode cell energy density was capped at 310 Wh/kg under full aging.",
+                "https://physics.example/silicon-aging",
+                "physics.example",
+                "American Physical Society",
+            ),
+        )
+        claims = []
+        documents = []
+        for text, location, domain, publisher in statements:
+            source, document, chunks, _ = await ingest_and_normalize(
+                session=session,
+                raw_bytes=text.encode("utf-8"),
+                location=location,
+                kind=SourceKind.WEB,
+                domain=domain,
+                publisher=publisher,
+                title="Independent measurement report",
+                created_by_run_id=run.id,
+            )
+            claim = await ClaimRepo.create_claim(
+                session=session,
+                run_id=run.id,
+                source_id=source.id,
+                document_id=document.id,
+                chunk_id=chunks[0].id,
+                text_content=text,
+                quote=text,
+                span_start=0,
+                span_end=len(text),
+                claim_type=ClaimType.MEASUREMENT,
+                subject="Entity",
+                origin=ClaimOrigin.EXTRACTED,
+                status=ClaimStatus.ACTIVE,
+            )
+            claims.append(claim)
+            documents.append(document)
+
+        class EmptyScout:
+            async def execute(self, **kwargs):
+                from intelx.agents.scout import ScoutOutput
+
+                return ScoutOutput()
+
+        verifier = VerifierAgent(scout_agent=EmptyScout())
+        await verifier.execute(claims=claims, session=session, run_id=run.id)
+
+        assert all(claim.status == ClaimStatus.DISPUTED for claim in claims)
+        assert all(claim.confidence <= 0.35 for claim in claims)
+        assert all(claim.confidence_method == "deterministic-contradiction-v1" for claim in claims)
+
+        stmt = select(Evidence).where(
+            Evidence.created_by_run_id == run.id,
+            Evidence.created_by_agent == "contradiction-engine",
+            Evidence.support_type == EvidenceSupportType.CONTRADICTS,
+        )
+        contradiction_evidence = list((await session.execute(stmt)).scalars().all())
+        assert len(contradiction_evidence) == 2
+        for evidence in contradiction_evidence:
+            source_document = next(
+                document for document in documents if document.id == evidence.document_id
+            )
+            assert evidence.quote == source_document.text[evidence.span_start : evidence.span_end]
+            assert len(evidence.independent_of_json) == 1
+
+        event_stmt = select(Event).where(Event.run_id == run.id, Event.type == "claim.disputed")
+        assert (await session.execute(event_stmt)).scalar_one_or_none() is not None
 
 
 @pytest.mark.asyncio

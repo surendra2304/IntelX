@@ -15,7 +15,13 @@ services:
       - INTELX_DB_URL=sqlite+aiosqlite:////app/data/intelx.db
       - INTELX_DATA_DIR=/app/data
       - INTELX_API_KEYS=${INTELX_API_KEYS:-}
-      - INTELX_SECRET_KEY=${INTELX_SECRET_KEY}
+      - INTELX_API_KEY=${INTELX_API_KEY:?Set INTELX_API_KEY in the deployment environment}
+      - INTELX_SECRET_KEY=${INTELX_SECRET_KEY:?Set INTELX_SECRET_KEY in the deployment environment}
+      - INTELX_LLM_PROVIDER=inference
+      - INTELX_INFERENCE_URL=${INTELX_INFERENCE_URL:-https://inference-h7bn.onrender.com}
+      - INTELX_LLM_MODEL=${INTELX_LLM_MODEL:?Set a non-mock INTELX_LLM_MODEL}
+      - INTELX_INFERENCE_API_KEY=${INTELX_INFERENCE_API_KEY:?Set INTELX_INFERENCE_API_KEY}
+      - INTELX_RUN_EMBEDDED_WORKER=true
     volumes:
       - intelx_data:/app/data
     healthcheck:
@@ -33,7 +39,7 @@ services:
       - postgres
     environment:
       - POSTGRES_USER=intelx
-      - POSTGRES_PASSWORD=intelx_secret
+      - POSTGRES_PASSWORD
       - POSTGRES_DB=intelx
     ports:
       - "5432:5432"

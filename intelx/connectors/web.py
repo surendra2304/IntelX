@@ -3,7 +3,6 @@
 import asyncio
 import ipaddress
 import logging
-import socket
 import time
 import urllib.parse
 import urllib.robotparser
@@ -13,6 +12,7 @@ from typing import Any
 import httpx
 
 from intelx.connectors.base import BaseConnector
+from intelx.connectors.fetch_guard import SSRFBlocked, resolve_and_validate
 from intelx.core.errors import (
     ContentSizeExceededError,
     RobotsDisallowedError,
@@ -28,6 +28,10 @@ ALLOWED_MIME_TYPES = {
     "text/plain",
     "application/pdf",
     "application/json",
+    "application/rss+xml",
+    "application/atom+xml",
+    "application/xml",
+    "text/xml",
     "text/markdown",
     "text/csv",
 }
@@ -40,32 +44,43 @@ BLOCKED_EXPLICIT_IPS = {
 
 
 def is_ip_allowed(ip_str: str) -> bool:
-    """Check if an IP address is safe for external requests (publicly routable)."""
+    """Check if an IP address is safe for external requests (globally routable)."""
     try:
         ip = ipaddress.ip_address(ip_str)
-        if (
-            str(ip) in BLOCKED_EXPLICIT_IPS
-            or ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_multicast
-            or ip.is_reserved
-            or ip.is_unspecified
-        ):
-            return False
-        return True
+        if isinstance(ip, ipaddress.IPv6Address):
+            if ip.ipv4_mapped is not None:
+                ip = ip.ipv4_mapped
+            elif ip in ipaddress.IPv6Network("64:ff9b::/96"):
+                ip = ipaddress.IPv4Address(ip.packed[-4:])
+        return str(ip) not in BLOCKED_EXPLICIT_IPS and ip.is_global
     except ValueError:
         return False
 
 
 def validate_and_resolve_url(url: str) -> bool:
-    """Validate that a URL does not resolve to a prohibited IP."""
+    """Validate HTTP(S) URL syntax and reject targets that resolve to unsafe IPs."""
     try:
-        parsed = urllib.parse.urlparse(url)
+        parsed = urllib.parse.urlsplit(url)
         hostname = parsed.hostname or ""
-        HttpFetchConnector.validate_ssrf(hostname, parsed.port or 80)
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or "%" in hostname
+        ):
+            return False
+        explicit_port = parsed.port
+        if explicit_port == 0:
+            return False
+        port = (
+            explicit_port
+            if explicit_port is not None
+            else (443 if parsed.scheme.lower() == "https" else 80)
+        )
+        HttpFetchConnector.validate_ssrf(hostname, port)
         return True
-    except SSRFBlockedError:
+    except (SSRFBlockedError, ValueError):
         return False
 
 
@@ -108,56 +123,89 @@ class HttpFetchConnector(BaseConnector):
         self._robots_cache: dict[str, tuple[urllib.robotparser.RobotFileParser, float]] = {}
 
     @classmethod
-    def validate_ssrf(cls, hostname: str, port: int = 80) -> None:
-        """Resolve hostname and reject any private, loopback, multicast, or metadata IPs."""
+    def validate_ssrf(cls, hostname: str, port: int = 80) -> list[str]:
+        """Resolve hostname and reject DNS errors or any non-public resolved address."""
         try:
-            ip_obj = ipaddress.ip_address(hostname)
-            cls._check_ip_safety(ip_obj)
-            return
+            return resolve_and_validate(hostname, port=port)
+        except SSRFBlocked as exc:
+            logger.debug("SSRF validation blocked %s: %s", hostname, exc)
+            raise SSRFBlockedError(
+                f"SSRF violation: {exc}",
+                details={"host": hostname},
+            ) from exc
+
+    def _validated_stream(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        *,
+        timeout: float | None = None,
+    ) -> Any:
+        """Build a request pinned to a previously validated public DNS address.
+
+        The original hostname remains in Host and TLS SNI, while the socket (or
+        proxy CONNECT target) uses the IP that passed SSRF validation. This
+        closes the gap where a second DNS lookup could resolve to a private IP.
+        """
+        parsed = urllib.parse.urlsplit(url)
+        scheme = parsed.scheme.lower()
+        hostname = parsed.hostname or ""
+        if scheme not in {"http", "https"} or not hostname or "%" in hostname:
+            raise SSRFBlockedError(f"Invalid or prohibited URL: {url}")
+        try:
+            explicit_port = parsed.port
+        except ValueError as exc:
+            raise SSRFBlockedError(f"Invalid URL port: {url}") from exc
+        if explicit_port == 0:
+            raise SSRFBlockedError(f"Invalid URL port: {url}")
+        port = explicit_port if explicit_port is not None else (443 if scheme == "https" else 80)
+        resolved_addresses = self.validate_ssrf(hostname, port)
+        try:
+            destination = ipaddress.ip_address(resolved_addresses[0])
+        except (IndexError, ValueError) as exc:
+            raise SSRFBlockedError(f"No valid public address resolved for {hostname}") from exc
+
+        destination_host = (
+            f"[{destination.compressed}]"
+            if isinstance(destination, ipaddress.IPv6Address)
+            else destination.compressed
+        )
+        pinned_url = urllib.parse.urlunsplit(
+            (scheme, f"{destination_host}:{port}", parsed.path or "/", parsed.query, "")
+        )
+
+        try:
+            original_ip = ipaddress.ip_address(hostname)
         except ValueError:
-            pass
-
-        try:
-            addr_info = socket.getaddrinfo(hostname, port, proto=socket.IPPROTO_TCP)
-        except socket.gaierror as e:
-            logger.debug(f"DNS resolution failed for {hostname}: {e}")
-            return
-
-        for _, _, _, _, sockaddr in addr_info:
-            ip_str = sockaddr[0]
             try:
-                ip_obj = ipaddress.ip_address(ip_str)
-                cls._check_ip_safety(ip_obj)
-            except ValueError:
-                continue
+                original_host = hostname.encode("idna").decode("ascii")
+            except UnicodeError as exc:
+                raise SSRFBlockedError(f"Invalid target hostname: {hostname}") from exc
+            extensions = {"sni_hostname": original_host} if scheme == "https" else {}
+        else:
+            original_host = (
+                f"[{original_ip.compressed}]"
+                if isinstance(original_ip, ipaddress.IPv6Address)
+                else original_ip.compressed
+            )
+            extensions = {}
+
+        host_header = f"{original_host}:{explicit_port}" if explicit_port else original_host
+        options: dict[str, Any] = {
+            "headers": {"Host": host_header},
+            "extensions": extensions,
+        }
+        if timeout is not None:
+            options["timeout"] = timeout
+        return client.stream("GET", pinned_url, **options)
 
     @classmethod
     def _check_ip_safety(cls, ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> None:
-        """Verify individual IP address against security blacklist rules."""
-        ip_str = str(ip)
-        if ip_str in BLOCKED_EXPLICIT_IPS:
+        """Verify an individual resolved address is globally routable."""
+        if not is_ip_allowed(str(ip)):
             raise SSRFBlockedError(
-                f"SSRF violation: target resolved to prohibited IP '{ip_str}'",
-                details={"ip": ip_str},
-            )
-
-        # Handle NAT64 / DNS64 Well-Known Prefix (RFC 6052: 64:ff9b::/96)
-        if isinstance(ip, ipaddress.IPv6Address) and ip in ipaddress.IPv6Network("64:ff9b::/96"):
-            embedded_ipv4 = ipaddress.IPv4Address(ip.packed[-4:])
-            cls._check_ip_safety(embedded_ipv4)
-            return
-
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_multicast
-            or ip.is_reserved
-            or ip.is_unspecified
-        ):
-            raise SSRFBlockedError(
-                f"SSRF violation: target resolved to prohibited IP '{ip_str}'",
-                details={"ip": ip_str},
+                f"SSRF violation: target resolved to prohibited IP '{ip}'",
+                details={"ip": str(ip)},
             )
 
     async def _check_robots(self, url: str, client: httpx.AsyncClient) -> bool:
@@ -177,12 +225,12 @@ class HttpFetchConnector(BaseConnector):
         robots_url = f"{parsed.scheme}://{domain}/robots.txt"
         rp = urllib.robotparser.RobotFileParser()
         try:
-            self.validate_ssrf(parsed.hostname or domain, parsed.port or 80)
-            res = await client.get(robots_url, timeout=5.0)
-            if res.status_code == 200:
-                rp.parse(res.text.splitlines())
-            else:
-                rp.allow_all = True
+            async with self._validated_stream(client, robots_url, timeout=5.0) as res:
+                if res.status_code == 200:
+                    body = await res.aread()
+                    rp.parse(body.decode("utf-8", errors="replace").splitlines())
+                else:
+                    rp.allow_all = True
         except Exception:
             rp.allow_all = True
 
@@ -206,6 +254,14 @@ class HttpFetchConnector(BaseConnector):
         """Fetch remote URL with SSRF checks, robots verification, and streaming size caps."""
         current_url = target
         max_redirects = 10
+        requested_max_bytes = kwargs.get("max_bytes", self.settings.MAX_PAGE_BYTES)
+        if (
+            not isinstance(requested_max_bytes, int)
+            or isinstance(requested_max_bytes, bool)
+            or requested_max_bytes < 1
+        ):
+            raise ValueError("max_bytes must be a positive integer")
+        max_bytes = min(requested_max_bytes, self.settings.MAX_PAGE_BYTES)
 
         async with self._semaphore:
             async with httpx.AsyncClient(
@@ -213,18 +269,34 @@ class HttpFetchConnector(BaseConnector):
                 timeout=httpx.Timeout(self.settings.FETCH_TIMEOUT_S),
                 headers={"User-Agent": self.settings.USER_AGENT},
                 follow_redirects=False,
+                trust_env=True,
             ) as client:
                 for redirect_hop in range(max_redirects):
                     parsed = urllib.parse.urlparse(current_url)
                     hostname = parsed.hostname or ""
-                    if not hostname:
-                        raise SSRFBlockedError(f"Invalid URL hostname: {current_url}")
+                    if (
+                        parsed.scheme.lower() not in ("http", "https")
+                        or not hostname
+                        or parsed.username is not None
+                        or parsed.password is not None
+                    ):
+                        raise SSRFBlockedError(f"Invalid or prohibited URL: {current_url}")
+                    try:
+                        parsed_port = parsed.port
+                    except ValueError as exc:
+                        raise SSRFBlockedError(f"Invalid URL port: {current_url}") from exc
 
                     # 1. Check connector domain policy
                     self.check_policy(hostname)
 
                     # 2. Enforce SSRF IP validation on EVERY redirect hop
-                    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+                    if parsed_port == 0:
+                        raise SSRFBlockedError(f"Invalid URL port: {current_url}")
+                    port = (
+                        parsed_port
+                        if parsed_port is not None
+                        else (443 if parsed.scheme.lower() == "https" else 80)
+                    )
                     self.validate_ssrf(hostname, port)
 
                     # 3. Check robots.txt on first hop
@@ -250,7 +322,7 @@ class HttpFetchConnector(BaseConnector):
                     await self._apply_politeness(hostname)
 
                     # 5. Stream request to enforce MAX_PAGE_BYTES cap
-                    async with client.stream("GET", current_url) as response:
+                    async with self._validated_stream(client, current_url) as response:
                         if response.is_redirect and "Location" in response.headers:
                             next_url = urllib.parse.urljoin(
                                 current_url, response.headers["Location"]
@@ -278,20 +350,23 @@ class HttpFetchConnector(BaseConnector):
 
                         # 7. Check Content-Length if present
                         content_len = response.headers.get("content-length")
-                        if content_len and int(content_len) > self.settings.MAX_PAGE_BYTES:
+                        if content_len and int(content_len) > max_bytes:
                             raise ContentSizeExceededError(
-                                f"Size {content_len} exceeds MAX_PAGE_BYTES limit",
-                                details={"size": int(content_len)},
+                                f"Size {content_len} exceeds the MAX_PAGE_BYTES/fetch limit of {max_bytes} bytes",
+                                details={"size": int(content_len), "limit": max_bytes},
                             )
 
                         # 8. Stream body with cumulative byte cap
                         accumulated = bytearray()
                         async for chunk in response.aiter_bytes():
                             accumulated.extend(chunk)
-                            if len(accumulated) > self.settings.MAX_PAGE_BYTES:
+                            if len(accumulated) > max_bytes:
                                 raise ContentSizeExceededError(
-                                    "Streamed body exceeded MAX_PAGE_BYTES limit",
-                                    details={"bytes_received": len(accumulated)},
+                                    f"Streamed body exceeded the MAX_PAGE_BYTES/fetch limit of {max_bytes} bytes",
+                                    details={
+                                        "bytes_received": len(accumulated),
+                                        "limit": max_bytes,
+                                    },
                                 )
 
                         return FetchResult(

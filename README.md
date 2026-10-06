@@ -28,15 +28,20 @@ Now navigate to **[http://localhost:8000](http://localhost:8000)** in your brows
 
 ## 🐳 Docker Deployment
 
-Run the complete unprivileged multi-stage container environment with persistent data storage:
+The single-container Compose file runs in production mode with SQLite and an embedded worker. Unlike `make dev`, it requires strong service secrets and a real inference-provider credential/model. It uses the configured inference gateway by default; set `INTELX_INFERENCE_URL` to override it for a private/self-hosted gateway. Generate distinct secrets and supply credentials from your provider; keep them in your shell or an untracked `.env` file, never in Git:
 
 ```bash
-# Start INTELX container with persistent volume
-docker compose up -d
+export POSTGRES_PASSWORD="$(openssl rand -hex 32)" # required by the optional Compose Postgres profile; hex is URL-safe
+export INTELX_API_KEY="$(openssl rand -hex 32)"
+export INTELX_SECRET_KEY="$(openssl rand -hex 32)"
+export INTELX_LLM_MODEL="<model-id-supported-by-your-inference-service>"
+export INTELX_INFERENCE_API_KEY="<your-inference-service-key>"
 
-# Inspect health status
+docker compose up -d
 curl -f http://localhost:8000/healthz
 ```
+
+For the multi-container PostgreSQL/Redis deployment with separate API replicas and worker, also set `INTELX_DB_URL` in the deployment environment to `postgresql+asyncpg://intelx:<URL-encoded-POSTGRES_PASSWORD>@postgres:5432/intelx`, then run `docker compose -f docker-compose.production.yml up -d`. Compose passes `POSTGRES_PASSWORD` through from the environment; the connection URL is supplied separately and is never embedded in the Compose file. Production Compose and Render explicitly reject mock models/providers and fail startup when required credentials are missing.
 
 ---
 
@@ -52,17 +57,18 @@ make eval    # Run deterministic golden evaluation suite
 |---|---|---|---|---|
 | **Citation Validity Rate** | **100.0%** | $\ge 100.0\%$ | `PASS` | All `[S:id]` / `[C:id]` citations resolve to valid database entities. |
 | **Groundedness Rate** | **100.0%** | $\ge 90.0\%$ | `PASS` | Key report findings backed by $\ge 1$ active primary claim. |
-| **Contradiction Recall** | **100.0%** | $\ge 75.0\%$ | `PASS` | Opposing measurement and factual conflicts flagged into Disputed status. |
+| **Contradiction Recall** | **100.0%** | $\ge 75.0\%$ | `PASS` | Golden opposing measurements are disputed with reciprocal, exact-span evidence links. |
+| **Contradiction Precision** | **100.0%** | $\ge 100.0\%$ | `PASS` | No unrelated or different-chemistry fixture pairs are falsely disputed. |
 | **Null Result Correctness** | **100.0%** | $\ge 100.0\%$ | `PASS` | Impossible/zero-evidence objectives yield `INSUFFICIENT_EVIDENCE`. |
 | **Independence Correctness** | **100.0%** | $\ge 100.0\%$ | `PASS` | Syndicated wire copies rejected from independent corroboration counts. |
-| **Extraction Precision** | **58.3%** | — | `PASS` | Primary assertions matching expected benchmark propositions. |
+| **Extraction Precision** | **100.0%** | — | `PASS` | Primary assertions matching expected benchmark propositions. |
 | **Completion Rate** | **100.0%** | $\ge 100.0\%$ | `PASS` | All golden benchmark investigations run successfully to completion. |
 
 ### 🎯 What Mock Mode Evals Prove
-Mock Mode evals verify **pipeline mechanical integrity and architectural invariants**: citation validity, exact verbatim character spans (`doc.text[start:end] == quote`), state machine DAG transitions, null results on unprovable queries, and syndicated wire independence deduplication. They do **NOT** measure real-world LLM research quality; contradiction recall and groundedness metrics only become true quality indicators when executed against live LLM backends (`openai_compatible` or `anthropic`).
+Mock Mode evals verify **controlled fixture behavior and pipeline invariants**: citation validity, exact verbatim character spans (`doc.text[start:end] == quote`), traceable contradiction recall/precision on known fixture pairs, null results on unprovable queries, and syndicated-wire independence. They do **not** establish broad real-world research quality, live-provider behavior, or the correctness of claims outside this fixture set; those still require live, representative evaluations.
 
 ### ⚡ Run Latency Drop Explained
-Average run latency in the eval suite dropped from ~19.2s to ~0.41s because the earlier mock implementation emitted synthetic public web URLs (`https://en.wikipedia.org/...`) that triggered live socket calls in `HttpFetchConnector` and stalled on TCP connection timeouts. Local fixture routing (`file://...`) resolves immediately from disk in <1ms without network I/O.
+The latest controlled fixture run averaged ~0.13s per research task. Earlier mock runs averaged ~19.2s because they emitted synthetic public web URLs (`https://en.wikipedia.org/...`) that triggered live socket calls and TCP timeouts. Topic-scoped `file://` fixtures now resolve from disk and avoid unrelated evidence.
 
 ---
 

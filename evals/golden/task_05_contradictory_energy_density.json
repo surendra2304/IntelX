@@ -18,6 +18,12 @@
     "expected_contradictions": [
       "420 Wh/kg vs 310 Wh/kg measurement conflict"
     ],
+    "expected_contradiction_pairs": [
+      [
+        "420 Wh/kg",
+        "310 Wh/kg"
+      ]
+    ],
     "expected_outcome": "ANSWERED"
   }
 }

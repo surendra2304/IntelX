@@ -5,7 +5,6 @@ import logging
 import signal
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.core.enums import RunStatus
@@ -32,20 +31,7 @@ class OrchestrationWorker:
         self._shutdown_event = asyncio.Event()
 
     async def claim_next_job(self, session: AsyncSession) -> ResearchRun | None:
-        """Atomically claim the oldest QUEUED run in the database."""
-        # Find next QUEUED run
-        stmt = (
-            select(ResearchRun)
-            .where(ResearchRun.status == RunStatus.QUEUED)
-            .order_by(ResearchRun.created_at.asc())
-            .limit(1)
-        )
-        res = await session.execute(stmt)
-        run = res.scalar_one_or_none()
-        if not run:
-            return None
-
-        # Lock and claim atomically
+        """Atomically claim the highest-priority eligible queued run."""
         return await RunRepo.claim_next_queued_run(session)
 
     async def run_once(self, session_factory: Any | None = None) -> bool:

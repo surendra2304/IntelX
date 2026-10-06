@@ -8,7 +8,7 @@ services:
     restart: unless-stopped
     environment:
       - POSTGRES_USER=intelx
-      - POSTGRES_PASSWORD=intelx_production_secret
+      - POSTGRES_PASSWORD
       - POSTGRES_DB=intelx
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -51,13 +51,19 @@ services:
     environment:
       - INTELX_ENV=production
       - INTELX_MOCK_MODE=false
-      - INTELX_DB_URL=postgresql+asyncpg://intelx:intelx_production_secret@postgres:5432/intelx
+      - INTELX_DB_URL=${INTELX_DB_URL:?Set INTELX_DB_URL in the deployment environment}
       - INTELX_REDIS_URL=redis://redis:6379/0
       - INTELX_DATA_DIR=/app/data
       - INTELX_MAX_CONCURRENT_RUNS=5
       - INTELX_RETENTION_DAYS_RAW_DOCS=30
       - INTELX_RETENTION_DAYS_REPORTS=365
-      - INTELX_SECRET_KEY=change-in-production-intelx-super-secret-key-32-chars
+      - INTELX_SECRET_KEY=${INTELX_SECRET_KEY:?Set INTELX_SECRET_KEY in the deployment environment}
+      - INTELX_API_KEY=${INTELX_API_KEY:?Set INTELX_API_KEY in the deployment environment}
+      - INTELX_API_KEYS=${INTELX_API_KEYS:-}
+      - INTELX_LLM_PROVIDER=inference
+      - INTELX_INFERENCE_URL=${INTELX_INFERENCE_URL:-https://inference-h7bn.onrender.com}
+      - INTELX_LLM_MODEL=${INTELX_LLM_MODEL:?Set a non-mock INTELX_LLM_MODEL}
+      - INTELX_INFERENCE_API_KEY=${INTELX_INFERENCE_API_KEY:?Set INTELX_INFERENCE_API_KEY}
     volumes:
       - shared_data:/app/data
     networks:
@@ -78,13 +84,19 @@ services:
     environment:
       - INTELX_ENV=production
       - INTELX_MOCK_MODE=false
-      - INTELX_DB_URL=postgresql+asyncpg://intelx:intelx_production_secret@postgres:5432/intelx
+      - INTELX_DB_URL=${INTELX_DB_URL:?Set INTELX_DB_URL in the deployment environment}
       - INTELX_REDIS_URL=redis://redis:6379/0
       - INTELX_DATA_DIR=/app/data
       - INTELX_MAX_CONCURRENT_RUNS=5
       - INTELX_RETENTION_DAYS_RAW_DOCS=30
       - INTELX_RETENTION_DAYS_REPORTS=365
-      - INTELX_SECRET_KEY=change-in-production-intelx-super-secret-key-32-chars
+      - INTELX_SECRET_KEY=${INTELX_SECRET_KEY:?Set INTELX_SECRET_KEY in the deployment environment}
+      - INTELX_API_KEY=${INTELX_API_KEY:?Set INTELX_API_KEY in the deployment environment}
+      - INTELX_API_KEYS=${INTELX_API_KEYS:-}
+      - INTELX_LLM_PROVIDER=inference
+      - INTELX_INFERENCE_URL=${INTELX_INFERENCE_URL:-https://inference-h7bn.onrender.com}
+      - INTELX_LLM_MODEL=${INTELX_LLM_MODEL:?Set a non-mock INTELX_LLM_MODEL}
+      - INTELX_INFERENCE_API_KEY=${INTELX_INFERENCE_API_KEY:?Set INTELX_INFERENCE_API_KEY}
     volumes:
       - shared_data:/app/data
     networks:
@@ -107,11 +119,17 @@ services:
     environment:
       - INTELX_ENV=production
       - INTELX_MOCK_MODE=false
-      - INTELX_DB_URL=postgresql+asyncpg://intelx:intelx_production_secret@postgres:5432/intelx
+      - INTELX_DB_URL=${INTELX_DB_URL:?Set INTELX_DB_URL in the deployment environment}
       - INTELX_REDIS_URL=redis://redis:6379/0
       - INTELX_DATA_DIR=/app/data
       - INTELX_MAX_CONCURRENT_RUNS=5
-      - INTELX_SECRET_KEY=change-in-production-intelx-super-secret-key-32-chars
+      - INTELX_SECRET_KEY=${INTELX_SECRET_KEY:?Set INTELX_SECRET_KEY in the deployment environment}
+      - INTELX_API_KEY=${INTELX_API_KEY:?Set INTELX_API_KEY in the deployment environment}
+      - INTELX_API_KEYS=${INTELX_API_KEYS:-}
+      - INTELX_LLM_PROVIDER=inference
+      - INTELX_INFERENCE_URL=${INTELX_INFERENCE_URL:-https://inference-h7bn.onrender.com}
+      - INTELX_LLM_MODEL=${INTELX_LLM_MODEL:?Set a non-mock INTELX_LLM_MODEL}
+      - INTELX_INFERENCE_API_KEY=${INTELX_INFERENCE_API_KEY:?Set INTELX_INFERENCE_API_KEY}
     volumes:
       - shared_data:/app/data
     networks:

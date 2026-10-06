@@ -10,7 +10,7 @@ import httpx
 from pydantic import BaseModel
 
 from intelx.core.errors import ProviderError
-from intelx.core.settings import get_settings
+from intelx.core.settings import Settings, get_settings
 from intelx.models.providers import BaseLLMProvider, compute_model_pricing
 from intelx.models.types import Usage
 
@@ -36,12 +36,13 @@ class AIUniverseProvider(BaseLLMProvider):
         base_url: str | None = None,
         api_key: str | None = None,
         timeout_seconds: float = 45.0,
+        settings: Settings | None = None,
     ) -> None:
-        settings = get_settings()
+        self.settings = settings or get_settings()
         self.base_url = (
-            base_url or settings.AI_UNIVERSE_BASE_URL or "https://friday-zw59.onrender.com"
+            base_url or self.settings.AI_UNIVERSE_BASE_URL or "https://friday-zw59.onrender.com"
         ).rstrip("/")
-        self.api_key = api_key or settings.AI_UNIVERSE_API_KEY
+        self.api_key = api_key or self.settings.AI_UNIVERSE_API_KEY
         self.timeout_seconds = timeout_seconds
         self.last_metadata: dict[str, Any] = {}
 
@@ -256,9 +257,8 @@ class AIUniverseProvider(BaseLLMProvider):
         """Query Inference live multi-model LLM reasoning endpoint to produce genuine intelligence."""
         import re
 
-        settings = get_settings()
         # Build dedicated headers for the /ask endpoint — Inference requires X-API-Key
-        inference_key = settings.INFERENCE_API_KEY
+        inference_key = self.settings.INFERENCE_API_KEY
         ask_headers = {
             "Content-Type": "application/json",
             "User-Agent": "INTELX-Engine/1.0",

@@ -50,6 +50,8 @@ secrets.json
 data/*.db
 data/*.db-shm
 data/*.db-wal
+# Runtime-ingested, content-addressed source snapshots can include external/user data.
+data/raw/
 
 # OS specific
 Thumbs.db

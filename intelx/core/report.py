@@ -405,8 +405,16 @@ def export_text_citations(findings: list[Any], sources: list[Any]) -> str:
 
 
 def export_spoken_citations(findings: list[Any], sources: list[Any]) -> str:
-    """Format findings into natural, conversational speech for FRIDAY voice TTS."""
+    """Format findings into natural speech, attributing only their own citations."""
     clean_prose_re = re.compile(r"\[[CS]:[a-zA-Z0-9_\-]+\]|\*\*|\*|`|\[|\]|\([^\)]*\)")
+    sources_by_id = {
+        str(_get_val(source, "id")): source for source in sources if _get_val(source, "id")
+    }
+    sources_by_url = {}
+    for source in sources:
+        url = _get_val(source, "location") or _get_val(source, "url")
+        if url:
+            sources_by_url[str(url)] = source
     spoken_sentences: list[str] = []
 
     for f in findings:
@@ -415,16 +423,25 @@ def export_spoken_citations(findings: list[Any], sources: list[Any]) -> str:
         clean_stmt = clean_prose_re.sub("", statement).strip()
         clean_stmt = re.sub(r"\s+", " ", clean_stmt)
 
-        citations = _get_val(f, "citations", [])
+        citations = _get_val(f, "citations", []) or []
+        if not isinstance(citations, (list, tuple)):
+            citations = [citations]
         source_title = None
-        if citations:
-            first_cit = citations[0]
-            source_title = _get_val(first_cit, "source_title", None)
-        elif sources:
-            first_s = sources[0]
-            source_title = _get_val(first_s, "title", None)
+        for citation in citations:
+            citation_source_id = _get_val(citation, "source_id")
+            citation_source_url = _get_val(citation, "source_url") or _get_val(citation, "url")
+            source = sources_by_id.get(str(citation_source_id)) if citation_source_id else None
+            if source is None and citation_source_url:
+                source = sources_by_url.get(str(citation_source_url))
 
-        if not source_title or source_title == "Source Document":
+            source_title = _get_val(citation, "source_title")
+            if not source_title or source_title == "Source Document":
+                source_title = _get_val(source, "title") if source else None
+            if source_title and source_title != "Source Document":
+                break
+            source_title = None
+
+        if not source_title:
             source_title = "reported evidence"
 
         if status in ("inference", "unverified"):

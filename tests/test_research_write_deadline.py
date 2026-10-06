@@ -19,7 +19,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -113,7 +112,9 @@ async def test_synthesis_releases_the_writer_lock():
         await engine.execute_run(session=session, run_id=run.id)
         await session.commit()
 
-    assert synthesis_reached.is_set(), "execute_run never reached synthesis; test is not exercising it"
+    assert synthesis_reached.is_set(), (
+        "execute_run never reached synthesis; test is not exercising it"
+    )
     assert "blocked" in probe, "the competing writer never ran"
     assert probe["blocked"] < 1.0, (
         f"a second writer was blocked for {probe['blocked']:.2f}s while the synthesizer "

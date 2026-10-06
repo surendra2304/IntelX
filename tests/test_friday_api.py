@@ -192,6 +192,29 @@ async def test_friday_research_status_and_progress(friday_test_client):
 
 
 @pytest.mark.asyncio
+async def test_friday_status_normalizes_sqlite_naive_run_timestamps(friday_test_client):
+    """Status polling must keep working when SQLite returns timezone-naive timestamps."""
+    headers = {"X-API-Key": "friday-test-secret-key-123"}
+    sessionmaker = get_sessionmaker()
+
+    async with sessionmaker() as session:
+        run = await RunRepo.create_run(session, objective="Timezone-safe status test")
+        run.status = RunStatus.FAILED
+        run.outcome = RunOutcome.FAILED
+        run.started_at = datetime.now(UTC)
+        run.completed_at = datetime.now(UTC)
+        await session.commit()
+        run_id = run.id
+
+    response = await friday_test_client.get(f"/api/v1/friday/research/{run_id}", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "FAILED"
+    assert data["duration_seconds"] is not None
+    assert data["duration_seconds"] >= 0
+
+
+@pytest.mark.asyncio
 async def test_friday_research_findings_and_citations(friday_test_client):
     """Verify GET /api/v1/friday/research/{run_id}/findings resolves citations."""
     headers = {"X-API-Key": "friday-test-secret-key-123"}

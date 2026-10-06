@@ -154,7 +154,10 @@ class SourceCredibilityScorer:
             1.00,
             "Official Documentation",
             [
-                r"docs\.",
+                r"docs\.python\.org",
+                r"docs\.rust-lang\.org",
+                r"docs\.kernel\.org",
+                r"docs\.postgresql\.org",
                 r"python\.org",
                 r"rust-lang\.org",
                 r"kernel\.org",
@@ -238,10 +241,6 @@ class SourceCredibilityScorer:
             "Primary Corporate Disclosure",
             [
                 r"company\.com",
-                r"investor\.",
-                r"ir\.",
-                r"press\.",
-                r"newsroom\.",
             ],
         ),
         (
@@ -287,23 +286,36 @@ class SourceCredibilityScorer:
         mode = normalize_research_mode(mode_or_hint)
         loc_clean = location.lower().strip()
 
-        # Parse domain from URL if applicable
-        if "://" in loc_clean:
-            try:
-                parsed = urlparse(loc_clean)
-                domain_target = f"{parsed.netloc}{parsed.path}"
-            except Exception:
-                domain_target = loc_clean
-        else:
-            domain_target = loc_clean
-
-        # Local files and upload paths are treated as verified internal corpus
-        if (
-            "data/uploads" in loc_clean
-            or "evals/fixtures" in loc_clean
-            or loc_clean.startswith("file://")
+        # Local paths are trusted corpus entries only when the location itself is
+        # local, never when a remote URL merely contains a familiar path segment.
+        try:
+            parsed = urlparse(loc_clean)
+        except ValueError:
+            parsed = None
+        source_path = (parsed.path.replace("\\", "/") if parsed else "").lower()
+        path_parts = [part for part in source_path.strip("/").split("/") if part]
+        local_file_uri = bool(
+            parsed and parsed.scheme == "file" and parsed.netloc in ("", "localhost")
+        )
+        local_path = bool(parsed and not parsed.scheme and not parsed.netloc)
+        if local_file_uri or (
+            local_path
+            and any(
+                path_parts[index : index + 2] in (["data", "uploads"], ["evals", "fixtures"])
+                for index in range(max(0, len(path_parts) - 1))
+            )
         ):
             return 0.85, "Verified Local Corpus"
+
+        # Extract only the normalized hostname for authority matching. A trusted
+        # hostname appearing in a path, username, or lookalike suffix is not authority.
+        try:
+            parsed = urlparse(loc_clean if "://" in loc_clean else f"//{loc_clean}")
+            domain_target = (parsed.hostname or "").rstrip(".").encode("idna").decode("ascii")
+            source_path = parsed.path.lower()
+        except (UnicodeError, ValueError):
+            domain_target = ""
+            source_path = ""
 
         # Select domain hierarchy
         if mode == ResearchMode.SECURITY_RESEARCH:
@@ -329,8 +341,13 @@ class SourceCredibilityScorer:
 
         for score, label, patterns in hierarchy:
             for pat in patterns:
-                if re.search(pat, domain_target, re.IGNORECASE):
-                    return score, label
+                host_pattern, separator, path_pattern = pat.partition("/")
+                host_re = rf"(?:[a-z0-9-]+\.)*{host_pattern}"
+                if not domain_target or not re.fullmatch(host_re, domain_target, re.IGNORECASE):
+                    continue
+                if separator and not re.search(path_pattern, source_path, re.IGNORECASE):
+                    continue
+                return score, label
 
         return default_score, default_label
 

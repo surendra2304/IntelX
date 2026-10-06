@@ -235,9 +235,7 @@ class RetrieverAgent(BaseAgent):
                 content_type="text/plain; format=snippet",
                 kind=SourceKind.WEB,
                 domain=parsed.hostname,
-                title=f"{candidate.title} (Snippet)"
-                if candidate.title
-                else "Web Search Snippet",
+                title=f"{candidate.title} (Snippet)" if candidate.title else "Web Search Snippet",
                 license_note="search-engine-snippet",
             )
 

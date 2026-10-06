@@ -1,6 +1,6 @@
 """Types and dataclasses for the INTELX model gateway."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -22,3 +22,4 @@ class ModelResult:
     usage: Usage
     provider: str
     model: str
+    metadata: dict[str, Any] = field(default_factory=dict)

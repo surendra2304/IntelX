@@ -66,7 +66,9 @@ async def test_five_simultaneous_jobs_concurrency_and_state_isolation():
     )
     for rid, outcome in zip(run_ids, outcomes, strict=True):
         if isinstance(outcome, BaseException):
-            raise AssertionError(f"run {rid} raised {type(outcome).__name__}: {outcome}") from outcome
+            raise AssertionError(
+                f"run {rid} raised {type(outcome).__name__}: {outcome}"
+            ) from outcome
     results = outcomes
 
     # 3. Assert all 5 completed

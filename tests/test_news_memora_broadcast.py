@@ -1,7 +1,6 @@
 import hashlib
 from datetime import UTC, datetime
 
-import httpx
 import pytest
 
 from intelx.ingestion import news_ingester
@@ -60,15 +59,12 @@ async def test_new_feed_article_is_broadcast_once_after_successful_ingestion(mon
         return {"status": "accepted", "event_id": "event-1"}
 
     monkeypatch.setattr(news_ingester, "publish_research_notice", publish)
-    real_async_client = httpx.AsyncClient
 
-    def client_factory(**kwargs):
-        kwargs["transport"] = httpx.MockTransport(
-            lambda _request: httpx.Response(200, text="<rss/>"),
-        )
-        return real_async_client(**kwargs)
+    class _Fetcher:
+        async def fetch(self, _url, **_kwargs):
+            return type("FetchResult", (), {"status_code": 200, "content": b"<rss/>"})()
 
-    monkeypatch.setattr(news_ingester.httpx, "AsyncClient", client_factory)
+    monkeypatch.setattr(news_ingester, "HttpFetchConnector", _Fetcher)
 
     stats = await news_ingester.crawl_once()
 

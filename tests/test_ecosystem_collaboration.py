@@ -1,18 +1,62 @@
 """Tests for StrateX and Futuris Ecosystem Integration and UI Visual Integrity."""
 
+from datetime import UTC, datetime
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from intelx.app.factory import create_app
-from intelx.connectors.search import clean_rss_text
+from intelx.connectors.search import SearchResult, WebSearchConnector, clean_rss_text
+from intelx.core.auth import hash_api_key
+from intelx.core.enums import ApiKeyRole, RunOutcome, RunStatus
+from intelx.core.errors import ProviderError
 from intelx.core.report import _clean_prose
+from intelx.db.models import ApiKey, Finding, ResearchRun
+from intelx.db.session import get_sessionmaker
+
+
+async def _seed_member_key(name: str) -> str:
+    raw_key = f"test-{name}-api-key"
+    async with get_sessionmaker()() as session:
+        session.add(
+            ApiKey(
+                key_hash=hash_api_key(raw_key),
+                name=name,
+                role=ApiKeyRole.MEMBER,
+            )
+        )
+        await session.commit()
+    return raw_key
 
 
 @pytest.mark.asyncio
-async def test_stratex_intelligence_research_endpoint_direct():
-    """Verify StrateX client endpoint POST /v1/intelligence/research satisfies StrateX contract."""
+async def test_stratex_intelligence_research_endpoint_direct(monkeypatch):
+    """Verify the StrateX contract when grounded market headlines are available."""
+
+    async def fake_news_fetch(self, target, **kwargs):
+        return [
+            SearchResult(
+                url="https://market.example.test/bitcoin-flows",
+                title="Bitcoin rally follows institutional accumulation",
+                snippet="Bitcoin gains as spot inflows rise.",
+            ),
+            SearchResult(
+                url="https://market.example.test/etf-approval",
+                title="SEC approves a spot Bitcoin ETF after court review",
+                snippet="The approval changes the regulatory outlook.",
+            ),
+            SearchResult(
+                url="https://market.example.test/fomc-outlook",
+                title="FOMC interest rate and CPI inflation outlook",
+                snippet="Treasury yields and liquidity remain in focus.",
+            ),
+        ]
+
+    monkeypatch.setattr(WebSearchConnector, "fetch", fake_news_fetch)
+    raw_key = await _seed_member_key("stratex-test")
     app = create_app()
     transport = ASGITransport(app=app)
+    headers = {"X-API-Key": raw_key}
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         # 1. Direct StrateX client path (/v1/intelligence/research)
         payload = {
@@ -20,7 +64,7 @@ async def test_stratex_intelligence_research_endpoint_direct():
             "query": "What events are driving BTCUSDT volatility? Regulatory changes? Institutional flows? Macro events?",
             "trigger_reason": "VOLATILITY_2_SIGMA",
         }
-        res = await client.post("/v1/intelligence/research", json=payload)
+        res = await client.post("/v1/intelligence/research", json=payload, headers=headers)
         assert res.status_code == 200, f"Error: {res.text}"
         data = res.json()
 
@@ -29,6 +73,12 @@ async def test_stratex_intelligence_research_endpoint_direct():
         assert data["trigger_reason"] == "VOLATILITY_2_SIGMA"
         assert len(data["summary"]) > 10
         assert isinstance(data["findings"], dict)
+        assert data["findings"]["status"] == "EVIDENCE_AVAILABLE"
+        assert data["findings"]["sources_count"] == 3
+        assert len(data["findings"]["evidence_sources"]) == 3
+        assert all(
+            source["url"].startswith("https://") for source in data["findings"]["evidence_sources"]
+        )
         assert len(data["sentiment_drivers"]) > 0
         assert len(data["regulatory_changes"]) > 0
         assert len(data["macro_events"]) > 0
@@ -37,48 +87,142 @@ async def test_stratex_intelligence_research_endpoint_direct():
         assert data["expires_at"] > data["timestamp"]
 
         # 2. API v1 gateway path (/api/v1/intelligence/research)
-        res_v1 = await client.post("/api/v1/intelligence/research", json=payload)
+        res_v1 = await client.post("/api/v1/intelligence/research", json=payload, headers=headers)
         assert res_v1.status_code == 200
         assert res_v1.json()["symbol"] == "BTCUSDT"
 
 
 @pytest.mark.asyncio
-async def test_futuris_research_query_endpoints():
-    """Verify Futuris research query endpoint /api/v1/research/query returns expected schema."""
+async def test_stratex_returns_no_synthetic_signals_without_evidence(monkeypatch):
+    """A successful empty search must produce neutral insufficiency, not invented drivers."""
+
+    async def empty_news_fetch(self, target, **kwargs):
+        return []
+
+    monkeypatch.setattr(WebSearchConnector, "fetch", empty_news_fetch)
+    raw_key = await _seed_member_key("stratex-empty-search")
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-        headers = {"X-API-Key": "intelx_api"}
+        response = await client.post(
+            "/v1/intelligence/research",
+            json={"symbol": "NOEVIDENCE", "trigger_reason": "VOLATILITY_2_SIGMA"},
+            headers={"X-API-Key": raw_key},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["findings"]["status"] == "INSUFFICIENT_EVIDENCE"
+    assert data["findings"]["sources_count"] == 0
+    assert data["findings"]["evidence_sources"] == []
+    assert data["sentiment_drivers"] == []
+    assert data["regulatory_changes"] == []
+    assert data["macro_events"] == []
+    assert data["sentiment_score"] == 0.0
+    assert data["volatility_impact_factor"] == 1.0
+    assert "No verified market evidence" in data["summary"]
+
+
+@pytest.mark.asyncio
+async def test_stratex_returns_service_unavailable_when_live_search_fails(monkeypatch):
+    """Provider outages without local evidence must not be disguised as market findings."""
+
+    async def failed_news_fetch(self, target, **kwargs):
+        raise ProviderError(
+            "Live search returned no sources while providers failed.",
+            details={"failed_providers": [{"provider": "google_news"}]},
+        )
+
+    monkeypatch.setattr(WebSearchConnector, "fetch", failed_news_fetch)
+    raw_key = await _seed_member_key("stratex-search-outage")
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/v1/intelligence/research",
+            json={"symbol": "NOEVIDENCE", "trigger_reason": "VOLATILITY_2_SIGMA"},
+            headers={"X-API-Key": raw_key},
+        )
+
+    assert response.status_code == 503
+    assert "providers are unavailable" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_futuris_research_query_endpoints():
+    """Return only evidence-backed reports that match the requested sector."""
+    raw_key = await _seed_member_key("futuris-query-test")
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        answered_run = ResearchRun(
+            objective="ETH institutional flows and volatility research",
+            status=RunStatus.COMPLETED,
+            outcome=RunOutcome.ANSWERED,
+            completed_at=datetime.now(UTC),
+        )
+        failed_btc_run = ResearchRun(
+            objective="BTC market research that failed before verification",
+            status=RunStatus.FAILED,
+            outcome=RunOutcome.FAILED,
+            completed_at=datetime.now(UTC),
+        )
+        session.add_all([answered_run, failed_btc_run])
+        await session.flush()
+        session.add_all(
+            [
+                Finding(
+                    run_id=answered_run.id,
+                    conclusion="ETH rallied as institutional inflows increased; volatility remained elevated.",
+                    confidence=0.91,
+                ),
+                Finding(
+                    run_id=failed_btc_run.id,
+                    conclusion="Unverified BTC baseline must not be exported.",
+                    confidence=0.2,
+                ),
+            ]
+        )
+        await session.commit()
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        headers = {"X-API-Key": raw_key}
         res = await client.get("/api/v1/research/query?sector=BTC", headers=headers)
         assert res.status_code == 200, f"Error: {res.text}"
         reports = res.json()
         assert isinstance(reports, list)
-        assert len(reports) > 0
-        r0 = reports[0]
-        assert "report_id" in r0
-        assert "asset_or_sector" in r0
-        assert "published_at" in r0
-        assert "summary" in r0
-        assert "sentiment_score" in r0
-        assert "volatility_impact_factor" in r0
-        assert "key_findings" in r0
-        assert isinstance(r0["key_findings"], list)
+        # Do not widen to an unrelated sector or include a failed BTC run.
+        assert reports == []
 
-        # Also test /api/v1/futuris/query
+        # Also test /api/v1/futuris/query returns only the completed, answered ETH run.
         res_fut = await client.get("/api/v1/futuris/query?sector=ETH", headers=headers)
         assert res_fut.status_code == 200
-        assert len(res_fut.json()) > 0
+        eth_reports = res_fut.json()
+        assert len(eth_reports) == 1
+        report = eth_reports[0]
+        assert report["report_id"] == answered_run.id
+        assert report["asset_or_sector"] == "ETH"
+        assert report["summary"] == (
+            "ETH rallied as institutional inflows increased; volatility remained elevated."
+        )
+        assert report["key_findings"] == [report["summary"]]
+        assert report["sentiment_score"] > 0
+        assert report["volatility_impact_factor"] == 1.35
 
 
 @pytest.mark.asyncio
 async def test_ecosystem_signal_trigger_endpoints():
     """Verify manual / webhook signal trigger endpoints for StrateX and Futuris."""
+    raw_key = await _seed_member_key("ecosystem-signal-test")
     app = create_app()
     transport = ASGITransport(app=app)
+    headers = {"X-API-Key": raw_key}
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         # Trigger StrateX signal
         st_res = await client.post(
             "/api/v1/stratex/trigger-signal",
+            headers=headers,
             json={
                 "finding_text": "Bullish ETF inflow acceleration indicates institutional spot accumulation",
                 "run_id": "test-run-123",
@@ -92,7 +236,7 @@ async def test_ecosystem_signal_trigger_endpoints():
         # Trigger Futuris forecast
         fu_res = await client.post(
             "/api/v1/futuris/trigger-forecast",
-            headers={"X-API-Key": "intelx_api"},
+            headers=headers,
             json={
                 "finding_text": "Supply shock breakthrough creates rapid adoption acceleration",
                 "run_id": "test-run-123",

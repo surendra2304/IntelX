@@ -6,8 +6,11 @@ from unittest.mock import patch
 from intelx.cli.main import (
     build_parser,
     run_purge,
+    run_serve,
+    run_smoke_live,
     run_verify_audit,
 )
+from intelx.core.settings import Settings
 
 
 def test_cli_parser_subcommands():
@@ -66,6 +69,40 @@ def test_cli_parser_subcommands():
     assert args_smoke_live.objective == "Test query"
     assert args_smoke_live.max_sources == 8
     assert args_smoke_live.max_usd == 2.0
+
+
+def test_serve_uses_platform_port_environment(monkeypatch):
+    monkeypatch.setenv("PORT", "9123")
+    args = build_parser().parse_args(["serve"])
+
+    with patch("uvicorn.run") as mock_run:
+        run_serve(args)
+
+    assert mock_run.call_args.kwargs["port"] == 9123
+    assert mock_run.call_args.kwargs["host"] == "0.0.0.0"
+
+
+def test_smoke_live_accepts_inference_provider_credentials():
+    """The live smoke command must check inference credentials, not OpenAI keys."""
+    settings = Settings(
+        MOCK_MODE=False,
+        LLM_PROVIDER="inference",
+        INFERENCE_API_KEY="local-inference-smoke-key",
+        TAVILY_API_KEY="local-search-smoke-key",
+    )
+
+    def _fake_run(coro):
+        coro.close()
+        return None
+
+    args = argparse.Namespace(objective=None, max_sources=None, max_usd=None)
+    with (
+        patch("intelx.cli.main.get_settings", return_value=settings),
+        patch("asyncio.run", side_effect=_fake_run) as mock_asyncio_run,
+    ):
+        run_smoke_live(args)
+
+    assert mock_asyncio_run.called
 
 
 def test_cli_verify_audit_command():

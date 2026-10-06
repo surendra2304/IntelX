@@ -1,5 +1,7 @@
 """Tests for Concurrent Run Management, Priority Queueing, and State Isolation."""
 
+import asyncio
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -36,6 +38,25 @@ async def test_concurrent_run_priority_and_isolation():
         assert claimed is not None
         assert claimed.id == urgent_run.id
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_simultaneous_workers_claim_distinct_runs_within_limit():
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        first = await RunRepo.create_run(session, objective="First queued research question")
+        second = await RunRepo.create_run(session, objective="Second queued research question")
+        await session.commit()
+
+    async def claim_one():
+        async with sessionmaker() as session:
+            run = await RunRepo.get_or_claim_next_queued_job(session, max_concurrent=2)
+            claimed_id = run.id if run else None
+            await session.commit()
+            return claimed_id
+
+    claimed = await asyncio.gather(claim_one(), claim_one())
+    assert set(claimed) == {first.id, second.id}
 
 
 @pytest.mark.asyncio

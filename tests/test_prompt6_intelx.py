@@ -22,7 +22,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from intelx.agents.extractor import ExtractionResult, ExtractorAgent
-from intelx.agents.scout import ScoutAgent, ScoutOutput
+from intelx.agents.scout import ScoutAgent, ScoutOutput, SourceCandidate
 from intelx.app.factory import create_app
 from intelx.connectors.context_firewall import ContextFirewall
 from intelx.connectors.web import is_ip_allowed
@@ -46,6 +46,12 @@ from intelx.orchestration.engine import OrchestrationEngine
 def db_session_factory():
     """Get active async sessionmaker."""
     return get_sessionmaker()
+
+
+async def seed_friday_test_key(settings):
+    """Seed the configured FRIDAY credential exactly as application startup does."""
+    async with get_sessionmaker()() as session:
+        await seed_api_keys_from_settings(session, settings)
 
 
 @pytest.mark.asyncio
@@ -93,6 +99,7 @@ async def test_friday_task_envelope_and_4dimension_validation():
     """Verify FRIDAY task envelope requires query scope, source policy, time budget, and doc budget."""
     settings = get_settings()
     settings.FRIDAY_API_KEY = "friday-test-key"
+    await seed_friday_test_key(settings)
     app = create_app()
     transport = ASGITransport(app=app)
     headers = {"X-API-Key": "friday-test-key", "Content-Type": "application/json"}
@@ -146,6 +153,7 @@ async def test_idempotent_repeated_delegations():
     """Verify repeated delegations with identical friday_request_id return existing run."""
     settings = get_settings()
     settings.FRIDAY_API_KEY = "friday-test-key"
+    await seed_friday_test_key(settings)
     app = create_app()
     transport = ASGITransport(app=app)
     headers = {"X-API-Key": "friday-test-key", "Content-Type": "application/json"}
@@ -178,6 +186,7 @@ async def test_task_cancellation_and_partial_reporting():
     """Verify task cancellation sets CANCELLED outcome and provides partial results."""
     settings = get_settings()
     settings.FRIDAY_API_KEY = "friday-test-key"
+    await seed_friday_test_key(settings)
     app = create_app()
     transport = ASGITransport(app=app)
     headers = {"X-API-Key": "friday-test-key", "Content-Type": "application/json"}
@@ -364,6 +373,37 @@ def test_spoken_and_text_citation_exports():
     assert "[Battery Research Journal](https://example.com/paper)" in text
 
 
+def test_spoken_citations_never_fall_back_to_an_unrelated_first_source():
+    speech = export_spoken_citations(
+        [
+            {
+                "statement": "The claim lacks a citation.",
+                "status": "verified",
+                "citations": [],
+            }
+        ],
+        [{"id": "unrelated-source", "title": "Unrelated Report"}],
+    )
+    assert "Unrelated Report" not in speech
+    assert "According to reported evidence" in speech
+
+    id_citation_speech = export_spoken_citations(
+        [
+            {
+                "statement": "The cited source is the second source.",
+                "status": "verified",
+                "citations": [{"source_id": "source-2"}],
+            }
+        ],
+        [
+            {"id": "source-1", "title": "Wrong First Source"},
+            {"id": "source-2", "title": "Correct Cited Source"},
+        ],
+    )
+    assert "According to Correct Cited Source" in id_citation_speech
+    assert "Wrong First Source" not in id_citation_speech
+
+
 def test_prompt_injection_context_firewall():
     """Verify ContextFirewall identifies injection directives and neutralizes boundary breakout attacks."""
     firewall = ContextFirewall()
@@ -497,7 +537,22 @@ async def test_null_result_state_and_contradiction(db_session_factory):
                 )
                 return ExtractionResult(claims=[], entities=[], events=[])
 
-        contra_engine = OrchestrationEngine(extractor_agent=DisputedExtractor())
+        class DisputeScout(ScoutAgent):
+            async def execute(self, subquestion, **kwargs):
+                return ScoutOutput(
+                    candidates=[
+                        SourceCandidate(
+                            location=source.location,
+                            title="Standard battery lab report",
+                            reason="Explicit contradiction-outcome test fixture",
+                        )
+                    ]
+                )
+
+        contra_engine = OrchestrationEngine(
+            scout_agent=DisputeScout(),
+            extractor_agent=DisputedExtractor(),
+        )
         final_contra_run = await contra_engine.execute_run(session=session, run_id=contra_run.id)
         assert final_contra_run.status == RunStatus.COMPLETED
         assert final_contra_run.outcome == RunOutcome.CONTRADICTION_DETECTED

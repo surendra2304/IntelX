@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.core.enums import ApiKeyRole
-from intelx.core.settings import Settings, get_settings, INSECURE_PRODUCTION_SECRETS
+from intelx.core.settings import INSECURE_PRODUCTION_SECRETS, Settings, get_settings
 from intelx.db.models import ApiKey
 from intelx.db.session import get_sessionmaker
 
@@ -145,8 +145,17 @@ async def seed_api_keys_from_settings(session: AsyncSession, settings: Settings)
         settings.validate_production_security()
 
     keys = list(settings.API_KEYS) if settings.API_KEYS else []
-    if getattr(settings, "INTELX_API_KEY", None) and settings.INTELX_API_KEY not in keys:
+    if settings.INTELX_API_KEY and settings.INTELX_API_KEY not in keys:
         keys.append(settings.INTELX_API_KEY)
+
+    service_keys = {
+        key
+        for key in (settings.FRIDAY_API_KEY, settings.FUTURIS_API_KEY, settings.STRATEX_API_KEY)
+        if key
+    }
+    for service_key in service_keys:
+        if service_key not in keys:
+            keys.append(service_key)
 
     # Strictly forbid demo keys in production; only seed in local dev or test if not production
     if not settings.is_production() and settings.is_dev_or_test():
@@ -170,11 +179,19 @@ async def seed_api_keys_from_settings(session: AsyncSession, settings: Settings)
         res = await session.execute(stmt)
         existing = res.scalar_one_or_none()
         if not existing:
-            role = ApiKeyRole.ADMIN if (idx == 0 or "admin" in raw_key) else ApiKeyRole.MEMBER
-            name = (
-                "friday-delegation"
-                if (settings.FRIDAY_API_KEY and raw_key == settings.FRIDAY_API_KEY)
-                else ("env-seeded-admin" if role == ApiKeyRole.ADMIN else f"env-seeded-{idx}")
+            is_service_key = raw_key in service_keys
+            role = (
+                ApiKeyRole.MEMBER
+                if is_service_key
+                else (ApiKeyRole.ADMIN if (idx == 0 or "admin" in raw_key) else ApiKeyRole.MEMBER)
+            )
+            service_names = {
+                settings.FRIDAY_API_KEY: "friday-delegation",
+                settings.FUTURIS_API_KEY: "futuris-delegation",
+                settings.STRATEX_API_KEY: "stratex-delegation",
+            }
+            name = service_names.get(raw_key) or (
+                "env-seeded-admin" if role == ApiKeyRole.ADMIN else f"env-seeded-{idx}"
             )
             new_key = ApiKey(
                 key_hash=k_hash,
@@ -189,12 +206,15 @@ async def seed_api_keys_from_settings(session: AsyncSession, settings: Settings)
 async def get_current_api_key(
     request: Request,
     authorization: str | None = Header(None, description="Bearer <api_key>"),
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
 ) -> ApiKey:
-    """Validate Bearer API key header and enforce sliding window rate limit."""
+    """Validate Bearer/X-API-Key credentials and enforce sliding-window rate limits."""
     key_hash: str | None = None
 
+    raw_token = x_api_key.strip() if x_api_key else None
     if authorization and authorization.startswith("Bearer "):
-        raw_token = authorization.replace("Bearer ", "").strip()
+        raw_token = authorization.removeprefix("Bearer ").strip()
+    if raw_token is not None:
         if not raw_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -294,7 +314,6 @@ async def get_friday_api_key(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    settings = get_settings()
     key_hash = hash_api_key(raw_token)
 
     # 1. Rate Limit Check (50 req/hour)
@@ -306,17 +325,8 @@ async def get_friday_api_key(
             headers={"Retry-After": str(retry_after)},
         )
 
-    # 2. Direct Match with INTELX_FRIDAY_API_KEY
-    if settings.FRIDAY_API_KEY and raw_token == settings.FRIDAY_API_KEY:
-        return ApiKey(
-            id="friday-env-key",
-            key_hash=key_hash,
-            name="friday-direct-key",
-            role=ApiKeyRole.MEMBER,
-            created_at=datetime.now(UTC),
-        )
-
-    # 3. Database Lookup
+    # Environment-configured integration keys are seeded into the key table at startup,
+    # so database revocation remains effective for every authentication path.
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session:
         stmt = select(ApiKey).where(ApiKey.key_hash == key_hash)
@@ -326,6 +336,12 @@ async def get_friday_api_key(
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid Friday API Key",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if api_key.revoked:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Friday API key has been revoked",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         return api_key
