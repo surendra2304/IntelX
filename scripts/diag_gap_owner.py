@@ -40,7 +40,7 @@ stage = {"now": "init"}
 intervals = {}
 open_txn = {}
 busy = []
-gaps = []          # (duration, stage, from_stmt, to_stmt)
+gaps = []  # (duration, stage, from_stmt, to_stmt)
 
 
 def wrap(mod, cls_name, label):
@@ -55,18 +55,21 @@ def wrap(mod, cls_name, label):
             return await orig(self, *a, **kw)
         finally:
             stage["now"] = "after:" + label
+
     cls.execute = patched
 
 
-for m, c, l in ((planner_mod, "PlannerAgent", "planner"),
-                (scout_mod, "ScoutAgent", "scout"),
-                (retriever_mod, "RetrieverAgent", "retriever"),
-                (extractor_mod, "ExtractorAgent", "extractor"),
-                (verifier_mod, "VerifierAgent", "verifier"),
-                (analyst_mod, "AnalystAgent", "analyst"),
-                (critic_mod, "CriticAgent", "critic"),
-                (synth_mod, "SynthesizerAgent", "synthesizer")):
-    wrap(m, c, l)
+for module, class_name, label in (
+    (planner_mod, "PlannerAgent", "planner"),
+    (scout_mod, "ScoutAgent", "scout"),
+    (retriever_mod, "RetrieverAgent", "retriever"),
+    (extractor_mod, "ExtractorAgent", "extractor"),
+    (verifier_mod, "VerifierAgent", "verifier"),
+    (analyst_mod, "AnalystAgent", "analyst"),
+    (critic_mod, "CriticAgent", "critic"),
+    (synth_mod, "SynthesizerAgent", "synthesizer"),
+):
+    wrap(module, class_name, label)
 
 _orig_dispatch = ecosystem_dispatch.dispatch_sequentially
 
@@ -106,8 +109,15 @@ def install(engine):
         is_w = head[:6].upper().startswith(WRITE_SQL)
         rec = open_txn.get(k)
         if rec is None:
-            rec = {"t0": now, "w0": None, "w1": None, "n": 0, "tag": None,
-                   "last_w_stage": None, "tl": []}
+            rec = {
+                "t0": now,
+                "w0": None,
+                "w1": None,
+                "n": 0,
+                "tag": None,
+                "last_w_stage": None,
+                "tl": [],
+            }
             open_txn[k] = rec
             rec["_keep"] = conn
         rec["n"] += 1
@@ -115,8 +125,7 @@ def install(engine):
         if rec["w0"] is not None and is_w:
             d = now - rec["w1"]
             if d > 0.5:
-                gaps.append((d, rec["last_w_stage"], rec["tl"][-1], tag,
-                             stage["now"]))
+                gaps.append((d, rec["last_w_stage"], rec["tl"][-1], tag, stage["now"]))
         if is_w:
             rec["w0"] = rec["w0"] or now
             rec["w1"] = now
@@ -129,9 +138,12 @@ def install(engine):
         rec = open_txn.pop(k, None)
         if rec and rec["w0"] is not None:
             intervals[k] = {
-                "w0": rec["w0"], "hold": now - rec["w0"],
-                "span": now - rec["t0"], "n": rec["n"],
-                "outcome": outcome, "tl": rec["tl"],
+                "w0": rec["w0"],
+                "hold": now - rec["w0"],
+                "span": now - rec["t0"],
+                "n": rec["n"],
+                "outcome": outcome,
+                "tl": rec["tl"],
             }
 
     @event.listens_for(sync, "commit")
@@ -149,11 +161,13 @@ def install(engine):
             busy.append(" ".join((ctx.statement or "?").split())[:70])
 
 
-OBJS = ["Assess sodium-ion battery cathode formulations",
-        "Investigate composite sulfide solid electrolyte dendrites",
-        "Benchmark 5000-qubit superconducting quantum annealing speedup",
-        "Analyze high-capacity silicon-graphite anode swelling limits",
-        "Evaluate piezoelectric kinetic energy recovery generators"]
+OBJS = [
+    "Assess sodium-ion battery cathode formulations",
+    "Investigate composite sulfide solid electrolyte dendrites",
+    "Benchmark 5000-qubit superconducting quantum annealing speedup",
+    "Analyze high-capacity silicon-graphite anode swelling limits",
+    "Evaluate piezoelectric kinetic energy recovery generators",
+]
 
 
 async def trial(sm, eng, n):
@@ -165,9 +179,11 @@ async def trial(sm, eng, n):
     async with sm() as s:
         for i, o in enumerate(OBJS):
             r = await RunRepo.create_run(
-                session=s, objective=f"[{i + 1}] {o}",
+                session=s,
+                objective=f"[{i + 1}] {o}",
                 scope_json={"depth": "quick", "budget": {"max_usd": 3.0, "max_minutes": 5}},
-                created_by=f"w{i + 1}")
+                created_by=f"w{i + 1}",
+            )
             ids.append(r.id)
         await s.commit()
     res = {}
@@ -211,8 +227,11 @@ async def main():
             cur["n"] += 1
             cur["tot"] += d
             cur["max"] = max(cur["max"], d)
-        print(f"  trial {n:>2}: busy {len(busy):>2} gaps>0.5s {len(gaps):>3} "
-              f"txns {len(ivs):>3} {sorted(set(res.values()))}", flush=True)
+        print(
+            f"  trial {n:>2}: busy {len(busy):>2} gaps>0.5s {len(gaps):>3} "
+            f"txns {len(ivs):>3} {sorted(set(res.values()))}",
+            flush=True,
+        )
         if busy:
             break
 

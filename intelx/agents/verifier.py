@@ -1,6 +1,7 @@
 """INTELX Verifier Agent: Cross-Source Corroboration and Contradiction Detection."""
 
 import logging
+import math
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -8,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.agents.base import BaseAgent
+from intelx.agents.contradictions import ContradictionEngine
 from intelx.agents.extractor import ExtractorAgent
 from intelx.agents.retriever import RetrieverAgent
 from intelx.agents.scout import ScoutAgent
@@ -20,7 +22,7 @@ from intelx.core.enums import (
     TrustTier,
 )
 from intelx.core.independence import is_independent_evidence
-from intelx.db.models import Chunk, Claim, Document
+from intelx.db.models import Chunk, Claim, Document, Evidence, Source
 from intelx.db.repos import EvidenceRepo, RunRepo, SourceRepo
 from intelx.models.gateway import ModelGateway
 
@@ -83,6 +85,151 @@ class VerifierAgent(BaseAgent):
         self.retriever = retriever_agent or RetrieverAgent(gateway=self.gateway)
         self.extractor = extractor_agent or ExtractorAgent(gateway=self.gateway)
 
+    async def _record_deterministic_conflicts(
+        self,
+        claims: list[Claim],
+        session: AsyncSession,
+        run_id: str,
+    ) -> None:
+        """Persist independently sourced measurement conflicts with exact spans on both sides."""
+        claim_by_id = {claim.id: claim for claim in claims}
+        source_ids = {claim.source_id for claim in claims}
+        document_ids = {claim.document_id for claim in claims}
+        source_rows = (
+            list((await session.execute(select(Source).where(Source.id.in_(source_ids)))).scalars())
+            if source_ids
+            else []
+        )
+        document_rows = (
+            list(
+                (
+                    await session.execute(select(Document).where(Document.id.in_(document_ids)))
+                ).scalars()
+            )
+            if document_ids
+            else []
+        )
+        source_cache = {source.id: source for source in source_rows}
+        document_cache = {document.id: document for document in document_rows}
+        context_by_claim = {}
+        for claim in claims:
+            source = source_cache.get(claim.source_id)
+            document = document_cache.get(claim.document_id)
+            local_context = ""
+            if document:
+                context_start = max(0, claim.span_start - 256)
+                context_end = min(len(document.text), claim.span_end + 256)
+                local_context = document.text[context_start:context_end]
+            context_by_claim[claim.id] = " ".join(
+                part
+                for part in (
+                    source.title if source else "",
+                    source.domain if source else "",
+                    local_context,
+                )
+                if part
+            )
+
+        for conflict in ContradictionEngine().analyze(claims, context_by_claim):
+            claim_a = claim_by_id.get(conflict.claim_a_id)
+            claim_b = claim_by_id.get(conflict.claim_b_id)
+            if (
+                claim_a is None
+                or claim_b is None
+                or claim_a.source_id == claim_b.source_id
+                or claim_a.status in (ClaimStatus.RETRACTED, ClaimStatus.SUPERSEDED)
+                or claim_b.status in (ClaimStatus.RETRACTED, ClaimStatus.SUPERSEDED)
+            ):
+                continue
+
+            for claim in (claim_a, claim_b):
+                if claim.source_id not in source_cache:
+                    source_cache[claim.source_id] = await SourceRepo.get_source(
+                        session, claim.source_id
+                    )
+                if claim.document_id not in document_cache:
+                    document_cache[claim.document_id] = await SourceRepo.get_document(
+                        session, claim.document_id
+                    )
+
+            source_a = source_cache[claim_a.source_id]
+            source_b = source_cache[claim_b.source_id]
+            doc_a = document_cache[claim_a.document_id]
+            doc_b = document_cache[claim_b.document_id]
+            if not source_a or not source_b or not doc_a or not doc_b:
+                continue
+
+            independent, independence_reason = is_independent_evidence(
+                source_a,
+                doc_a,
+                claim_a.quote,
+                source_b,
+                doc_b,
+                claim_b.quote,
+            )
+            if not independent:
+                logger.info(
+                    "Ignoring non-independent conflict candidate (%s): claims %s and %s",
+                    independence_reason,
+                    claim_a.id,
+                    claim_b.id,
+                )
+                continue
+
+            evidence_specs = (
+                (claim_a, claim_b, source_a),
+                (claim_b, claim_a, source_b),
+            )
+            created_any = False
+            for target_claim, opposing_claim, target_source in evidence_specs:
+                stmt = select(Evidence.id).where(
+                    Evidence.claim_id == target_claim.id,
+                    Evidence.source_id == opposing_claim.source_id,
+                    Evidence.document_id == opposing_claim.document_id,
+                    Evidence.quote == opposing_claim.quote,
+                    Evidence.support_type == EvidenceSupportType.CONTRADICTS,
+                    Evidence.created_by_run_id == run_id,
+                )
+                if (await session.execute(stmt)).scalar_one_or_none():
+                    continue
+                await EvidenceRepo.create_evidence(
+                    session=session,
+                    claim_id=target_claim.id,
+                    source_id=opposing_claim.source_id,
+                    document_id=opposing_claim.document_id,
+                    chunk_id=opposing_claim.chunk_id,
+                    span_start=opposing_claim.span_start,
+                    span_end=opposing_claim.span_end,
+                    quote=opposing_claim.quote,
+                    support_type=EvidenceSupportType.CONTRADICTS,
+                    created_by_run_id=run_id,
+                    created_by_agent="contradiction-engine",
+                    independent_of_json=[target_source.id],
+                )
+                created_any = True
+
+            for claim in (claim_a, claim_b):
+                claim.status = ClaimStatus.DISPUTED
+                claim.confidence = min(claim.confidence, 0.35)
+                claim.confidence_method = "deterministic-contradiction-v1"
+
+            if created_any:
+                await RunRepo.add_event(
+                    session=session,
+                    run_id=run_id,
+                    event_type="claim.disputed",
+                    payload_json={
+                        "claim_id_1": claim_a.id,
+                        "claim_id_2": claim_b.id,
+                        "reason": conflict.reason,
+                        "conflict_type": conflict.conflict_type,
+                        "independence_reason": independence_reason,
+                        "created_by_agent": "contradiction-engine",
+                    },
+                )
+
+        await session.flush()
+
     async def execute(
         self,
         claims: list[Claim],
@@ -111,6 +258,7 @@ class VerifierAgent(BaseAgent):
             ][:4]
 
         for claim in target_claims:
+            ai_confidences: list[float] = []
             # 1. Fetch original source and document
             orig_source = await SourceRepo.get_source(session, claim.source_id)
             orig_doc = await SourceRepo.get_document(session, claim.document_id)
@@ -205,6 +353,25 @@ class VerifierAgent(BaseAgent):
                         run_id=run_id,
                     )
                     verdict: VerificationVerdict = verdict_res.parsed
+                    provider_name = getattr(verdict_res, "provider", None)
+                    metadata = getattr(verdict_res, "metadata", None) or {}
+                    if provider_name in ("inference", "ai_universe") and isinstance(metadata, dict):
+                        provider_confidence = metadata.get("confidence")
+                        if provider_confidence is not None:
+                            try:
+                                confidence_value = float(provider_confidence)
+                            except (TypeError, ValueError):
+                                logger.warning("Ignoring invalid provider confidence metadata")
+                            else:
+                                if (
+                                    math.isfinite(confidence_value)
+                                    and 0.0 <= confidence_value <= 1.0
+                                ):
+                                    ai_confidences.append(confidence_value)
+                                else:
+                                    logger.warning(
+                                        "Ignoring out-of-range provider confidence metadata"
+                                    )
 
                     # Compute exact absolute span in new document
                     ev_quote = new_claim_data.quote
@@ -302,12 +469,7 @@ class VerifierAgent(BaseAgent):
                         orig_source.location, domain_hint
                     )
 
-                ai_conf = None
-                if (
-                    hasattr(self.gateway, "_ai_universe_provider")
-                    and self.gateway._ai_universe_provider
-                ):
-                    ai_conf = self.gateway._ai_universe_provider.last_metadata.get("confidence")
+                ai_conf = sum(ai_confidences) / len(ai_confidences) if ai_confidences else None
 
                 score, label, _ = compute_confidence_score(
                     strongest_tier=strongest_tier,
@@ -321,5 +483,6 @@ class VerifierAgent(BaseAgent):
                 claim.confidence = score
                 claim.confidence_method = "v1-composite"
 
+        await self._record_deterministic_conflicts(claims, session, run_id)
         await session.flush()
         return claims

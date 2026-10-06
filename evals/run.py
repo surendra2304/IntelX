@@ -16,16 +16,128 @@ if str(REPO_ROOT) not in sys.path:
 
 from sqlalchemy import select
 
-from intelx.core.enums import ClaimStatus, RunOutcome, RunStatus
+from intelx.core.enums import ClaimStatus, EvidenceSupportType, RunOutcome, RunStatus
 from intelx.core.independence import is_independent_evidence
 from intelx.core.report import validate_citations
 from intelx.db.base import Base
 from intelx.db.engine import get_async_engine
-from intelx.db.models import Claim, Finding, Source
+from intelx.db.models import Claim, Evidence, Finding, Source
 from intelx.db.repos import RunRepo
 from intelx.db.session import get_sessionmaker
 
 logger = logging.getLogger("intelx.evals")
+
+
+async def _has_traceable_conflict_pair(
+    session: Any,
+    run_id: str,
+    claims: list[Claim],
+    expected_pair: list[str],
+) -> bool:
+    """Require both disputed claims and reciprocal, exact-span CONTRADICTS evidence."""
+    if len(expected_pair) != 2 or not all(isinstance(fragment, str) for fragment in expected_pair):
+        return False
+    left_fragment, right_fragment = (fragment.casefold() for fragment in expected_pair)
+    left_claims = [
+        claim
+        for claim in claims
+        if claim.status == ClaimStatus.DISPUTED and left_fragment in claim.quote.casefold()
+    ]
+    right_claims = [
+        claim
+        for claim in claims
+        if claim.status == ClaimStatus.DISPUTED and right_fragment in claim.quote.casefold()
+    ]
+
+    for claim_a in left_claims:
+        for claim_b in right_claims:
+            if claim_a.id == claim_b.id or claim_a.source_id == claim_b.source_id:
+                continue
+            evidence_a = select(Evidence.id).where(
+                Evidence.claim_id == claim_a.id,
+                Evidence.source_id == claim_b.source_id,
+                Evidence.document_id == claim_b.document_id,
+                Evidence.chunk_id == claim_b.chunk_id,
+                Evidence.span_start == claim_b.span_start,
+                Evidence.span_end == claim_b.span_end,
+                Evidence.quote == claim_b.quote,
+                Evidence.support_type == EvidenceSupportType.CONTRADICTS,
+                Evidence.created_by_run_id == run_id,
+            )
+            evidence_b = select(Evidence.id).where(
+                Evidence.claim_id == claim_b.id,
+                Evidence.source_id == claim_a.source_id,
+                Evidence.document_id == claim_a.document_id,
+                Evidence.chunk_id == claim_a.chunk_id,
+                Evidence.span_start == claim_a.span_start,
+                Evidence.span_end == claim_a.span_end,
+                Evidence.quote == claim_a.quote,
+                Evidence.support_type == EvidenceSupportType.CONTRADICTS,
+                Evidence.created_by_run_id == run_id,
+            )
+            if (await session.execute(evidence_a)).scalar_one_or_none() and (
+                await session.execute(evidence_b)
+            ).scalar_one_or_none():
+                return True
+    return False
+
+
+def _expected_conflict_pair_ids(
+    claims: list[Claim],
+    expected_pairs: list[list[str]],
+) -> set[tuple[str, str]]:
+    """Map golden quote fragments to exact, different-source claim pairs."""
+    expected_ids: set[tuple[str, str]] = set()
+    for pair in expected_pairs:
+        if len(pair) != 2 or not all(isinstance(fragment, str) for fragment in pair):
+            continue
+        left_fragment, right_fragment = (fragment.casefold() for fragment in pair)
+        left_claims = [claim for claim in claims if left_fragment in claim.quote.casefold()]
+        right_claims = [claim for claim in claims if right_fragment in claim.quote.casefold()]
+        for claim_a in left_claims:
+            for claim_b in right_claims:
+                if claim_a.id != claim_b.id and claim_a.source_id != claim_b.source_id:
+                    expected_ids.add(tuple(sorted((claim_a.id, claim_b.id))))
+    return expected_ids
+
+
+async def _observed_conflict_pair_ids(
+    session: Any,
+    run_id: str,
+    claims: list[Claim],
+) -> set[tuple[str, str]]:
+    """Reconstruct disputed claim pairs from independent, exact-span contradiction evidence."""
+    claim_by_id = {claim.id: claim for claim in claims}
+    rows = await session.execute(
+        select(Evidence).where(
+            Evidence.created_by_run_id == run_id,
+            Evidence.support_type == EvidenceSupportType.CONTRADICTS,
+        )
+    )
+    evidence_items = list(rows.scalars().all())
+    observed_ids: set[tuple[str, str]] = set()
+    for evidence in evidence_items:
+        target_claim = claim_by_id.get(evidence.claim_id)
+        if (
+            target_claim is None
+            or target_claim.status != ClaimStatus.DISPUTED
+            or not evidence.independent_of_json
+        ):
+            continue
+        for opposing_claim in claims:
+            if (
+                opposing_claim.id != target_claim.id
+                and opposing_claim.status == ClaimStatus.DISPUTED
+                and opposing_claim.source_id != target_claim.source_id
+                and opposing_claim.source_id == evidence.source_id
+                and opposing_claim.document_id == evidence.document_id
+                and opposing_claim.chunk_id == evidence.chunk_id
+                and opposing_claim.span_start == evidence.span_start
+                and opposing_claim.span_end == evidence.span_end
+                and opposing_claim.quote == evidence.quote
+            ):
+                observed_ids.add(tuple(sorted((target_claim.id, opposing_claim.id))))
+    return observed_ids
 
 
 async def run_evaluation_suite(
@@ -66,6 +178,8 @@ async def run_evaluation_suite(
     total_findings_evaluated = 0
     contradictions_planted = 0
     contradictions_detected = 0
+    contradiction_pairs_observed = 0
+    contradiction_pairs_correct = 0
     null_results_expected = 0
     null_results_achieved = 0
     independence_checks_total = 0
@@ -141,12 +255,25 @@ async def run_evaluation_suite(
                 if req_claim.lower() in claim_quotes.lower():
                     extractions_matched += 1
 
-            # Contradictions Detection
-            if expected.get("expected_contradictions"):
-                contradictions_planted += len(expected["expected_contradictions"])
-                disputed = [c for c in claims if c.status == ClaimStatus.DISPUTED]
-                if disputed:
-                    contradictions_detected += len(expected["expected_contradictions"])
+            # Contradiction recall and precision require explicit, exact-span,
+            # independently sourced evidence instead of merely finding any DISPUTED claim.
+            expected_contradictions = expected.get("expected_contradictions", [])
+            expected_pairs = expected.get("expected_contradiction_pairs", [])
+            contradictions_planted += len(expected_contradictions)
+            if len(expected_pairs) != len(expected_contradictions):
+                logger.warning(
+                    "Golden task %s defines %d expected contradictions but %d explicit claim pairs",
+                    task_id,
+                    len(expected_contradictions),
+                    len(expected_pairs),
+                )
+            expected_pair_ids = _expected_conflict_pair_ids(claims, expected_pairs)
+            observed_pair_ids = await _observed_conflict_pair_ids(session, run_id, claims)
+            contradiction_pairs_observed += len(observed_pair_ids)
+            contradiction_pairs_correct += len(observed_pair_ids & expected_pair_ids)
+            for pair in expected_pairs:
+                if await _has_traceable_conflict_pair(session, run_id, claims, pair):
+                    contradictions_detected += 1
 
             # Independence Check for syndicated fixtures
             if "independence_check" in expected:
@@ -233,6 +360,11 @@ async def run_evaluation_suite(
     contradiction_recall = (
         contradictions_detected / contradictions_planted if contradictions_planted > 0 else 1.0
     )
+    contradiction_precision = (
+        contradiction_pairs_correct / contradiction_pairs_observed
+        if contradiction_pairs_observed > 0
+        else 1.0
+    )
     extraction_precision = (
         extractions_matched / extractions_expected if extractions_expected > 0 else 1.0
     )
@@ -259,6 +391,7 @@ async def run_evaluation_suite(
             "citation_validity_rate": round(citation_validity_rate, 4),
             "groundedness_rate": round(groundedness_rate, 4),
             "contradiction_recall": round(contradiction_recall, 4),
+            "contradiction_precision": round(contradiction_precision, 4),
             "extraction_precision": round(extraction_precision, 4),
             "independence_correctness": round(independence_correctness, 4),
             "null_result_correctness": round(null_result_correctness, 4),
@@ -289,6 +422,12 @@ async def run_evaluation_suite(
     t_contra = thresholds.get("contradiction_recall", 0.75) * 100
     v_contra = results["metrics"]["contradiction_recall"] * 100
     print(f"  • Contradiction Recall:     {v_contra:.1f}% (Threshold: {t_contra:.0f}%)")
+    t_contra_precision = thresholds.get("contradiction_precision", 1.0) * 100
+    v_contra_precision = results["metrics"]["contradiction_precision"] * 100
+    print(
+        f"  • Contradiction Precision:  {v_contra_precision:.1f}% "
+        f"(Threshold: {t_contra_precision:.0f}%)"
+    )
     t_null = thresholds.get("null_result_correctness", 1.0) * 100
     v_null = results["metrics"]["null_result_correctness"] * 100
     print(f"  • Null Result Correctness:  {v_null:.1f}% (Threshold: {t_null:.0f}%)")

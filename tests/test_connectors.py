@@ -1,5 +1,6 @@
 """Tests for INTELX Connectors, SSRF Protection, Robots Enforcement, Ingestion, and Sanitization."""
 
+import socket
 from pathlib import Path
 
 import httpx
@@ -8,12 +9,13 @@ import respx
 
 from intelx.connectors.files import FileConnector
 from intelx.connectors.sanitize import IngestionSanitizer
-from intelx.connectors.search import WebSearchConnector
+from intelx.connectors.search import SearchResult, WebSearchConnector
 from intelx.connectors.web import HttpFetchConnector
 from intelx.core.enums import SourceKind, TrustTier
 from intelx.core.errors import (
     ContentSizeExceededError,
     DomainPolicyError,
+    ProviderError,
     RobotsDisallowedError,
     SSRFBlockedError,
     UnsupportedContentTypeError,
@@ -27,6 +29,28 @@ from intelx.memory.normalize import chunk_text_with_offsets, ingest_and_normaliz
 def db_session_factory():
     """Get active async sessionmaker."""
     return get_sessionmaker()
+
+
+@pytest.fixture
+def resolve_example_com(monkeypatch):
+    """Keep fetch tests deterministic while providing one public DNS answer."""
+    original_getaddrinfo = socket.getaddrinfo
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "example.com":
+            port = args[0] if args else kwargs.get("port", 0)
+            return [
+                (
+                    socket.AF_INET,
+                    socket.SOCK_STREAM,
+                    socket.IPPROTO_TCP,
+                    "",
+                    ("93.184.216.34", port or 0),
+                )
+            ]
+        return original_getaddrinfo(host, *args, **kwargs)
+
+    monkeypatch.setattr("intelx.connectors.fetch_guard.socket.getaddrinfo", fake_getaddrinfo)
 
 
 @pytest.mark.asyncio
@@ -51,9 +75,9 @@ async def test_ssrf_protection_blocks_private_and_metadata_ips():
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_ssrf_protection_on_redirect():
+async def test_ssrf_protection_on_redirect(resolve_example_com):
     """Verify SSRF guard checks every redirect hop and halts when redirected to private IP."""
-    respx.get("http://example.com/redirect-to-private").mock(
+    respx.get("http://93.184.216.34:80/redirect-to-private").mock(
         return_value=httpx.Response(
             302,
             headers={"Location": "http://127.0.0.1/secret"},
@@ -67,16 +91,87 @@ async def test_ssrf_protection_on_redirect():
 
 
 @pytest.mark.asyncio
+async def test_fetch_pins_validated_dns_address_and_preserves_host(
+    resolve_example_com,
+):
+    """Connect to the validated IP while retaining the origin Host and TLS SNI."""
+    observed = []
+
+    async def handler(request):
+        observed.append(request)
+        return httpx.Response(200, headers={"Content-Type": "text/plain"}, text="safe")
+
+    connector = HttpFetchConnector(
+        settings=Settings(_env_file=None, RESPECT_ROBOTS=False, PER_DOMAIN_DELAY_S=0),
+        transport=httpx.MockTransport(handler),
+    )
+    result = await connector.fetch("https://example.com/article?q=trace")
+
+    assert result.final_url == "https://example.com/article?q=trace"
+    assert len(observed) == 1
+    request = observed[0]
+    assert request.url.host == "93.184.216.34"
+    assert request.url.path == "/article"
+    assert request.url.query == b"q=trace"
+    assert request.headers["host"] == "example.com"
+    assert request.extensions["sni_hostname"] == "example.com"
+
+
+@pytest.mark.asyncio
+async def test_fetch_rejects_port_zero_before_dns(monkeypatch):
+    def unexpected_dns(*_args, **_kwargs):
+        pytest.fail("port zero should be rejected before DNS resolution")
+
+    monkeypatch.setattr("intelx.connectors.fetch_guard.socket.getaddrinfo", unexpected_dns)
+    connector = HttpFetchConnector(settings=Settings(_env_file=None, RESPECT_ROBOTS=False))
+
+    with pytest.raises(SSRFBlockedError, match="Invalid URL port"):
+        await connector.fetch("http://example.com:0/article")
+
+
+@pytest.mark.asyncio
+async def test_fetch_rejects_dns_rebinding_before_connect(monkeypatch):
+    """Reject a host that becomes private between policy and connection checks."""
+    resolutions = 0
+    requests = []
+    original_getaddrinfo = socket.getaddrinfo
+
+    def rebinding_getaddrinfo(host, port, **kwargs):
+        nonlocal resolutions
+        if host != "rebind.example":
+            return original_getaddrinfo(host, port, **kwargs)
+        resolutions += 1
+        address = "93.184.216.34" if resolutions == 1 else "127.0.0.1"
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (address, port or 0))]
+
+    async def handler(request):
+        requests.append(request)
+        return httpx.Response(200, headers={"Content-Type": "text/plain"}, text="unexpected")
+
+    monkeypatch.setattr("intelx.connectors.fetch_guard.socket.getaddrinfo", rebinding_getaddrinfo)
+    connector = HttpFetchConnector(
+        settings=Settings(_env_file=None, RESPECT_ROBOTS=False),
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(SSRFBlockedError, match="127.0.0.1"):
+        await connector.fetch("http://rebind.example/article")
+
+    assert resolutions == 2
+    assert requests == []
+
+
+@pytest.mark.asyncio
 @respx.mock
-async def test_robots_txt_disallow_enforcement():
+async def test_robots_txt_disallow_enforcement(resolve_example_com):
     """Verify robots.txt disallow rules are honored."""
-    respx.get("http://example.com/robots.txt").mock(
+    respx.get("http://93.184.216.34/robots.txt").mock(
         return_value=httpx.Response(
             200,
             text="User-agent: *\nDisallow: /private/\n",
         )
     )
-    respx.get("http://example.com/private/data").mock(
+    respx.get("http://93.184.216.34/private/data").mock(
         return_value=httpx.Response(200, text="Secret Content")
     )
 
@@ -95,11 +190,11 @@ async def test_robots_txt_disallow_enforcement():
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_oversized_body_and_content_type_rejection():
+async def test_oversized_body_and_content_type_rejection(resolve_example_com):
     """Verify oversized payloads and unsupported content types are rejected."""
     # 1. Oversized body
     large_payload = "A" * 60000
-    respx.get("http://example.com/huge.html").mock(
+    respx.get("http://93.184.216.34/huge.html").mock(
         return_value=httpx.Response(
             200,
             headers={"Content-Type": "text/html"},
@@ -115,7 +210,7 @@ async def test_oversized_body_and_content_type_rejection():
     assert "MAX_PAGE_BYTES" in str(exc_size.value)
 
     # 2. Unsupported Content-Type
-    respx.get("http://example.com/binary.exe").mock(
+    respx.get("http://93.184.216.34/binary.exe").mock(
         return_value=httpx.Response(
             200,
             headers={"Content-Type": "application/x-msdownload"},
@@ -237,6 +332,84 @@ def test_file_connector_supported_formats(tmp_path):
     # 4. Disallowed extension
     with pytest.raises(UnsupportedContentTypeError):
         connector.parse_bytes(b"\x00\x01\x02", "archive.zip")
+
+
+@pytest.mark.asyncio
+async def test_live_search_provider_outage_is_not_reported_as_no_results(monkeypatch):
+    """Distinguish a genuine empty search response from failed external providers."""
+    searcher = WebSearchConnector(settings=Settings(MOCK_MODE=False))
+
+    class BrokenProvider:
+        async def fetch(self, target, **kwargs):
+            raise RuntimeError("provider internals must not leak")
+
+    for name in ("_google_news", "_wikipedia", "_ddg"):
+        monkeypatch.setattr(searcher, name, BrokenProvider())
+
+    with pytest.raises(ProviderError, match="one or more providers failed") as exc_info:
+        await searcher.fetch("test outage handling")
+
+    failures = exc_info.value.details["failed_providers"]
+    assert {failure["provider"] for failure in failures} == {
+        "google_news",
+        "wikipedia",
+        "duckduckgo",
+    }
+    assert all("provider internals must not leak" not in str(failure) for failure in failures)
+
+
+@pytest.mark.asyncio
+async def test_live_search_empty_success_remains_an_honest_null_result(monkeypatch):
+    searcher = WebSearchConnector(settings=Settings(MOCK_MODE=False))
+
+    class EmptyProvider:
+        async def fetch(self, target, **kwargs):
+            return []
+
+    for name in ("_google_news", "_wikipedia", "_ddg"):
+        monkeypatch.setattr(searcher, name, EmptyProvider())
+
+    assert await searcher.fetch("a query with no matching sources") == []
+
+
+@pytest.mark.asyncio
+async def test_live_search_uses_partial_results_when_a_provider_fails(monkeypatch):
+    searcher = WebSearchConnector(settings=Settings(MOCK_MODE=False))
+    expected = SearchResult(
+        url="https://news.example.test/report",
+        title="Independent report",
+        snippet="A source result from a healthy provider.",
+    )
+
+    class ResultProvider:
+        async def fetch(self, target, **kwargs):
+            return [expected]
+
+    class BrokenProvider:
+        async def fetch(self, target, **kwargs):
+            raise ProviderError("provider unavailable", details={"provider": "wikipedia"})
+
+    monkeypatch.setattr(searcher, "_google_news", ResultProvider())
+    monkeypatch.setattr(searcher, "_wikipedia", BrokenProvider())
+
+    assert await searcher.fetch("a topic with partial provider health") == [expected]
+
+
+@pytest.mark.asyncio
+async def test_mock_search_keeps_topic_fixtures_separate_and_returns_honest_nulls():
+    """Do not contaminate a topic with unrelated fixture evidence or synthetic defaults."""
+    searcher = WebSearchConnector(settings=Settings(MOCK_MODE=True))
+
+    solid_state = await searcher.fetch("Determine composite sulfide solid-state capacity retention")
+    silicon = await searcher.fetch("Investigate silicon composite anode energy density benchmarks")
+    unknown = await searcher.fetch("Assess undocumented orbital elevator field data")
+
+    assert [result.url.rsplit("/", 1)[-1] for result in solid_state] == ["solid_state_cycling.txt"]
+    assert {result.url.rsplit("/", 1)[-1] for result in silicon} == {
+        "density_paper_nature.txt",
+        "density_paper_prl.txt",
+    }
+    assert unknown == []
 
 
 @pytest.mark.asyncio

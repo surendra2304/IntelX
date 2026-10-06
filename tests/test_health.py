@@ -1,8 +1,13 @@
 """Tests for system health, readiness, version, and middleware endpoints."""
 
+import json
+
 import pytest
+from fastapi.responses import JSONResponse
 from httpx import AsyncClient
 
+import intelx.api.v1.health as health_module
+from intelx.core.settings import Settings
 from intelx.core.version import PROJECT_NAME, __version__
 
 
@@ -37,6 +42,58 @@ async def test_readyz_endpoint(client: AsyncClient):
     assert data["database"] == "ok"
     assert data["evidence_class"] == "dependency_readiness"
     assert "observed_at" in data
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "provider_keys", "expected_ready"),
+    [
+        ("inference", {"INFERENCE_API_KEY": None}, False),
+        ("inference", {"INFERENCE_API_KEY": "local-inference-test-key"}, True),
+        (
+            "anthropic",
+            {"OPENAI_API_KEY": "local-openai-test-key"},
+            False,
+        ),
+        (
+            "anthropic",
+            {"ANTHROPIC_API_KEY": "local-anthropic-test-key"},
+            True,
+        ),
+        (
+            "openai_compatible",
+            {"OPENAI_API_KEY": "local-openai-test-key"},
+            True,
+        ),
+    ],
+)
+async def test_readyz_requires_selected_provider_credentials(
+    monkeypatch, tmp_path, provider, provider_keys, expected_ready
+):
+    """Readiness checks the selected provider's config, not a different provider's key."""
+    settings = Settings(
+        MOCK_MODE=False,
+        LLM_PROVIDER=provider,
+        DATA_DIR=str(tmp_path),
+        **provider_keys,
+    )
+    monkeypatch.setattr(health_module, "get_settings", lambda: settings)
+
+    async def database_is_healthy():
+        return True
+
+    monkeypatch.setattr(health_module, "check_database_health", database_is_healthy)
+    result = await health_module.readyz()
+    if isinstance(result, JSONResponse):
+        status_code = result.status_code
+        payload = json.loads(result.body)
+    else:
+        status_code = 200
+        payload = result
+
+    assert payload["ready"] is expected_ready
+    assert (status_code == 200) is expected_ready
+    assert payload["model_provider_check"] == "configuration_only"
 
 
 @pytest.mark.asyncio

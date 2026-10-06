@@ -1,11 +1,24 @@
 """Tests for Futuris Context Exchange, Research-Informed Forecasting, and Combined Intelligence Reports."""
 
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from intelx.app.factory import create_app
-from intelx.core.enums import ClaimOrigin, ClaimStatus, ClaimType, SourceKind, TrustTier
+from intelx.core.auth import seed_api_keys_from_settings
+from intelx.core.enums import (
+    ClaimOrigin,
+    ClaimStatus,
+    ClaimType,
+    RunOutcome,
+    RunStatus,
+    SourceKind,
+    TrustTier,
+)
 from intelx.core.settings import get_settings
+from intelx.db.models import Finding
 from intelx.db.repos import ClaimRepo, RunRepo, SourceRepo
 from intelx.db.session import get_sessionmaker
 from intelx.integrations.futuris_context import (
@@ -31,6 +44,40 @@ async def test_relevance_computation_and_signal_extraction():
         "Superconducting quantum annealer demonstrated speedup on graph partitioning",
     )
     assert low_rel <= 0.35
+    assert FuturisContextProvider.compute_relevance(set(), "unrelated input") == 0.0
+
+
+def test_futuris_exogenous_signals_exclude_disputed_and_low_confidence_claims():
+    active = SimpleNamespace(
+        id="active-claim-001",
+        text="Battery efficiency increased by 20 percent.",
+        subject="Battery",
+        predicate="efficiency increased",
+        confidence=0.92,
+        status=ClaimStatus.ACTIVE,
+    )
+    disputed = SimpleNamespace(
+        id="disputed-claim-02",
+        text="Battery output surged by 40 percent.",
+        subject="Battery",
+        predicate="output surged",
+        confidence=0.98,
+        status=ClaimStatus.DISPUTED,
+    )
+    low_confidence = SimpleNamespace(
+        id="low-confidence-03",
+        text="Battery output increased by 15 percent.",
+        subject="Battery",
+        predicate="output increased",
+        confidence=0.42,
+        status=ClaimStatus.ACTIVE,
+    )
+
+    signals = FuturisContextProvider._extract_signals([active, disputed, low_confidence])
+
+    assert len(signals) == 1
+    assert signals[0].direction == "positive"
+    assert signals[0].source == "Claim active-c"
 
 
 @pytest.mark.asyncio
@@ -44,6 +91,25 @@ async def test_futuris_context_provider_database_query():
             session=session,
             objective="Evaluate solid state composite sulfide battery energy density and stability",
         )
+        run.status = RunStatus.COMPLETED
+        run.outcome = RunOutcome.ANSWERED
+        run.completed_at = datetime.now(UTC)
+
+        failed_run = await RunRepo.create_run(
+            session=session,
+            objective="Failed sodium battery run with unverified energy claims",
+        )
+        failed_run.status = RunStatus.FAILED
+        failed_run.outcome = RunOutcome.FAILED
+        failed_run.completed_at = datetime.now(UTC)
+        session.add(
+            Finding(
+                run_id=failed_run.id,
+                conclusion="FAILED_ONLY sodium battery evidence claimed 99% retention.",
+                confidence=0.99,
+            )
+        )
+
         src = await SourceRepo.create_source(
             session=session,
             kind=SourceKind.FILE,
@@ -104,6 +170,7 @@ async def test_futuris_context_provider_database_query():
         assert response.forecast_target == "Solid state battery energy density growth"
         assert response.horizon == "1y"
         assert len(response.research_findings) > 0
+        assert all("FAILED_ONLY" not in finding.finding for finding in response.research_findings)
         assert len(response.exogenous_signals) > 0
 
         sig = response.exogenous_signals[0]
@@ -113,6 +180,48 @@ async def test_futuris_context_provider_database_query():
         # Credibility and temporal context
         assert response.source_credibility_summary.authoritative_sources_count >= 1
         assert len(response.temporal_context.recent_events) > 0
+
+
+@pytest.mark.asyncio
+async def test_futuris_context_excludes_failed_runs_instead_of_reusing_them():
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        failed_run = await RunRepo.create_run(
+            session=session,
+            objective="Sodium battery energy density study that failed verification",
+        )
+        failed_run.status = RunStatus.FAILED
+        failed_run.outcome = RunOutcome.FAILED
+        failed_run.completed_at = datetime.now(UTC)
+        await SourceRepo.create_source(
+            session=session,
+            kind=SourceKind.WEB,
+            location="https://unverified.example.test/sodium-study",
+            title="Unverified sodium battery study",
+            trust_tier=TrustTier.TRUSTED,
+            created_by_run_id=failed_run.id,
+        )
+        session.add(
+            Finding(
+                run_id=failed_run.id,
+                conclusion="Sodium battery energy density increased by 99 percent.",
+                confidence=0.99,
+            )
+        )
+        await session.commit()
+
+        response = await FuturisContextProvider.get_research_context(
+            session=session,
+            forecast_target="Sodium battery energy density",
+            horizon="6m",
+            lookback_days=7,
+            domain="technical",
+        )
+
+    assert response.research_findings == []
+    assert response.source_credibility_summary.top_sources == []
+    assert response.temporal_context.recent_events == []
+    assert response.exogenous_signals == []
 
 
 @pytest.mark.asyncio
@@ -160,6 +269,8 @@ async def test_futuris_context_api_endpoints():
     settings = get_settings()
     settings.MOCK_MODE = True
     settings.FUTURIS_API_KEY = "futuris-secret-test-key"
+    async with get_sessionmaker()() as session:
+        await seed_api_keys_from_settings(session, settings)
 
     app = create_app()
     transport = ASGITransport(app=app)
@@ -251,12 +362,16 @@ async def test_combined_intelligence_report_generation():
     # Test via API endpoint
     settings = get_settings()
     settings.MOCK_MODE = True
+    settings.FUTURIS_API_KEY = "futuris-report-test-key"
+    async with get_sessionmaker()() as session:
+        await seed_api_keys_from_settings(session, settings)
     app = create_app()
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post(
             "/api/v1/futuris/combined-report",
+            headers={"X-API-Key": "futuris-report-test-key"},
             json={
                 "research_data": research_input,
                 "forecast_data": forecast_input,

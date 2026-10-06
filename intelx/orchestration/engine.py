@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import math
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,6 +29,7 @@ from intelx.core.enums import (
 from intelx.core.errors import (
     BudgetExceededError,
     NotFoundError,
+    ProviderError,
     ValidationError,
 )
 from intelx.core.settings import Settings, get_settings
@@ -224,8 +226,17 @@ class OrchestrationEngine:
             run.usd_cost = max(run.usd_cost, usage.usd_cost)
             await session.flush()
 
-        # 2. Budget Ceiling Check
-        max_usd = self.settings.MAX_RUN_USD
+        # 2. Apply both caller-requested and operator-defined budget ceilings.
+        run_budget = (run.scope_json or {}).get("budget") or {}
+        try:
+            requested_usd = float(run_budget.get("max_usd", self.settings.MAX_RUN_USD))
+            requested_minutes = int(run_budget.get("max_minutes", self.settings.MAX_RUN_MINUTES))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(f"Run {run_id} has an invalid budget configuration") from exc
+        if not math.isfinite(requested_usd) or requested_usd < 0 or requested_minutes < 1:
+            raise ValidationError(f"Run {run_id} has an invalid budget configuration")
+        max_usd = min(requested_usd, self.settings.MAX_RUN_USD)
+        max_minutes = min(requested_minutes, self.settings.MAX_RUN_MINUTES)
         if run.usd_cost >= max_usd:
             logger.warning(f"Run {run_id} exceeded budget (${run.usd_cost:.4f} >= ${max_usd:.4f})")
             await RunRepo.set_status(
@@ -258,7 +269,7 @@ class OrchestrationEngine:
             if started.tzinfo is None:
                 started = started.replace(tzinfo=UTC)
             elapsed_minutes = (datetime.now(UTC) - started).total_seconds() / 60.0
-            if elapsed_minutes > self.settings.MAX_RUN_MINUTES:
+            if elapsed_minutes > max_minutes:
                 await RunRepo.set_status(
                     session,
                     run_id,
@@ -442,6 +453,7 @@ class OrchestrationEngine:
                 run = await release_writer_lock(session, run)
 
                 all_candidates: list[SourceCandidate] = []
+                failed_scout_branches = 0
                 # Ensure primary objective is scouted directly as the first high-priority target
                 scouting_targets = [run.objective] + [
                     sq
@@ -474,16 +486,43 @@ class OrchestrationEngine:
                                 run_id=run_id,
                             )
                             scout_task.status = TaskStatus.SUCCEEDED
-                            scout_task.result_json = {"candidates_count": len(scout_res.candidates)}
+                            scout_task.result_json = {
+                                "candidates_count": len(scout_res.candidates),
+                                "search_failures": scout_res.search_failures,
+                            }
                             scout_task.finished_at = datetime.now(UTC)
                             all_candidates.extend(scout_res.candidates)
+                            if scout_res.search_failures:
+                                failed_scout_branches += 1
+                                degradations.append(
+                                    f"Scout search providers failed for subquestion: {subq}"
+                                )
                         except Exception as e:
                             logger.error(f"Scout task failed for '{subq}': {e}")
                             scout_task.status = TaskStatus.FAILED
-                            scout_task.error_class = TaskErrorClass.LOGICAL
-                            scout_task.error_json = {"error": str(e)}
+                            scout_task.error_class = (
+                                TaskErrorClass.TRANSIENT
+                                if isinstance(e, ProviderError)
+                                else TaskErrorClass.LOGICAL
+                            )
+                            scout_task.error_json = {
+                                "type": type(e).__name__,
+                                "error": str(e),
+                                "details": getattr(e, "details", {}),
+                            }
                             scout_task.finished_at = datetime.now(UTC)
                             degradations.append(f"Scout failed for subquestion: {subq}")
+                            if isinstance(e, ProviderError):
+                                failed_scout_branches += 1
+
+                if failed_scout_branches and not all_candidates:
+                    raise ProviderError(
+                        "Source discovery was incomplete and returned no candidates; refusing to report a no-evidence result.",
+                        details={
+                            "failed_scout_branches": failed_scout_branches,
+                            "scouting_branches": len(scouting_targets),
+                        },
+                    )
 
                 # 3. RETRIEVING STAGE
                 run = await self.transition_state(session, run, RunStatus.RETRIEVING)
@@ -858,14 +897,17 @@ class OrchestrationEngine:
 
         except Exception as e:
             logger.exception(f"Unhandled error during run {run_id} execution: {e}")
+            failure = {"error": str(e), "type": type(e).__name__}
+            if isinstance(e, ProviderError) and e.details:
+                failure["details"] = e.details
             settled = await self._settle_terminal_state(
                 session,
                 run_id,
                 RunStatus.FAILED,
                 RunOutcome.FAILED,
-                {"error": str(e), "type": type(e).__name__},
+                failure,
             )
             if settled is None:
                 return run
-            await emit_event(session, run_id, "run.failed", {"error": str(e)})
+            await emit_event(session, run_id, "run.failed", failure)
             return settled

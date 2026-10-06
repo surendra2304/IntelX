@@ -19,6 +19,7 @@ from intelx.core.enums import (
     TrustTier,
 )
 from intelx.core.policy import policy_engine
+from intelx.core.settings import get_settings
 from intelx.db.models import (
     ApiKey,
     Artifact,
@@ -79,7 +80,7 @@ async def login_submit(
     res = await session.execute(stmt)
     key_obj = res.scalar_one_or_none()
 
-    if not key_obj:
+    if not key_obj or key_obj.revoked:
         return templates.TemplateResponse(
             request=request,
             name="login.html",
@@ -103,7 +104,7 @@ async def login_submit(
         value=token,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=get_settings().is_production(),
     )
     return resp
 
@@ -111,7 +112,9 @@ async def login_submit(
 @web_router.get("/logout")
 async def logout(response: Response):
     resp = RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
-    resp.delete_cookie(COOKIE_NAME)
+    resp.delete_cookie(
+        COOKIE_NAME, secure=get_settings().is_production(), httponly=True, samesite="lax"
+    )
     return resp
 
 

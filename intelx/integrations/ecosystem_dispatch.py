@@ -7,7 +7,6 @@ import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
-
 # Total time the whole dispatch may consume. Each recipient already carries its own
 # retry budget, and awaiting them one after another multiplied that budget by the
 # recipient count: with an unreachable peer, a research request stalled ~90s and
@@ -57,11 +56,13 @@ async def dispatch_sequentially(
 
     try:
         await asyncio.wait_for(run_all(), timeout=budget_seconds)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pending = [name for name, _ in deliveries if name not in outcomes]
         logger.warning(
             "IntelX ecosystem dispatch budget of %ss expired; %d recipient(s) undelivered: %s",
-            budget_seconds, len(pending), ", ".join(pending) or "none",
+            budget_seconds,
+            len(pending),
+            ", ".join(pending) or "none",
         )
         for recipient in pending:
             outcomes[recipient] = {"status": "skipped", "error": "dispatch_budget_exhausted"}

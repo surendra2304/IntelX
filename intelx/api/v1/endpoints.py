@@ -3,6 +3,7 @@
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -16,7 +17,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,14 +64,28 @@ class ScopeModel(BaseModel):
 
 
 class BudgetModel(BaseModel):
-    max_usd: float = 10.0
-    max_minutes: int = 30
+    max_usd: float = Field(default=10.0, ge=0.0, allow_inf_nan=False)
+    max_minutes: int = Field(default=30, ge=1)
 
 
 class CreateJobRequest(BaseModel):
     objective: str = Field(..., min_length=5, description="Primary research objective question")
     scope: ScopeModel = Field(default_factory=ScopeModel)
     budget: BudgetModel = Field(default_factory=BudgetModel)
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_legacy_nested_budget(cls, values: Any) -> Any:
+        """Accept older documented clients that placed budget inside scope."""
+        if not isinstance(values, dict):
+            return values
+        root = dict(values)
+        scope = root.get("scope")
+        if "budget" not in root and isinstance(scope, dict) and "budget" in scope:
+            scope_copy = dict(scope)
+            root["budget"] = scope_copy.pop("budget")
+            root["scope"] = scope_copy
+        return root
 
 
 class JobResponse(BaseModel):
@@ -109,7 +124,18 @@ class RetractClaimRequest(BaseModel):
 class KnowledgeQueryRequest(BaseModel):
     q: str = Field(..., min_length=2)
     kinds: list[str] = Field(default_factory=lambda: ["claim", "source", "entity"])
-    limit: int = 10
+    limit: int = Field(default=10, ge=1, le=100)
+
+
+def _is_admin(api_key: ApiKey) -> bool:
+    role = getattr(api_key.role, "value", api_key.role)
+    return str(role).lower() == "admin"
+
+
+def _ensure_run_access(run: ResearchRun, api_key: ApiKey) -> None:
+    """Hide runs owned by another API key from non-admin callers."""
+    if not _is_admin(api_key) and run.created_by != api_key.name:
+        raise HTTPException(status_code=404, detail="Research job not found")
 
 
 # 1. Job Submission
@@ -134,6 +160,7 @@ async def create_research_job(
         res = await session.execute(stmt)
         existing = res.scalar_one_or_none()
         if existing:
+            _ensure_run_access(existing, api_key)
             created_ts = existing.created_at
             if created_ts.tzinfo is None:
                 created_ts = created_ts.replace(tzinfo=UTC)
@@ -208,6 +235,8 @@ async def list_research_jobs(
     session: AsyncSession = Depends(get_db_session),
 ):
     stmt = select(ResearchRun)
+    if not _is_admin(api_key):
+        stmt = stmt.where(ResearchRun.created_by == api_key.name)
     if status_filter:
         stmt = stmt.where(ResearchRun.status == status_filter)
     if cursor:
@@ -245,6 +274,7 @@ async def get_research_job(
     run = await RunRepo.get_run(session, job_id)
     if not run:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    _ensure_run_access(run, api_key)
     return {
         "id": run.id,
         "objective": run.objective,
@@ -275,6 +305,7 @@ async def cancel_research_job(
     run = await RunRepo.get_run(session, job_id)
     if not run:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    _ensure_run_access(run, api_key)
 
     if run.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
         raise HTTPException(
@@ -301,6 +332,11 @@ async def get_job_events(
     api_key: ApiKey = Depends(get_current_api_key),
     session: AsyncSession = Depends(get_db_session),
 ):
+    run = await RunRepo.get_run(session, job_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    _ensure_run_access(run, api_key)
+
     accept_header = request.headers.get("accept", "")
     if stream or "text/event-stream" in accept_header:
 
@@ -332,6 +368,10 @@ async def list_job_artifacts(
     api_key: ApiKey = Depends(get_current_api_key),
     session: AsyncSession = Depends(get_db_session),
 ):
+    run = await RunRepo.get_run(session, job_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    _ensure_run_access(run, api_key)
     stmt = select(Artifact).where(Artifact.run_id == job_id)
     res = await session.execute(stmt)
     artifacts = list(res.scalars().all())
@@ -363,6 +403,10 @@ async def download_artifact(
     art = res.scalar_one_or_none()
     if not art:
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
+    run = await RunRepo.get_run(session, art.run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
+    _ensure_run_access(run, api_key)
 
     file_path = Path(art.path)
     if not file_path.exists():
@@ -393,6 +437,7 @@ async def create_followup_job(
     parent_run = await RunRepo.get_run(session, job_id)
     if not parent_run:
         raise HTTPException(status_code=404, detail=f"Parent job {job_id} not found")
+    _ensure_run_access(parent_run, api_key)
 
     scope_dict = {
         "depth": "standard",

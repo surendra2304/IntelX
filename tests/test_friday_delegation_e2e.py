@@ -4,6 +4,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from intelx.app.factory import create_app
+from intelx.core.auth import seed_api_keys_from_settings
 from intelx.core.settings import get_settings
 from intelx.db.session import get_sessionmaker
 from intelx.orchestration.worker import OrchestrationWorker
@@ -15,6 +16,8 @@ async def test_friday_delegation_pipeline_e2e(tmp_path):
     settings = get_settings()
     settings.MOCK_MODE = True
     settings.FRIDAY_API_KEY = "friday-e2e-secret-key"
+    async with get_sessionmaker()() as session:
+        await seed_api_keys_from_settings(session, settings)
 
     app = create_app()
     transport = ASGITransport(app=app)

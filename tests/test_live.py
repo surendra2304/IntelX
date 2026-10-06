@@ -2,7 +2,9 @@
 
 import os
 
+import httpx
 import pytest
+import respx
 from pydantic import BaseModel, Field
 
 from intelx.core.errors import ProviderError
@@ -77,9 +79,19 @@ async def test_anthropic_live_completion():
 
 
 @pytest.mark.asyncio
+@respx.mock
 async def test_live_provider_fail_fast_invalid_key():
-    """Verify live provider with invalid API key fails fast without hanging or retrying endlessly."""
-    provider = OpenAICompatibleProvider(api_key="invalid-key-sk-dummy-12345")
+    """Verify invalid provider credentials fail promptly without a real network request."""
+    unauthorized = respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            401,
+            json={"error": {"message": "invalid_api_key", "type": "authentication_error"}},
+        )
+    )
+    provider = OpenAICompatibleProvider(
+        base_url="https://api.openai.com/v1",
+        api_key="invalid-key-sk-dummy-12345",
+    )
     with pytest.raises(ProviderError) as excinfo:
         await provider.complete(
             messages=[{"role": "user", "content": "hello"}],
@@ -91,3 +103,4 @@ async def test_live_provider_fail_fast_invalid_key():
         or "invalid" in str(excinfo.value).lower()
         or "401" in str(excinfo.value)
     )
+    assert unauthorized.called

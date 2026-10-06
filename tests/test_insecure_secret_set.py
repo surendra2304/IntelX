@@ -32,9 +32,13 @@ def _production_settings(**overrides):
         "MOCK_MODE": False,
         "LLM_MODEL": "google/gemini-2.5-flash",
         "LLM_PROVIDER": "ai_universe",
+        "INFERENCE_API_KEY": "production-inference-token-gH6j" * 2,
+        "SECRET_KEY": "production-session-secret-aB3x" * 2,
+        "INTELX_API_KEY": "production-api-key-cD4y" * 2,
+        "API_KEYS": ["production-client-key-eF5z" * 2],
     }
     base.update(overrides)
-    return IntelXSettings(**base)
+    return IntelXSettings(_env_file=None, **base)
 
 
 def test_seeded_dev_secret_is_in_shared_deny_list() -> None:
@@ -83,6 +87,54 @@ def test_auth_and_settings_deny_lists_agree() -> None:
     for secret in INSECURE_PRODUCTION_SECRETS:
         # auth also applies a 16-char floor; every entry here is checked by value.
         assert not validate_production_secret(secret), f"auth accepted deny-listed {secret!r}"
+
+
+def test_production_inference_provider_requires_an_api_key() -> None:
+    """Fail at startup rather than deploying an unauthenticated inference client."""
+    settings = _production_settings(INFERENCE_API_KEY=None)
+    with pytest.raises(RuntimeError, match="inference provider requires INTELX_INFERENCE_API_KEY"):
+        validate_production_security(settings)
+
+
+def test_production_openai_compatible_provider_requires_its_matching_credential() -> None:
+    """An inference key must not satisfy OpenAI-compatible provider startup checks."""
+    missing_key = _production_settings(
+        LLM_PROVIDER="openai_compatible",
+        INFERENCE_API_KEY=None,
+        OPENAI_API_KEY=None,
+        LLM_API_KEY=None,
+    )
+    with pytest.raises(RuntimeError, match="OpenAI-compatible provider requires"):
+        validate_production_security(missing_key)
+
+    configured = _production_settings(
+        LLM_PROVIDER="openai_compatible",
+        INFERENCE_API_KEY=None,
+        OPENAI_API_KEY="production-openai-provider-token-aB3x" * 2,
+        LLM_API_KEY=None,
+    )
+    validate_production_security(configured)
+
+
+def test_production_anthropic_provider_does_not_accept_openai_key() -> None:
+    """Anthropic production readiness must not borrow the OpenAI credential."""
+    wrong_provider_key = _production_settings(
+        LLM_PROVIDER="anthropic",
+        INFERENCE_API_KEY=None,
+        OPENAI_API_KEY="production-openai-provider-token-aB3x" * 2,
+        ANTHROPIC_API_KEY=None,
+        LLM_API_KEY=None,
+    )
+    with pytest.raises(RuntimeError, match="Anthropic requires"):
+        validate_production_security(wrong_provider_key)
+
+    configured = _production_settings(
+        LLM_PROVIDER="anthropic",
+        INFERENCE_API_KEY=None,
+        ANTHROPIC_API_KEY="production-anthropic-provider-token-cD4y" * 2,
+        LLM_API_KEY=None,
+    )
+    validate_production_security(configured)
 
 
 def test_strong_unique_secret_passes_production_validation() -> None:

@@ -45,10 +45,21 @@ for i in range(1, N + 1):
     t0 = time.time()
     p = subprocess.run(
         [
-            sys.executable, "-m", "pytest", *LOCK_GUARD_TESTS,
-            "-q", "--no-header", "-p", "no:cacheprovider", "-m", "not live",
+            sys.executable,
+            "-m",
+            "pytest",
+            *LOCK_GUARD_TESTS,
+            "-q",
+            "--no-header",
+            "-p",
+            "no:cacheprovider",
+            "-m",
+            "not live",
         ],
-        capture_output=True, text=True, cwd=str(REPO), env=CHILD_ENV,
+        capture_output=True,
+        text=True,
+        cwd=str(REPO),
+        env=CHILD_ENV,
     )
     dt = time.time() - t0
     tail = [ln for ln in p.stdout.strip().splitlines() if ln.strip()]
@@ -61,13 +72,15 @@ for i in range(1, N + 1):
         sqls = re.findall(r"SQL: (\w+ [^,]+)", p.stdout)
         excs = re.findall(r"^E\s+(\w+(?:Error|Exception))", p.stdout, re.M)
         failed = re.findall(r"^FAILED (\S+)", p.stdout, re.M)
-        fails.append({
-            "i": i,
-            "failed": failed,
-            "exceptions": sorted(set(excs)),
-            "sql": sorted(set(sqls)),
-            "first_errors": errs[:6],
-        })
+        fails.append(
+            {
+                "i": i,
+                "failed": failed,
+                "exceptions": sorted(set(excs)),
+                "sql": sorted(set(sqls)),
+                "first_errors": errs[:6],
+            }
+        )
 
 print("\n==== SUMMARY ====")
 print(f"{N - len(fails)}/{N} passed   ({len(LOCK_GUARD_TESTS)} lock-guard files per iteration)")

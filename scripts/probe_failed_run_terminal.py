@@ -90,12 +90,16 @@ async def _scenario(sessionmaker, label: str, inject) -> bool:
 
     print(f"\n--- {label} ---")
     if outcome["raised"] is not None:
-        print(f"  execute_run raised : {type(outcome['raised']).__name__}: "
-              f"{str(outcome['raised'])[:110]}")
+        print(
+            f"  execute_run raised : {type(outcome['raised']).__name__}: "
+            f"{str(outcome['raised'])[:110]}"
+        )
     else:
         got = outcome["returned"]
-        print(f"  execute_run returned: status="
-              f"{got.status.value if hasattr(got.status, 'value') else got.status}")
+        print(
+            f"  execute_run returned: status="
+            f"{got.status.value if hasattr(got.status, 'value') else got.status}"
+        )
     print(f"  persisted status    : {state['status'] if state else 'NO ROW'}")
     print(f"  persisted outcome   : {state['outcome'] if state else '-'}")
     print(f"  persisted reason    : {state['error_json'] if state else '-'}")
@@ -105,8 +109,7 @@ async def _scenario(sessionmaker, label: str, inject) -> bool:
         print("  VERDICT             : FAIL - run row missing")
         return False
     if state["status"] != RunStatus.FAILED.value:
-        print(f"  VERDICT             : FAIL - stranded in {state['status']!r}, "
-              f"not terminal")
+        print(f"  VERDICT             : FAIL - stranded in {state['status']!r}, not terminal")
         return False
     if not state["error_json"]:
         print("  VERDICT             : FAIL - FAILED but no reason recorded")
@@ -115,8 +118,10 @@ async def _scenario(sessionmaker, label: str, inject) -> bool:
         print("  VERDICT             : FAIL - FAILED but completed_at not set")
         return False
     if outcome["raised"] is not None:
-        print(f"  VERDICT             : FAIL - persisted, but execute_run still raised "
-              f"{type(outcome['raised']).__name__}")
+        print(
+            f"  VERDICT             : FAIL - persisted, but execute_run still raised "
+            f"{type(outcome['raised']).__name__}"
+        )
         return False
     print("  VERDICT             : PASS - terminal FAILED, reason recorded")
     return True

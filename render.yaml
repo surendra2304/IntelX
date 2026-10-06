@@ -8,21 +8,27 @@ services:
     envVars:
       - key: PORT
         value: "8000"
-      - key: HOST
-        value: "0.0.0.0"
-      - key: ENVIRONMENT
+      - key: INTELX_ENV
         value: "production"
+      - key: INTELX_MOCK_MODE
+        value: "false"
+      - key: INTELX_RUN_EMBEDDED_WORKER
+        value: "true"
       - key: INTELX_DATA_DIR
         value: "/app/data"
       - key: INTELX_DB_URL
-        value: "sqlite+aiosqlite:////app/data/intelx.db"
+        fromDatabase:
+          name: intelx-db
+          property: connectionString
       - key: PYTHONUNBUFFERED
         value: "1"
-      - key: TURSO_DATABASE_URL
-        value: "https://intelx-db-surendra2304.aws-ap-south-1.turso.io"
-      - key: TURSO_AUTH_TOKEN
-        sync: false
+      - key: INTELX_SECRET_KEY
+        generateValue: true
       - key: INTELX_API_KEY
+        generateValue: true
+      - key: INTELX_LLM_PROVIDER
+        value: "inference"
+      - key: INTELX_LLM_MODEL
         sync: false
       # Live Mesh Interconnects
       - key: FRIDAY_URL
@@ -31,7 +37,7 @@ services:
         sync: false
       - key: INFERENCE_URL
         value: "https://inference-h7bn.onrender.com"
-      - key: INFERENCE_API_KEY
+      - key: INTELX_INFERENCE_API_KEY
         sync: false
       - key: STRATEX_URL
         value: "https://stratex-8wj1.onrender.com"
@@ -57,3 +63,10 @@ services:
         value: "https://sentinel-a861.onrender.com"
       - key: SENTINEL_API_KEY
         sync: false
+
+databases:
+  - name: intelx-db
+    databaseName: intelx
+    user: intelx
+    plan: free
+    region: singapore

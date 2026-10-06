@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
+from intelx.agents.critic import CritiqueReport
 from intelx.agents.extractor import (
     ExtractedClaim,
     ExtractedEntity,
@@ -13,10 +14,18 @@ from intelx.agents.extractor import (
     RelativeSpan,
 )
 from intelx.agents.scout import ScoutAgent, ScoutOutput, SourceCandidate
-from intelx.core.enums import ClaimStatus, ClaimType, RunOutcome, RunStatus, SourceKind
-from intelx.core.errors import ValidationError
+from intelx.core.enums import (
+    ClaimStatus,
+    ClaimType,
+    RunOutcome,
+    RunStatus,
+    SourceKind,
+    TaskErrorClass,
+    TaskType,
+)
+from intelx.core.errors import ProviderError, ValidationError
 from intelx.core.settings import Settings
-from intelx.db.models import Event, Finding, ResearchRun
+from intelx.db.models import Event, Finding, ResearchRun, Task
 from intelx.db.repos import ClaimRepo, RunRepo
 from intelx.db.session import get_sessionmaker
 from intelx.memory.normalize import ingest_and_normalize
@@ -161,6 +170,88 @@ async def test_orchestration_logical_failure_degrades_gracefully(db_session_fact
 
 
 @pytest.mark.asyncio
+async def test_orchestration_does_not_report_no_evidence_after_total_search_outage(
+    db_session_factory,
+):
+    """If every discovery branch fails externally, surface a provider failure, not a null result."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(
+            session, objective="Search outage must not look like no evidence"
+        )
+
+        class FailedSearchScout(ScoutAgent):
+            async def execute(self, subquestion, **kwargs):
+                raise ProviderError(
+                    "Live search returned no sources while providers failed.",
+                    details={"failed_providers": [{"provider": "google_news"}]},
+                )
+
+        engine = OrchestrationEngine(scout_agent=FailedSearchScout())
+        final_run = await engine.execute_run(session=session, run_id=run.id)
+
+        assert final_run.status == RunStatus.FAILED
+        assert final_run.outcome == RunOutcome.FAILED
+
+        scout_tasks = list(
+            (
+                await session.execute(
+                    select(Task).where(Task.run_id == run.id, Task.type == TaskType.SCOUT)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert scout_tasks
+        assert all(task.error_class == TaskErrorClass.TRANSIENT for task in scout_tasks)
+
+        failure_event = (
+            await session.execute(
+                select(Event).where(Event.run_id == run.id, Event.type == "run.failed")
+            )
+        ).scalar_one()
+        assert failure_event.payload_json["type"] == "ProviderError"
+        assert failure_event.payload_json["details"]["failed_scout_branches"] == len(scout_tasks)
+
+
+@pytest.mark.asyncio
+async def test_high_severity_critique_triggers_one_bounded_replan(db_session_factory):
+    """A first-pass critical gap should trigger one recovery cycle, then terminate."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(session, objective="Critic-directed evidence repair")
+
+        class EmptyScout(ScoutAgent):
+            async def execute(self, subquestion, **kwargs):
+                return ScoutOutput(candidates=[])
+
+        class RecoveringCritic:
+            calls = 0
+
+            async def execute(self, **kwargs):
+                self.calls += 1
+                severity = "HIGH" if self.calls == 1 else "LOW"
+                return CritiqueReport(
+                    severity=severity,
+                    summary="Replan requested once; recovery pass completed.",
+                    missing_angles=["independent source validation"] if self.calls == 1 else [],
+                )
+
+        critic = RecoveringCritic()
+        engine = OrchestrationEngine(scout_agent=EmptyScout(), critic_agent=critic)
+        final_run = await engine.execute_run(session=session, run_id=run.id)
+
+        assert final_run.status == RunStatus.COMPLETED
+        assert final_run.outcome == RunOutcome.INSUFFICIENT_EVIDENCE
+        assert critic.calls == 2
+        stmt = select(Event).where(
+            Event.run_id == run.id,
+            Event.type == "orchestrator.replan_triggered",
+        )
+        replans = list((await session.execute(stmt)).scalars().all())
+        assert len(replans) == 1
+        assert replans[0].payload_json["replan_iteration"] == 1
+
+
+@pytest.mark.asyncio
 async def test_orchestration_budget_ceiling_gate(db_session_factory):
     """Verify exceeding MAX_RUN_USD halts run immediately with budget.exceeded event."""
     async with db_session_factory() as session:
@@ -239,9 +330,8 @@ async def test_failed_run_reaches_failed_state_when_session_is_poisoned(db_sessi
 
         # And the terminal state must be durable, not just visible in this session.
         persisted = (
-            (await session.execute(select(ResearchRun).where(ResearchRun.id == run_id)))
-            .scalar_one()
-        )
+            await session.execute(select(ResearchRun).where(ResearchRun.id == run_id))
+        ).scalar_one()
         assert persisted.status == RunStatus.FAILED
         assert persisted.completed_at is not None
 

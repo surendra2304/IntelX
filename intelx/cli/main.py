@@ -18,7 +18,7 @@ def run_serve(args: argparse.Namespace) -> None:
 
     setup_logging()
     host = args.host or "0.0.0.0"
-    port = args.port or int(os.getenv("PORT", "8000"))
+    port = args.port if args.port is not None else int(os.getenv("PORT", "8000"))
     print(f"[INTELX] Starting server on http://{host}:{port}")
     uvicorn.run(
         "intelx.app.main:app",
@@ -231,9 +231,29 @@ def run_smoke_live(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
 
-    if not settings.LLM_API_KEY:
+    if settings.LLM_PROVIDER in ("inference", "ai_universe", "aiuniverse"):
+        provider_key_present = bool(settings.INFERENCE_API_KEY)
+        key_instruction = "Set INTELX_INFERENCE_API_KEY."
+    elif settings.LLM_PROVIDER == "anthropic":
+        provider_key_present = bool(settings.get_llm_api_key("anthropic"))
+        key_instruction = "Set INTELX_ANTHROPIC_API_KEY or INTELX_LLM_API_KEY."
+    elif settings.LLM_PROVIDER in {
+        "openai_compatible",
+        "openai",
+        "groq",
+        "vllm",
+        "ollama",
+        "openrouter",
+    }:
+        provider_key_present = bool(settings.get_llm_api_key("openai_compatible"))
+        key_instruction = "Set INTELX_OPENAI_API_KEY or INTELX_LLM_API_KEY."
+    else:
+        print(f"[ERROR] Unsupported live provider configuration: {settings.LLM_PROVIDER}.")
+        sys.exit(1)
+
+    if not provider_key_present:
         print(
-            "[ERROR] Missing LLM API key. Set INTELX_LLM_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY."
+            f"[ERROR] Missing credentials for {settings.LLM_PROVIDER} provider. {key_instruction}"
         )
         sys.exit(1)
 
@@ -415,7 +435,7 @@ def build_parser() -> argparse.ArgumentParser:
     # serve
     serve_parser = subparsers.add_parser("serve", help="Start the FastAPI application server")
     serve_parser.add_argument("--host", default="0.0.0.0", help="Host address")
-    serve_parser.add_argument("--port", type=int, default=8000, help="Port number")
+    serve_parser.add_argument("--port", type=int, default=None, help="Port number")
     serve_parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
 
     # worker

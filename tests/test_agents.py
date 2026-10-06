@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
+from intelx.agents.contradictions import ContradictionEngine
 from intelx.agents.extractor import (
     ExtractedClaim,
     ExtractionResult,
@@ -14,7 +15,9 @@ from intelx.agents.extractor import (
 from intelx.agents.planner import Plan, PlannerAgent
 from intelx.agents.retriever import RetrieverAgent
 from intelx.agents.scout import ScoutAgent, SourceCandidate
+from intelx.connectors.search import SearchResult
 from intelx.core.enums import ClaimType, SourceKind, TaskErrorClass
+from intelx.core.errors import ProviderError
 from intelx.core.settings import Settings
 from intelx.db.models import Chunk, Claim, Event
 from intelx.db.repos import RunRepo, SourceRepo
@@ -28,6 +31,53 @@ from intelx.models.types import Usage
 def db_session_factory():
     """Get active async sessionmaker."""
     return get_sessionmaker()
+
+
+def test_contradiction_engine_matches_subject_and_metric_before_disputing_values():
+    """Only materially different measurements of the same subject and metric conflict."""
+    claims = [
+        {
+            "id": "silicon-high",
+            "subject": "Entity",
+            "text": "Silicon-graphite composite anodes reached 420 Wh/kg energy density.",
+        },
+        {
+            "id": "silicon-low",
+            "subject": "Entity",
+            "text": "Under full-aging constraints, achievable cell energy density was capped at 310 Wh/kg.",
+        },
+        {
+            "id": "sodium",
+            "subject": "Entity",
+            "text": "Sodium-ion cathodes achieved 160 Wh/kg energy density.",
+        },
+    ]
+
+    conflicts = ContradictionEngine().analyze(
+        claims,
+        context_by_claim={
+            "silicon-low": "Physical Limitations of Silicon Anodes under Dynamic Cycling"
+        },
+    )
+
+    assert len(conflicts) == 1
+    assert {conflicts[0].claim_a_id, conflicts[0].claim_b_id} == {"silicon-high", "silicon-low"}
+    assert conflicts[0].conflict_type == "measurement"
+    assert "420 Wh/kg vs 310 Wh/kg" in conflicts[0].reason
+
+    different_chemistries = [
+        {
+            "id": "prussian-blue",
+            "subject": "Entity",
+            "text": "Prussian blue analogs reach 90 Wh/kg energy density.",
+        },
+        {
+            "id": "layered-oxide",
+            "subject": "Entity",
+            "text": "The optimized layered oxide formulation reaches 160 Wh/kg energy density.",
+        },
+    ]
+    assert ContradictionEngine().analyze(different_chemistries) == []
 
 
 @pytest.mark.asyncio
@@ -66,6 +116,54 @@ async def test_scout_agent_dedup_and_policy_filtering():
     for c in output.candidates:
         assert c.location not in already_seen
         assert "blocked-domain.com" not in c.location
+
+
+@pytest.mark.asyncio
+async def test_scout_raises_instead_of_returning_no_candidates_on_search_outage():
+    class FailedSearch:
+        calls = 0
+
+        async def fetch(self, target, **kwargs):
+            self.calls += 1
+            raise ProviderError(
+                "Live search returned no sources while providers failed.",
+                details={"failed_providers": [{"provider": "google_news"}]},
+            )
+
+    search = FailedSearch()
+    agent = ScoutAgent(search_connector=search)
+
+    with pytest.raises(ProviderError, match="search failed before any candidates"):
+        await agent.execute(subquestion="Investigate an unindexed research topic")
+
+    assert search.calls > 0
+
+
+@pytest.mark.asyncio
+async def test_scout_preserves_healthy_results_and_records_partial_search_failures():
+    class PartiallyFailedSearch:
+        calls = 0
+
+        async def fetch(self, target, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise ProviderError(
+                    "One source failed.",
+                    details={"failed_providers": [{"provider": "wikipedia"}]},
+                )
+            return [
+                SearchResult(
+                    url="https://example.com/independent-report",
+                    title="Independent report",
+                    snippet="A candidate from an available source provider.",
+                )
+            ]
+
+    agent = ScoutAgent(search_connector=PartiallyFailedSearch())
+    result = await agent.execute(subquestion="Investigate independent battery research")
+
+    assert len(result.candidates) == 1
+    assert result.search_failures[0]["details"]["failed_providers"][0]["provider"] == "wikipedia"
 
 
 @pytest.mark.asyncio

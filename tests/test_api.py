@@ -1,18 +1,52 @@
 """Tests for INTELX REST API Surface, Auth, Rate Limiting, Policies, and Lifecycle."""
 
+import asyncio
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
+from sqlalchemy import select
 
+from intelx.api.v1.endpoints import CreateJobRequest
 from intelx.app.factory import create_app
 from intelx.core.auth import hash_api_key, rate_limiter
-from intelx.core.enums import ApiKeyRole, ClaimStatus, RunStatus
-from intelx.db.models import ApiKey
+from intelx.core.enums import ApiKeyRole, ArtifactFormat, ArtifactType, ClaimStatus, RunStatus
+from intelx.db.models import ApiKey, Artifact
 from intelx.db.repos import ClaimRepo, RunRepo
 from intelx.db.session import get_sessionmaker
 from intelx.orchestration.worker import OrchestrationWorker
+
+
+def test_create_job_accepts_legacy_budget_location_and_validates_limits():
+    request = CreateJobRequest.model_validate(
+        {
+            "objective": "Analyze a documented technical question",
+            "scope": {
+                "depth": "quick",
+                "budget": {"max_usd": 1.25, "max_minutes": 7},
+            },
+        }
+    )
+    assert request.budget.max_usd == 1.25
+    assert request.budget.max_minutes == 7
+    assert "budget" not in request.scope.model_dump()
+
+    with pytest.raises(ValidationError):
+        CreateJobRequest.model_validate(
+            {
+                "objective": "Analyze a documented technical question",
+                "budget": {"max_usd": -0.01},
+            }
+        )
+    with pytest.raises(ValidationError):
+        CreateJobRequest.model_validate(
+            {
+                "objective": "Analyze a documented technical question",
+                "budget": {"max_minutes": 0},
+            }
+        )
 
 
 @pytest_asyncio.fixture
@@ -207,13 +241,83 @@ async def test_full_api_lifecycle_and_artifact_download(app_client):
 
 
 @pytest.mark.asyncio
+async def test_job_resources_are_hidden_from_other_member_keys(app_client):
+    """Runs, event streams, artifacts, and follow-ups must remain owner-scoped."""
+    other_key = "intelx_second_member_secret_test_key"
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        session.add(
+            ApiKey(
+                key_hash=hash_api_key(other_key),
+                name="test-member-2",
+                role=ApiKeyRole.MEMBER,
+            )
+        )
+        await session.commit()
+
+    create_response = await app_client.post(
+        "/api/v1/research/jobs",
+        json={"objective": "Trace ownership for this private research run"},
+        headers=app_client.member_headers,
+    )
+    assert create_response.status_code == 202
+    job_id = create_response.json()["id"]
+
+    async with sessionmaker() as session:
+        session.add(
+            Artifact(
+                run_id=job_id,
+                type=ArtifactType.REPORT,
+                format=ArtifactFormat.MD,
+                path="/missing/private-report.md",
+                sha256="0" * 64,
+            )
+        )
+        await session.commit()
+        artifact_id = (
+            await session.execute(select(Artifact.id).where(Artifact.run_id == job_id))
+        ).scalar_one()
+
+    other_headers = {"Authorization": f"Bearer {other_key}"}
+    private_requests = [
+        app_client.get(f"/api/v1/research/jobs/{job_id}", headers=other_headers),
+        app_client.get(f"/api/v1/research/jobs/{job_id}/events", headers=other_headers),
+        app_client.get(f"/api/v1/research/jobs/{job_id}/events?stream=true", headers=other_headers),
+        app_client.get(f"/api/v1/research/jobs/{job_id}/artifacts", headers=other_headers),
+        app_client.get(f"/api/v1/artifacts/{artifact_id}", headers=other_headers),
+        app_client.post(
+            f"/api/v1/research/jobs/{job_id}/followups",
+            json={"focus": "challenge the original evidence"},
+            headers=other_headers,
+        ),
+    ]
+    responses = await asyncio.gather(*private_requests)
+    assert [response.status_code for response in responses] == [404] * len(private_requests)
+
+    owner_response = await app_client.get(
+        f"/api/v1/research/jobs/{job_id}", headers=app_client.member_headers
+    )
+    assert owner_response.status_code == 200
+    admin_response = await app_client.get(
+        f"/api/v1/research/jobs/{job_id}", headers=app_client.admin_headers
+    )
+    assert admin_response.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_job_cancellation_lifecycle(app_client):
     """Verify cancel on active job returns 200 and cancel on completed job returns 409."""
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session:
-        run_active = await RunRepo.create_run(session, objective="Active job cancellation test")
+        run_active = await RunRepo.create_run(
+            session,
+            objective="Active job cancellation test",
+            created_by="test-member",
+        )
         run_completed = await RunRepo.create_run(
-            session, objective="Completed job cancellation test"
+            session,
+            objective="Completed job cancellation test",
+            created_by="test-member",
         )
         run_completed.status = RunStatus.COMPLETED
         await session.commit()

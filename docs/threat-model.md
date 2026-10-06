@@ -51,12 +51,12 @@ flowchart TD
 ```
 
 ### Control 1: SSRF & Redirect Defense
-- **Implementation**: [`intelx/connectors/web.py`](file:///d:/IntelX/intelx/connectors/web.py)
+- **Implementation**: `intelx/connectors/web.py` and `intelx/connectors/fetch_guard.py`
 - **Mechanisms**:
-  - DNS resolution pre-flight checking before HTTP connection.
-  - Strict blocking of private (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), loopback (`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`), and AWS/Cloud metadata IP endpoints.
-  - Per-redirect hop resolution re-evaluation (max 5 hops).
-  - Body length caps (`MAX_RESPONSE_BYTES`) and disallowed MIME type early rejection.
+  - Resolve every target and reject DNS errors, empty answers, and any private or non-global address.
+  - Pin the HTTP connection (or configured proxy CONNECT target) to a validated numeric IP while preserving the original `Host` header and TLS SNI, closing the DNS-rebinding gap.
+  - Revalidate and pin each redirect hop; robots.txt requests use the same guarded transport.
+  - Reject URL credentials and non-HTTP(S) schemes, enforce a 10-hop redirect limit, cap bodies at `MAX_PAGE_BYTES`, and reject unsupported MIME types.
 
 ### Control 2: Non-Mutating Injection Scanning & Quarantine
 - **Implementation**: [`intelx/connectors/sanitize.py`](file:///d:/IntelX/intelx/connectors/sanitize.py)
@@ -106,10 +106,9 @@ flowchart TD
 
 ## 5. Residual Risks & Future Mitigations
 
-1. **DNS Rebinding Attacks (MVP Residual Risk)**:
-   - *Current State*: DNS resolution is checked pre-flight before issuing requests, and redirect locations are resolved.
-   - *Residual Risk*: In a fast-flux DNS rebinding scenario, a malicious DNS server could return a public IP during pre-flight and switch to an internal IP (127.0.0.1) on socket connection.
-   - *Future Mitigation*: Enforce socket-level IP binding via a custom `httpx.AsyncHTTPTransport` network connection hook in v1.1.
+1. **DNS Rebinding / Configured Proxy Trust**:
+   - *Mitigation*: Every HTTP request is pinned to a validated public numeric IP, including robots.txt and each redirect hop, while the original hostname remains in `Host` and TLS SNI.
+   - *Residual Risk*: An operator-configured outbound proxy is part of the trusted computing base; the connector cannot verify whether a malicious proxy honors the numeric CONNECT target.
 
 2. **Model Hallucination on Zero-Evidence Runs**:
    - *Mitigation*: Validated by the `SynthesizerAgent` groundedness filter which forces run outcomes to `INSUFFICIENT_EVIDENCE` whenever primary claims are absent.

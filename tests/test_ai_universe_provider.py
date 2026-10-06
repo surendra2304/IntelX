@@ -73,6 +73,43 @@ async def test_ai_universe_provider_successful_completion():
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_gateway_uses_injected_inference_endpoint_and_key():
+    """A gateway configured with a private inference URL must send requests there."""
+    endpoint = "https://inference.example.test/v1/intelx/research"
+    route = respx.post(endpoint).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "response": json.dumps(
+                    {"summary": "Evidence-backed adapter check.", "confidence": 0.93}
+                ),
+                "confidence": 0.93,
+            },
+        )
+    )
+    settings = Settings(
+        MOCK_MODE=False,
+        LLM_PROVIDER="inference",
+        LLM_MODEL="inference-test-model",
+        INFERENCE_URL="https://inference.example.test",
+        INFERENCE_API_KEY="local-inference-test-key",
+    )
+    gateway = ModelGateway(settings=settings)
+
+    result = await gateway.complete(
+        messages=[{"role": "user", "content": "Check injected inference configuration."}],
+        role="analyst",
+        schema_model=DummySchema,
+    )
+
+    assert route.called
+    assert route.calls.last.request.headers["Authorization"] == "Bearer local-inference-test-key"
+    assert result.provider == "inference"
+    assert result.parsed.summary == "Evidence-backed adapter check."
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_ai_universe_provider_endpoint_fallback():
     """Verify provider falls back to /intelx/research if /v1/intelx/research returns 404."""
     v1_url = "https://friday-zw59.onrender.com/v1/intelx/research"
@@ -108,8 +145,9 @@ async def test_gateway_fallback_chain_from_ai_universe_to_mock():
     custom_settings = Settings(
         MOCK_MODE=False,
         LLM_PROVIDER="ai_universe",
-        AI_UNIVERSE_BASE_URL="https://friday-zw59.onrender.com",
+        INFERENCE_URL="https://friday-zw59.onrender.com",
         LLM_API_KEY=None,
+        ALLOW_MOCK_FALLBACK=True,
     )
     gateway = ModelGateway(settings=custom_settings)
 
@@ -121,6 +159,29 @@ async def test_gateway_fallback_chain_from_ai_universe_to_mock():
     assert result is not None
     assert result.provider == "mock"
     assert len(result.text) > 0
+
+
+@pytest.mark.asyncio
+async def test_production_gateway_fails_closed_when_primary_provider_is_down(monkeypatch):
+    """Production calls must never turn a provider outage into a successful mock answer."""
+    settings = Settings(
+        ENV="production",
+        MOCK_MODE=False,
+        LLM_PROVIDER="inference",
+        LLM_MODEL="production-model",
+    )
+    gateway = ModelGateway(settings=settings)
+
+    class FailingProvider:
+        async def complete(self, **_kwargs):
+            raise ProviderError("simulated provider outage")
+
+    monkeypatch.setattr(gateway, "_get_provider", lambda: ("inference", FailingProvider()))
+
+    with pytest.raises(ProviderError, match="mock fallback is disabled"):
+        await gateway.complete(
+            messages=[{"role": "user", "content": "Verify evidence"}], role="verifier"
+        )
 
 
 def test_confidence_formula_with_ai_universe_multiplier():

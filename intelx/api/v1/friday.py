@@ -423,14 +423,14 @@ async def delegate_research_from_friday(
             missing_dims.append("document_budget")
         if missing_dims:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=422,
                 detail=f"Missing mandatory FRIDAY research contract dimensions: {', '.join(missing_dims)}",
             )
 
     raw_query = payload.query_scope.query if payload.query_scope else payload.question
     if not raw_query or len(raw_query.strip()) < 5:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail="Missing mandatory research contract parameter: query_scope (minimum 5 characters required)",
         )
 
@@ -441,7 +441,7 @@ async def delegate_research_from_friday(
     )
     if time_minutes < 1 or time_minutes > 60:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail="Invalid mandatory research contract parameter: time_budget (must be between 1 and 60 minutes)",
         )
 
@@ -452,7 +452,7 @@ async def delegate_research_from_friday(
     )
     if doc_count < 1 or doc_count > 50:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail="Invalid mandatory research contract parameter: document_budget (must be between 1 and 50 documents)",
         )
 
@@ -512,7 +512,8 @@ async def delegate_research_from_friday(
                 await asyncio.sleep(0.2 * (2**attempt))
                 logger.warning(
                     "Research run write contended on the database lock; retry %d/%d",
-                    attempt + 1, _RUN_WRITE_ATTEMPTS,
+                    attempt + 1,
+                    _RUN_WRITE_ATTEMPTS,
                 )
 
     logger.info(
@@ -569,7 +570,7 @@ async def delegate_from_friday_envelope(
     )
     if not question or len(str(question).strip()) < 5:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail="Missing mandatory research contract parameter: query_scope (minimum 5 characters required)",
         )
 
@@ -734,8 +735,14 @@ async def get_friday_research_status(
 
     duration = None
     if run.started_at:
+        started_at = run.started_at
         end_t = run.completed_at or datetime.now(UTC)
-        duration = round((end_t - run.started_at).total_seconds(), 2)
+        # SQLite stores timezone-aware SQLAlchemy datetimes without tzinfo.
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=UTC)
+        if end_t.tzinfo is None:
+            end_t = end_t.replace(tzinfo=UTC)
+        duration = round((end_t - started_at).total_seconds(), 2)
 
     friday_req_id = (
         run.scope_json.get("friday_request_id") if isinstance(run.scope_json, dict) else None

@@ -1,10 +1,11 @@
 """INTELX Application Settings and Configuration Management."""
 
+import json
 from functools import lru_cache
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AliasChoices, Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # Credentials published in source, docs, .env.example, or seed scripts. They must
 # never authenticate a production deployment: anyone who can read the repository
@@ -39,10 +40,12 @@ class Settings(BaseSettings):
     # Core Environment & Database
     ENV: str = Field(
         default="development",
+        validation_alias=AliasChoices("INTELX_ENV", "ENVIRONMENT", "ENV"),
         description="Runtime environment: development | staging | production",
     )
     DB_URL: str = Field(
         default="sqlite+aiosqlite:///./data/intelx.db",
+        validation_alias=AliasChoices("INTELX_DB_URL", "DATABASE_URL", "DB_URL"),
         description="Async SQLAlchemy database URL (SQLite or PostgreSQL)",
     )
     TURSO_DATABASE_URL: str | None = Field(
@@ -66,18 +69,28 @@ class Settings(BaseSettings):
 
     # Mock & Provider Controls
     MOCK_MODE: bool = Field(
-        default=False,
+        default=True,
         validation_alias=AliasChoices("INTELX_MOCK_MODE", "MOCK_MODE"),
         description="When true, all LLM & search calls use local synthetic mock data",
     )
-    LLM_PROVIDER: Literal["mock", "openai_compatible", "anthropic", "inference", "ai_universe"] = (
-        Field(
-            default="inference",
-            validation_alias=AliasChoices(
-                "INTELX_LLM_PROVIDER", "LLM_PROVIDER", "INTELX_MODEL_PROVIDER", "MODEL_PROVIDER"
-            ),
-            description="Active LLM provider backend",
-        )
+    LLM_PROVIDER: Literal[
+        "mock",
+        "openai_compatible",
+        "openai",
+        "groq",
+        "vllm",
+        "ollama",
+        "openrouter",
+        "anthropic",
+        "inference",
+        "ai_universe",
+        "aiuniverse",
+    ] = Field(
+        default="inference",
+        validation_alias=AliasChoices(
+            "INTELX_LLM_PROVIDER", "LLM_PROVIDER", "INTELX_MODEL_PROVIDER", "MODEL_PROVIDER"
+        ),
+        description="Active LLM provider backend",
     )
     LLM_BASE_URL: str | None = Field(
         default=None,
@@ -86,15 +99,28 @@ class Settings(BaseSettings):
     )
     LLM_API_KEY: str | None = Field(
         default=None,
-        validation_alias=AliasChoices(
-            "INTELX_LLM_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "LLM_API_KEY"
-        ),
-        description="API key for LLM provider",
+        validation_alias=AliasChoices("INTELX_LLM_API_KEY", "LLM_API_KEY"),
+        description="Generic API key for an LLM provider when no provider-specific key is set",
+    )
+    OPENAI_API_KEY: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_OPENAI_API_KEY", "OPENAI_API_KEY"),
+        description="OpenAI or OpenAI-compatible provider credential",
+    )
+    ANTHROPIC_API_KEY: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
+        description="Anthropic provider credential",
     )
     LLM_MODEL: str = Field(
         default="mock-gpt-4o",
         validation_alias=AliasChoices("INTELX_LLM_MODEL", "LLM_MODEL"),
         description="Default LLM model name",
+    )
+    ALLOW_MOCK_FALLBACK: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("INTELX_ALLOW_MOCK_FALLBACK", "ALLOW_MOCK_FALLBACK"),
+        description="Allow non-production provider failures to fall back to synthetic mock answers",
     )
 
     # Inference Multi-Agent Gateway Provider
@@ -127,6 +153,22 @@ class Settings(BaseSettings):
     @property
     def AI_UNIVERSE_API_KEY(self) -> str | None:
         return self.INFERENCE_API_KEY
+
+    def get_llm_api_key(self, provider: str | None = None) -> str | None:
+        """Resolve the credential for one provider without mixing unrelated provider keys."""
+        normalized = (provider or self.LLM_PROVIDER or "").lower().strip()
+        if normalized == "anthropic":
+            return self.ANTHROPIC_API_KEY or self.LLM_API_KEY
+        if normalized in {
+            "openai",
+            "openai_compatible",
+            "groq",
+            "vllm",
+            "ollama",
+            "openrouter",
+        }:
+            return self.OPENAI_API_KEY or self.LLM_API_KEY
+        return self.LLM_API_KEY
 
     # Memora Cloud Memory Integration
     MEMORA_URL: str = Field(
@@ -240,11 +282,11 @@ class Settings(BaseSettings):
         default="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (compatible; IntelXResearch/2.0; +https://github.com/surendra2304/IntelX)",
         description="HTTP User-Agent identifier sent with crawler requests",
     )
-    DOMAIN_ALLOWLIST: list[str] = Field(
+    DOMAIN_ALLOWLIST: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
         description="Permitted domain patterns (empty allows all non-denied domains)",
     )
-    DOMAIN_DENYLIST: list[str] = Field(
+    DOMAIN_DENYLIST: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
         description="Forbidden domain patterns",
     )
@@ -268,14 +310,30 @@ class Settings(BaseSettings):
         default=False,
         description="Seed fake demonstration runs on startup (disabled by default to ensure only genuine research)",
     )
+    RUN_EMBEDDED_WORKER: bool | None = Field(
+        default=None,
+        description="Run the worker inside the API process; defaults on outside production only",
+    )
+    ENABLE_NEWS_INGESTER: bool = Field(
+        default=False,
+        description="Enable outbound RSS ingestion loop in this process",
+    )
+    ENABLE_AUTONOMOUS_RESEARCH: bool = Field(
+        default=False,
+        description="Enable autonomous research generation loop in this process",
+    )
 
     # Auth & Storage
+    SESSION_TTL_SECONDS: int = Field(
+        default=28_800,
+        description="Maximum lifetime of a signed web session in seconds",
+    )
     INTELX_API_KEY: str = Field(
         default="",
         validation_alias=AliasChoices("INTELX_API_KEY", "API_KEY"),
         description="Master API authentication key for IntelX service",
     )
-    API_KEYS: list[str] = Field(
+    API_KEYS: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
         description="Comma-separated API keys allowed for client access",
     )
@@ -309,12 +367,6 @@ class Settings(BaseSettings):
         default=90,
         description="Retention window for raw scraped data in days",
     )
-    # Redis for distributed rate limiting and caching
-    REDIS_URL: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("INTELX_REDIS_URL", "REDIS_URL"),
-        description="Redis connection URL for distributed rate limiting",
-    )
 
     def is_production(self) -> bool:
         """Check if running in production mode."""
@@ -338,6 +390,10 @@ class Settings(BaseSettings):
                 "CRITICAL SECURITY VIOLATION: Mock LLM models cannot be used in production. "
                 "Configure a valid production LLM provider and model."
             )
+        if self.ALLOW_MOCK_FALLBACK:
+            raise RuntimeError(
+                "CRITICAL SECURITY VIOLATION: Synthetic mock fallback is never allowed in production."
+            )
         if any(
             k in {"dev-admin-key", "dev-member-key", "intelx_dev_secret_key_admin"}
             for k in (self.API_KEYS or [])
@@ -346,25 +402,73 @@ class Settings(BaseSettings):
                 "CRITICAL SECURITY VIOLATION: Insecure development API keys configured in production."
             )
         secret_values = [self.SECRET_KEY or "", self.INTELX_API_KEY or "", *(self.API_KEYS or [])]
-        if any(
+        if len(set(secret_values)) != len(secret_values) or any(
             len(value) < 32
             or value.strip().lower() in INSECURE_PRODUCTION_SECRETS
             or len(set(value)) < 2
             for value in secret_values
         ):
             raise RuntimeError(
-                "CRITICAL SECURITY VIOLATION: Production signing/API secrets must be unique values of at least 32 characters. "
-                "Configure INTELX_SECRET_KEY, INTELX_API_KEY, and API_KEYS in the deployment environment."
+                "CRITICAL SECURITY VIOLATION: Production signing/API secrets must be unique, distinct values of at least 32 characters. "
+                "Configure INTELX_SECRET_KEY and INTELX_API_KEY, plus any API_KEYS, in the deployment environment."
             )
+        if self.LLM_PROVIDER == "anthropic" and not self.get_llm_api_key("anthropic"):
+            raise RuntimeError(
+                "CRITICAL SECURITY VIOLATION: Anthropic requires INTELX_ANTHROPIC_API_KEY "
+                "or INTELX_LLM_API_KEY in production."
+            )
+        if self.LLM_PROVIDER in {
+            "openai_compatible",
+            "openai",
+            "groq",
+            "vllm",
+            "ollama",
+            "openrouter",
+        } and not self.get_llm_api_key("openai_compatible"):
+            raise RuntimeError(
+                "CRITICAL SECURITY VIOLATION: an OpenAI-compatible provider requires "
+                "INTELX_OPENAI_API_KEY or INTELX_LLM_API_KEY in production."
+            )
+        if (
+            self.LLM_PROVIDER in ("inference", "ai_universe", "aiuniverse")
+            and not self.INFERENCE_API_KEY
+        ):
+            raise RuntimeError(
+                "CRITICAL SECURITY VIOLATION: the inference provider requires "
+                "INTELX_INFERENCE_API_KEY in production."
+            )
+
+    @field_validator("DB_URL", mode="before")
+    @classmethod
+    def normalize_async_database_url(cls, value: Any) -> str:
+        """Normalize provider PostgreSQL URLs to SQLAlchemy's asyncpg driver."""
+        if not isinstance(value, str):
+            raise ValueError("DB_URL must be a string")
+        normalized = value.strip()
+        if normalized.startswith("postgres://"):
+            return "postgresql+asyncpg://" + normalized[len("postgres://") :]
+        if normalized.startswith("postgresql://"):
+            return "postgresql+asyncpg://" + normalized[len("postgresql://") :]
+        return normalized
 
     @field_validator("DOMAIN_ALLOWLIST", "DOMAIN_DENYLIST", "API_KEYS", mode="before")
     @classmethod
     def parse_comma_separated_list(cls, value: Any) -> list[str]:
-        """Convert comma-delimited strings to cleanly stripped string lists."""
+        """Parse comma-separated strings or JSON arrays without env-source pre-decoding."""
         if isinstance(value, str):
-            if not value.strip():
+            cleaned = value.strip()
+            if not cleaned:
                 return []
-            return [item.strip() for item in value.split(",") if item.strip()]
+            if cleaned.startswith(("[", "{")):
+                try:
+                    decoded = json.loads(cleaned)
+                except json.JSONDecodeError as exc:
+                    raise ValueError("expected a comma-separated string or JSON array") from exc
+                if not isinstance(decoded, list):
+                    raise ValueError("expected a comma-separated string or JSON array")
+                value = decoded
+            else:
+                value = cleaned.split(",")
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
         return []
@@ -387,12 +491,13 @@ class Settings(BaseSettings):
         data = self.model_dump()
         sensitive_keys = {
             "SECRET_KEY",
-            "LLM_API_KEY",
-            "TAVILY_API_KEY",
             "API_KEYS",
-            "FRIDAY_API_KEY",
-            "AI_UNIVERSE_API_KEY",
+            "DB_URL",
+            "REDIS_URL",
+            "TURSO_AUTH_TOKEN",
         }
+        sensitive_keys.update(key for key in data if key.endswith("_API_KEY"))
+        sensitive_keys.add("AI_UNIVERSE_API_KEY")
         for k in sensitive_keys:
             if k in data and data[k]:
                 data[k] = "[REDACTED]"

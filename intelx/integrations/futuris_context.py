@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.core.credibility import SourceCredibilityScorer
-from intelx.core.enums import ClaimStatus, ResearchMode, TrustTier
+from intelx.core.enums import ClaimStatus, ResearchMode, RunOutcome, RunStatus, TrustTier
 from intelx.core.settings import get_settings
 from intelx.db.models import Claim, Finding, ResearchRun, Source
 
@@ -152,7 +152,7 @@ class FuturisContextProvider:
     def compute_relevance(cls, target_tokens: set[str], candidate_text: str) -> float:
         """Calculate token overlap relevance score between target and candidate text."""
         if not target_tokens:
-            return 0.5
+            return 0.0
         cand_tokens = cls._tokenize(candidate_text)
         if not cand_tokens:
             return 0.1
@@ -192,6 +192,8 @@ class FuturisContextProvider:
         }
 
         for cl in claims:
+            if cl.status != ClaimStatus.ACTIVE or cl.confidence < 0.70:
+                continue
             txt_lower = cl.text.lower()
             direction = "neutral"
             if any(k in txt_lower for k in positive_keywords):
@@ -238,64 +240,73 @@ class FuturisContextProvider:
         # 1. Fetch relevant research runs
         stmt_runs = (
             select(ResearchRun)
-            .where(ResearchRun.created_at >= cutoff)
+            .where(
+                ResearchRun.created_at >= cutoff,
+                ResearchRun.status == RunStatus.COMPLETED,
+                ResearchRun.outcome == RunOutcome.ANSWERED,
+            )
             .order_by(ResearchRun.created_at.desc())
         )
         recent_runs = list((await session.execute(stmt_runs)).scalars().all())
-
-        # If lookback yields no recent runs, widen to all available completed runs
-        if not recent_runs:
-            stmt_all = select(ResearchRun).order_by(ResearchRun.created_at.desc()).limit(10)
-            recent_runs = list((await session.execute(stmt_all)).scalars().all())
-
         run_ids = [r.id for r in recent_runs]
 
-        # 2. Fetch associated claims and sources
-        claims_stmt = (
-            select(Claim).where(Claim.run_id.in_(run_ids)).order_by(Claim.confidence.desc())
-        )
-        all_claims = list((await session.execute(claims_stmt)).scalars().all()) if run_ids else []
+        # 2. Fetch only claims and sources attached to eligible completed runs.
+        if run_ids:
+            claims_stmt = (
+                select(Claim).where(Claim.run_id.in_(run_ids)).order_by(Claim.confidence.desc())
+            )
+            all_claims = list((await session.execute(claims_stmt)).scalars().all())
+            sources_stmt = select(Source).where(Source.created_by_run_id.in_(run_ids))
+            all_sources = list((await session.execute(sources_stmt)).scalars().all())
+            findings_stmt = select(Finding).where(Finding.run_id.in_(run_ids))
+            db_findings = list((await session.execute(findings_stmt)).scalars().all())
+        else:
+            all_claims = []
+            all_sources = []
+            db_findings = []
 
-        sources_stmt = (
-            select(Source).where(Source.created_by_run_id.in_(run_ids))
-            if run_ids
-            else select(Source).limit(20)
-        )
-        sources = {s.id: s for s in (await session.execute(sources_stmt)).scalars().all()}
-
-        # 3. Fetch explicit Findings
-        findings_stmt = (
-            select(Finding).where(Finding.run_id.in_(run_ids))
-            if run_ids
-            else select(Finding).limit(10)
-        )
-        db_findings = list((await session.execute(findings_stmt)).scalars().all())
+        relevant_claims = [
+            claim for claim in all_claims if cls.compute_relevance(target_tokens, claim.text) > 0.2
+        ]
+        relevant_findings = [
+            (finding, cls.compute_relevance(target_tokens, finding.conclusion))
+            for finding in db_findings
+            if cls.compute_relevance(target_tokens, finding.conclusion) > 0.2
+        ]
+        cited_claim_ids = {
+            claim_id
+            for finding, _relevance in relevant_findings
+            for claim_id in (finding.claim_ids_json or [])
+        }
+        relevant_claim_ids = cited_claim_ids | {claim.id for claim in relevant_claims}
+        relevant_source_ids = {
+            claim.source_id for claim in all_claims if claim.id in relevant_claim_ids
+        }
+        sources = {source.id: source for source in all_sources if source.id in relevant_source_ids}
 
         research_findings: list[FuturisFinding] = []
         credibility_scores: list[float] = []
         top_sources_list: list[dict[str, Any]] = []
 
-        # Process DB Findings
-        for f in db_findings:
-            rel = cls.compute_relevance(target_tokens, f.conclusion)
+        # Process only findings relevant to this target; verified status also requires citations.
+        for f, rel in relevant_findings:
             citations: list[FuturisCitation] = []
             for c_id in f.claim_ids_json or []:
                 matching_claim = next((c for c in all_claims if c.id == c_id), None)
                 if matching_claim:
                     src = sources.get(matching_claim.source_id)
-                    citations.append(
-                        FuturisCitation(
-                            source_title=src.title
-                            if src and src.title
-                            else "Empirical Source Document",
-                            source_url=src.location if src else "internal://source",
-                            verbatim_span=matching_claim.quote,
+                    if src and src.location and matching_claim.quote:
+                        citations.append(
+                            FuturisCitation(
+                                source_title=src.title or "Research Source Document",
+                                source_url=src.location,
+                                verbatim_span=matching_claim.quote,
+                            )
                         )
-                    )
             st = (
                 "disputed"
                 if f.contradictions_json
-                else ("verified" if f.confidence >= 0.70 else "unverified")
+                else ("verified" if f.confidence >= 0.70 and citations else "unverified")
             )
             research_findings.append(
                 FuturisFinding(
@@ -308,24 +319,26 @@ class FuturisContextProvider:
                 )
             )
 
-        # Synthesize findings from verified claims if DB findings are sparse
-        if len(research_findings) < 5 and all_claims:
-            for cl in all_claims[:10]:
+        # Synthesize additional context only from claims relevant to this target.
+        if len(research_findings) < 5 and relevant_claims:
+            for cl in relevant_claims[:10]:
                 rel = cls.compute_relevance(target_tokens, cl.text)
                 src = sources.get(cl.source_id)
-                cit = [
-                    FuturisCitation(
-                        source_title=src.title
-                        if src and src.title
-                        else "Primary Research Document",
-                        source_url=src.location if src else "internal://source",
-                        verbatim_span=cl.quote,
-                    )
-                ]
+                cit = (
+                    [
+                        FuturisCitation(
+                            source_title=src.title or "Research Source Document",
+                            source_url=src.location,
+                            verbatim_span=cl.quote,
+                        )
+                    ]
+                    if src and src.location and cl.quote
+                    else []
+                )
                 st = (
                     "disputed"
                     if cl.status == ClaimStatus.DISPUTED
-                    else ("verified" if cl.confidence >= 0.70 else "unverified")
+                    else ("verified" if cl.confidence >= 0.70 and cit else "unverified")
                 )
                 research_findings.append(
                     FuturisFinding(
@@ -383,9 +396,13 @@ class FuturisContextProvider:
             top_sources=top_sources_list[:5],
             authoritative_sources_count=auth_count,
             average_trust_tier=(
-                "AUTHORITATIVE"
-                if (avg_cred >= 0.80 or auth_count > 0)
-                else ("STANDARD" if avg_cred >= 0.60 else "COMMUNITY")
+                "UNKNOWN"
+                if not sources
+                else (
+                    "AUTHORITATIVE"
+                    if (avg_cred >= 0.80 or auth_count > 0)
+                    else ("STANDARD" if avg_cred >= 0.60 else "COMMUNITY")
+                )
             ),
             domain_credibility_breakdown={
                 "average_credibility": round(avg_cred, 4),
@@ -421,7 +438,7 @@ class FuturisContextProvider:
         )
 
         # 6. Extract Exogenous Signals
-        exogenous_signals = cls._extract_signals(all_claims)
+        exogenous_signals = cls._extract_signals(relevant_claims)
 
         return ForecastContextResponse(
             forecast_target=forecast_target,

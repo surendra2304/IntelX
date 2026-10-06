@@ -27,7 +27,7 @@ This document sets forth the legal, ethical, and operational standards governing
 ## 2. Ingestion Defense & Content Quarantine
 
 - **No Ingestion Code Execution**: Ingested files (PDFs, DOCX, CSVs, HTML) are converted strictly to plain text with all scripts, macros, and embedded binaries stripped.
-- **SSRF Network Boundaries**: Outbound fetches to `localhost`, RFC 1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), and AWS/GCP cloud metadata endpoints (`169.254.169.254`) are intercepted and rejected at the socket layer.
+- **SSRF Network Boundaries**: Outbound fetches to `localhost`, RFC 1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), and cloud metadata endpoints are rejected during DNS/IP validation. Allowed requests are pinned to a validated public IP through the connection, including redirect and robots.txt requests.
 
 ---
 

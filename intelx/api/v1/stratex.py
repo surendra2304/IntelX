@@ -8,13 +8,16 @@ import logging
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.api.v1.futuris import verify_futuris_auth
-from intelx.connectors.search import GoogleNewsSearchConnector
+from intelx.connectors.search import SearchResult, WebSearchConnector
+from intelx.core.enums import RunOutcome, RunStatus
+from intelx.core.errors import ProviderError
+from intelx.core.settings import get_settings
 from intelx.db.models import Claim, Finding, ResearchRun
 from intelx.db.session import get_db_session
 from intelx.integrations.stratex_context import StratexConnector
@@ -82,6 +85,7 @@ def _clean_symbol(raw_symbol: str) -> str:
     "/intelligence/research",
     response_model=StratexResearchResponse,
     summary="Generate Market Research for StrateX Asset",
+    dependencies=[Depends(verify_futuris_auth)],
 )
 async def query_stratex_market_research(
     req: StratexResearchRequest,
@@ -103,7 +107,11 @@ async def query_stratex_market_research(
     search_token = f"%{clean_sym}%"
     stmt_runs = (
         select(ResearchRun)
-        .where(ResearchRun.objective.ilike(search_token))
+        .where(
+            ResearchRun.objective.ilike(search_token),
+            ResearchRun.status == RunStatus.COMPLETED,
+            ResearchRun.outcome == RunOutcome.ANSWERED,
+        )
         .order_by(ResearchRun.created_at.desc())
         .limit(5)
     )
@@ -169,76 +177,94 @@ async def query_stratex_market_research(
         if any(k in txt_lower for k in macro_kw):
             macro_events.append(text[:120])
 
-    # 3. If DB findings were sparse, fetch real news headlines via GoogleNews connector
-    if not sentiment_drivers or not regulatory_changes:
-        try:
-            connector = GoogleNewsSearchConnector()
-            news_results = await connector.search(
-                f"{clean_sym} crypto market price ETF SEC Fed", max_results=6
-            )
-            for res in news_results:
-                title = res.title or res.snippet
-                txt_lower = title.lower()
-                if any(k in txt_lower for k in reg_kw):
-                    if len(regulatory_changes) < 3:
-                        regulatory_changes.append(title[:120])
-                elif any(k in txt_lower for k in macro_kw):
-                    if len(macro_events) < 3:
-                        macro_events.append(title[:120])
-                else:
-                    if len(sentiment_drivers) < 4:
-                        sentiment_drivers.append(title[:120])
+    # 3. Always request current news; stored findings supplement, but do not replace,
+    # a live source check. Never fill gaps with generic placeholder statements.
+    news_results: list[SearchResult] = []
+    search_attempted = True
+    search_failed = False
+    try:
+        connector = WebSearchConnector(settings=get_settings())
+        news_results = await connector.fetch(query, max_results=6)
+    except ProviderError as exc:
+        search_failed = True
+        logger.warning("Live search enrichment failed for %s (%s)", symbol, type(exc).__name__)
+        if not db_findings_text:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Market news providers are unavailable; no evidence-backed report can be generated.",
+            ) from exc
 
-                if any(k in txt_lower for k in pos_kw):
-                    pos_count += 1
-                elif any(k in txt_lower for k in neg_kw):
-                    neg_count += 1
-        except Exception as ex:
-            logger.debug(f"Live search enrichment failed for {symbol}: {ex}")
+    for res in news_results:
+        title = res.title or res.snippet
+        txt_lower = f"{title} {res.snippet}".lower()
+        if any(k in txt_lower for k in reg_kw) and len(regulatory_changes) < 3:
+            regulatory_changes.append(title[:120])
+        if any(k in txt_lower for k in macro_kw) and len(macro_events) < 3:
+            macro_events.append(title[:120])
+        if any(k in txt_lower for k in pos_kw | neg_kw) and len(sentiment_drivers) < 4:
+            sentiment_drivers.append(title[:120])
 
-    # Fallbacks if still empty
-    if not sentiment_drivers:
-        sentiment_drivers = [
-            f"Active spot accumulation and derivative volume concentration in {clean_sym}",
-            f"Order book balance reflecting elevated volatility regime under {trigger_reason}",
-        ]
-    if not regulatory_changes:
-        regulatory_changes = [
-            f"Global regulatory framework for {clean_sym} maintaining compliance baselines",
-            "SEC and CFTC jurisdictional review of exchange trading venues",
-        ]
-    if not macro_events:
-        macro_events = [
-            "FOMC macroeconomic rate path expectations influencing systemic crypto liquidity",
-            "Global monetary policy shifts driving institutional capital allocations",
-        ]
+        if any(k in txt_lower for k in pos_kw):
+            pos_count += 1
+        elif any(k in txt_lower for k in neg_kw):
+            neg_count += 1
 
-    # Calculate sentiment score (-1.0 to +1.0)
+    evidence_sources = [
+        {"kind": "intelx_finding_or_claim", "text": text} for text in db_findings_text
+    ]
+    evidence_sources.extend(
+        {
+            "kind": "news_search",
+            "title": result.title,
+            "url": result.url,
+            "snippet": result.snippet,
+        }
+        for result in news_results
+    )
+    evidence_count = len(evidence_sources)
+
+    # Calculate sentiment score (-1.0 to +1.0); no directional signal is neutral.
     total_sentiment_signals = pos_count + neg_count
     if total_sentiment_signals > 0:
         raw_score = (pos_count - neg_count) / total_sentiment_signals
         sentiment_score = round(max(-1.0, min(1.0, raw_score * 0.8)), 2)
     else:
-        sentiment_score = 0.15 if "VOLATILITY" in trigger_reason else 0.05
+        sentiment_score = 0.0
 
-    # Volatility impact factor (baseline 1.0, elevated for high triggers)
+    # Keep the volatility factor at its neutral baseline without source evidence.
     vol_impact = 1.0
-    if "VOLATILITY" in trigger_reason:
+    if evidence_count and "VOLATILITY" in trigger_reason:
         vol_impact = 1.45
-    elif "DRAWDOWN" in trigger_reason:
+    elif evidence_count and "DRAWDOWN" in trigger_reason:
         vol_impact = 1.30
-    elif "LOW_ADVISORY" in trigger_reason:
+    elif evidence_count and "LOW_ADVISORY" in trigger_reason:
         vol_impact = 1.20
 
-    summary = (
-        f"IntelX real-time market intelligence for {symbol} (trigger: {trigger_reason}): "
-        f"Sentiment bias is {sentiment_score:+.2f} with volatility factor {vol_impact:.2f}x. "
-        f"Identified {len(sentiment_drivers)} sentiment drivers, {len(regulatory_changes)} regulatory factors, "
-        f"and {len(macro_events)} macro indicators."
-    )
+    if evidence_count == 0:
+        summary = (
+            f"No verified market evidence is available for {symbol}; "
+            "no directional sentiment or volatility assessment was produced."
+        )
+    elif not (sentiment_drivers or regulatory_changes or macro_events):
+        summary = (
+            f"Retrieved {evidence_count} source record(s) for {symbol}, but none supported a "
+            "classified sentiment, regulatory, or macro indicator; no directional assessment was produced."
+        )
+    else:
+        summary = (
+            f"IntelX evidence-backed market intelligence for {symbol} (trigger: {trigger_reason}): "
+            f"Sentiment bias is {sentiment_score:+.2f} with volatility factor {vol_impact:.2f}x. "
+            f"Identified {len(sentiment_drivers)} sentiment drivers, {len(regulatory_changes)} regulatory factors, "
+            f"and {len(macro_events)} macro indicators from {evidence_count} source record(s)."
+        )
 
+    findings_status = (
+        "INSUFFICIENT_EVIDENCE"
+        if evidence_count == 0
+        else ("PARTIAL_EVIDENCE" if search_failed else "EVIDENCE_AVAILABLE")
+    )
     findings_payload = {
-        "status": "EVALUATED_LIVE",
+        "status": findings_status,
         "symbol": symbol,
         "base_asset": clean_sym,
         "sentiment_score": sentiment_score,
@@ -246,7 +272,11 @@ async def query_stratex_market_research(
         "sentiment_drivers": sentiment_drivers,
         "regulatory_changes": regulatory_changes,
         "macro_events": macro_events,
-        "sources_count": len(db_findings_text),
+        "sources_count": evidence_count,
+        "evidence_sources": evidence_sources,
+        "external_search_status": (
+            "failed" if search_failed else ("completed" if search_attempted else "not_needed")
+        ),
     }
 
     return StratexResearchResponse(

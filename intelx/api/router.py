@@ -1,10 +1,12 @@
 """Main API router combining all endpoint groups."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 
 from intelx.api.v1 import v1_router
 from intelx.api.v1.health import router as health_root_router
 from intelx.api.v1.stratex import router as stratex_root_router
+from intelx.core.auth import get_friday_api_key
+from intelx.db.models import ApiKey
 
 root_api_router = APIRouter()
 
@@ -19,7 +21,7 @@ root_api_router.include_router(stratex_root_router, prefix="/v1")
 
 
 @root_api_router.post("/v1/task/execute", tags=["Universal Task Protocol"])
-async def execute_task(body: dict):
+async def execute_task(body: dict, api_key: ApiKey = Depends(get_friday_api_key)):
     """Universal Task Protocol endpoint for IntelX."""
     import time
 
@@ -46,6 +48,11 @@ async def execute_task(body: dict):
             )
             run = (await session.execute(stmt)).scalar_one_or_none()
             if run:
+                key_role = getattr(api_key.role, "value", api_key.role)
+                if str(key_role).lower() != "admin" and run.created_by != api_key.name:
+                    raise HTTPException(status_code=404, detail="Research task not found")
+                if run.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
+                    raise HTTPException(status_code=409, detail="Research task is already terminal")
                 run.status = RunStatus.CANCELLED
                 run.outcome = RunOutcome.CANCELLED
                 await session.commit()
@@ -72,43 +79,120 @@ async def execute_task(body: dict):
     )
 
     async with sessionmaker() as session:
-        # Fetch latest sources and documents
-        stmt_src = select(Source).order_by(Source.retrieved_at.desc()).limit(10)
-        sources = list((await session.execute(stmt_src)).scalars().all())
+        # Restrict summaries to completed runs owned by this integration key (or all runs for admins).
+        key_role = getattr(api_key.role, "value", api_key.role)
+        run_stmt = select(ResearchRun.id).where(ResearchRun.status == RunStatus.COMPLETED)
+        if str(key_role).lower() != "admin":
+            run_stmt = run_stmt.where(ResearchRun.created_by == api_key.name)
 
-        stmt_cl = (
-            select(Claim)
-            .where(Claim.status != "DISPUTED")
-            .order_by(Claim.created_at.desc())
-            .limit(10)
-        )
-        claims = list((await session.execute(stmt_cl)).scalars().all())
+        query_terms = [word.strip(".,:;!?()[]{}\"'").lower() for word in query.split()]
+        query_terms = [word for word in query_terms if len(word) >= 3][:6]
+        if query_terms and query.lower() != "macro intelligence":
+            from sqlalchemy import or_
 
-        stmt_f = select(Finding).order_by(Finding.created_at.desc()).limit(5)
-        findings = list((await session.execute(stmt_f)).scalars().all())
+            run_stmt = run_stmt.where(
+                or_(*(ResearchRun.objective.ilike(f"%{word}%") for word in query_terms))
+            )
+        run_stmt = run_stmt.order_by(ResearchRun.created_at.desc()).limit(20)
+        run_ids = list((await session.execute(run_stmt)).scalars().all())
 
-        # Construct findings items for citation generators
+        if run_ids:
+            claims_stmt = (
+                select(Claim)
+                .where(Claim.run_id.in_(run_ids), Claim.status != "DISPUTED")
+                .order_by(Claim.created_at.desc())
+                .limit(50)
+            )
+            claims = list((await session.execute(claims_stmt)).scalars().all())
+            findings_stmt = (
+                select(Finding)
+                .where(Finding.run_id.in_(run_ids))
+                .order_by(Finding.created_at.desc())
+                .limit(5)
+            )
+            findings = list((await session.execute(findings_stmt)).scalars().all())
+            needed_claim_ids = {
+                str(claim_id) for finding in findings for claim_id in (finding.claim_ids_json or [])
+            }
+            known_claim_ids = {claim.id for claim in claims}
+            missing_claim_ids = needed_claim_ids - known_claim_ids
+            if missing_claim_ids:
+                extra_stmt = select(Claim).where(
+                    Claim.id.in_(missing_claim_ids), Claim.run_id.in_(run_ids)
+                )
+                claims.extend((await session.execute(extra_stmt)).scalars().all())
+            source_ids = {claim.source_id for claim in claims}
+            sources = (
+                list(
+                    (
+                        await session.execute(
+                            select(Source)
+                            .where(Source.id.in_(source_ids))
+                            .order_by(Source.retrieved_at.desc())
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                if source_ids
+                else []
+            )
+        else:
+            claims = []
+            findings = []
+            sources = []
+
+        # Construct per-finding source citations from the exact supporting claims.
+        claims_by_id = {claim.id: claim for claim in claims}
+        sources_by_id = {source.id: source for source in sources}
         findings_items = []
-        for f in findings:
+        for finding in findings:
+            claim_ids = [str(claim_id) for claim_id in (finding.claim_ids_json or [])]
+            citations = []
+            for claim_id in claim_ids:
+                claim = claims_by_id.get(claim_id)
+                source = sources_by_id.get(claim.source_id) if claim else None
+                if source:
+                    citations.append(
+                        {
+                            "source_id": source.id,
+                            "source_title": source.title or "Source Document",
+                            "source_url": source.location,
+                        }
+                    )
             findings_items.append(
                 {
-                    "statement": f.conclusion,
-                    "confidence": f.confidence,
-                    "confidence_score": f.confidence,
-                    "status": "verified" if f.confidence >= 0.70 else "inference",
-                    "claim_ids": f.claim_ids_json or [],
+                    "statement": finding.conclusion,
+                    "confidence": finding.confidence,
+                    "confidence_score": finding.confidence,
+                    "status": "verified" if finding.confidence >= 0.70 else "inference",
+                    "claim_ids": claim_ids,
+                    "citations": citations,
                 }
             )
 
         if not findings_items and claims:
-            for cl in claims[:5]:
+            for claim in claims[:5]:
+                source = sources_by_id.get(claim.source_id)
+                citations = (
+                    [
+                        {
+                            "source_id": source.id,
+                            "source_title": source.title or "Source Document",
+                            "source_url": source.location,
+                        }
+                    ]
+                    if source
+                    else []
+                )
                 findings_items.append(
                     {
-                        "statement": cl.text,
-                        "confidence": cl.confidence,
-                        "confidence_score": cl.confidence,
-                        "status": "verified" if cl.confidence >= 0.75 else "inference",
-                        "claim_ids": [cl.id],
+                        "statement": claim.text,
+                        "confidence": claim.confidence,
+                        "confidence_score": claim.confidence,
+                        "status": "verified" if claim.confidence >= 0.75 else "inference",
+                        "claim_ids": [claim.id],
+                        "citations": citations,
                     }
                 )
 

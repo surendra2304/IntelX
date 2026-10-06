@@ -11,6 +11,7 @@ import bs4
 import httpx
 
 from intelx.connectors.base import BaseConnector
+from intelx.core.errors import ProviderError
 from intelx.core.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -98,8 +99,20 @@ class DuckDuckGoSearchConnector(BaseConnector):
             ) as client:
                 resp = await client.get(url)
                 if resp.status_code != 200:
-                    logger.warning(f"DuckDuckGo returned HTTP {resp.status_code}")
-                    return []
+                    raise ProviderError(
+                        "DuckDuckGo search returned a non-success response",
+                        details={"provider": "duckduckgo", "status_code": resp.status_code},
+                    )
+
+                page_lower = resp.text.lower()
+                if any(
+                    marker in page_lower
+                    for marker in ("captcha", "anomaly-modal", "bots use duckduckgo")
+                ):
+                    raise ProviderError(
+                        "DuckDuckGo search returned an anti-bot challenge",
+                        details={"provider": "duckduckgo"},
+                    )
 
                 soup = bs4.BeautifulSoup(resp.text, "html.parser")
                 results: list[SearchResult] = []
@@ -128,9 +141,14 @@ class DuckDuckGoSearchConnector(BaseConnector):
                             break
 
                 return results
+        except ProviderError:
+            raise
         except Exception as e:
-            logger.warning(f"DuckDuckGo search failed gracefully: {e}")
-            return []
+            logger.warning("DuckDuckGo search request failed (%s)", type(e).__name__)
+            raise ProviderError(
+                "DuckDuckGo search request failed",
+                details={"provider": "duckduckgo", "error_class": type(e).__name__},
+            ) from e
 
 
 def clean_rss_text(raw_text: str) -> str:
@@ -255,8 +273,17 @@ class GoogleNewsSearchConnector(BaseConnector):
             ) as client:
                 resp = await client.get(url)
                 if resp.status_code != 200:
-                    logger.warning(f"Google News RSS returned HTTP {resp.status_code}")
-                    return []
+                    raise ProviderError(
+                        "Google News RSS returned a non-success response",
+                        details={"provider": "google_news", "status_code": resp.status_code},
+                    )
+
+                response_lower = resp.text[:1000].lower()
+                if not any(marker in response_lower for marker in ("<rss", "<?xml", "<feed")):
+                    raise ProviderError(
+                        "Google News RSS returned an invalid feed response",
+                        details={"provider": "google_news"},
+                    )
 
                 import re as re_lib
 
@@ -285,9 +312,14 @@ class GoogleNewsSearchConnector(BaseConnector):
                             )
                         )
                 return results
+        except ProviderError:
+            raise
         except Exception as e:
-            logger.warning(f"Google News search failed: {e}")
-            return []
+            logger.warning("Google News search request failed (%s)", type(e).__name__)
+            raise ProviderError(
+                "Google News search request failed",
+                details={"provider": "google_news", "error_class": type(e).__name__},
+            ) from e
 
 
 class WikipediaSearchConnector(BaseConnector):
@@ -347,10 +379,16 @@ class WikipediaSearchConnector(BaseConnector):
                     url = f"https://en.wikipedia.org/w/api.php?action=opensearch&search={encoded_query}&limit={max_results}&namespace=0&format=json"
                     resp = await client.get(url)
                     if resp.status_code != 200:
-                        continue
+                        raise ProviderError(
+                            "Wikipedia search returned a non-success response",
+                            details={"provider": "wikipedia", "status_code": resp.status_code},
+                        )
                     data = resp.json()
                     if not isinstance(data, list) or len(data) < 4:
-                        continue
+                        raise ProviderError(
+                            "Wikipedia search returned an invalid response",
+                            details={"provider": "wikipedia"},
+                        )
 
                     titles = data[1]
                     snippets = data[2]
@@ -363,9 +401,14 @@ class WikipediaSearchConnector(BaseConnector):
                     if results:
                         return results
                 return []
+        except ProviderError:
+            raise
         except Exception as e:
-            logger.debug(f"Wikipedia search failed: {e}")
-            return []
+            logger.warning("Wikipedia search request failed (%s)", type(e).__name__)
+            raise ProviderError(
+                "Wikipedia search request failed",
+                details={"provider": "wikipedia", "error_class": type(e).__name__},
+            ) from e
 
 
 class WebSearchConnector(BaseConnector):
@@ -419,10 +462,33 @@ class WebSearchConnector(BaseConnector):
         matched_files: list[Path] = []
         if fixtures_dir.exists():
             all_txt = list(fixtures_dir.glob("*.txt"))
+            topic_groups = (
+                (("silicon", "anode", "graphite"), {"density_paper_nature", "density_paper_prl"}),
+                (("sodium", "cathode", "prussian blue"), {"sodium_lab_2026", "sodium_stale_2021"}),
+                (("solid-state", "solid state", "sulfide", "dendrite"), {"solid_state_cycling"}),
+                (
+                    ("quantum", "anneal", "qubit", "wire", "syndicat"),
+                    {"quantum_wire_reuters", "quantum_wire_syndicated"},
+                ),
+                (
+                    ("piezoelectric", "micro-generator", "micro generator", "kinetic"),
+                    {"poisoned_injection"},
+                ),
+                (("historical", "2021", "stale"), {"sodium_stale_2021"}),
+            )
+            eligible_stems = {
+                stem
+                for terms, stems in topic_groups
+                if any(term in q_lower for term in terms)
+                for stem in stems
+            }
+            # Mock research must not fabricate breadth by mixing unrelated local fixtures.
+            # A query with no recognized fixture topic returns no candidates (honest null result).
+            eligible_files = [f for f in all_txt if f.stem in eligible_stems]
             scores: list[tuple[int, Path]] = []
 
-            for f in all_txt:
-                score = 0
+            for f in eligible_files:
+                score = 1
                 name = f.stem.lower()
                 content = f.read_text(encoding="utf-8", errors="replace").lower()
 
@@ -492,15 +558,6 @@ class WebSearchConnector(BaseConnector):
             scores.sort(key=lambda x: x[0], reverse=True)
             matched_files = [f for _, f in scores]
 
-            if not matched_files:
-                default_stems = ["sodium_lab_2026", "solid_state_cycling", "density_paper_nature"]
-                for st in default_stems:
-                    cand = fixtures_dir / f"{st}.txt"
-                    if cand.exists():
-                        matched_files.append(cand)
-                if not matched_files:
-                    matched_files = all_txt[:2]
-
         results: list[SearchResult] = []
         for f in matched_files[:4]:
             text = f.read_text(encoding="utf-8", errors="replace")
@@ -521,24 +578,53 @@ class WebSearchConnector(BaseConnector):
         if self.settings.MOCK_MODE:
             return self._load_mock_results(target)
 
+        failed_providers: list[dict[str, Any]] = []
+
+        async def fetch_provider(name: str, connector: Any) -> list[SearchResult]:
+            try:
+                return await connector.fetch(target, **kwargs)
+            except Exception as exc:
+                failure = {"provider": name, "error_class": type(exc).__name__}
+                if isinstance(exc, ProviderError):
+                    failure.update(
+                        {
+                            key: value
+                            for key, value in exc.details.items()
+                            if key in {"status_code", "provider", "error_class"}
+                        }
+                    )
+                failed_providers.append(failure)
+                logger.warning("Live search provider %s failed (%s)", name, type(exc).__name__)
+                return []
+
         # 1. Tavily if key present
         if self.settings.TAVILY_API_KEY:
-            results = await self._tavily.fetch(target, **kwargs)
+            results = await fetch_provider("tavily", self._tavily)
             if results:
                 return results
 
-        # 2. Google News RSS (real-time news and announcements) + Wikipedia (encyclopedic past and present context)
+        # 2. Google News RSS + Wikipedia, then DuckDuckGo as a fallback.
         results: list[SearchResult] = []
-        news_results = await self._google_news.fetch(target, **kwargs)
+        news_results = await fetch_provider("google_news", self._google_news)
         if news_results:
             results.extend(news_results[:10])
 
-        wiki_results = await self._wikipedia.fetch(target, **kwargs)
+        wiki_results = await fetch_provider("wikipedia", self._wikipedia)
         if wiki_results:
             results.extend(wiki_results[:5])
 
         if results:
             return results
 
-        # 4. DuckDuckGo fallback
-        return await self._ddg.fetch(target, **kwargs)
+        fallback_results = await fetch_provider("duckduckgo", self._ddg)
+        if fallback_results:
+            return fallback_results
+
+        if failed_providers:
+            raise ProviderError(
+                "Live search returned no sources while one or more providers failed.",
+                details={"failed_providers": failed_providers},
+            )
+
+        # Empty successful responses are an honest no-result search, not an outage.
+        return []

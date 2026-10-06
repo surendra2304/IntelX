@@ -165,16 +165,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         async with sessionmaker() as session:
             await auto_seed_demonstrations_if_empty(session)
 
-    # 4. Start background worker hook
-    await worker_hook.start()
+    # 4. Start background services only when explicitly enabled (or when a
+    # non-production development instance uses the embedded-worker default).
+    run_embedded_worker = settings.RUN_EMBEDDED_WORKER
+    if run_embedded_worker is None:
+        run_embedded_worker = not settings.is_production()
+    if run_embedded_worker:
+        await worker_hook.start()
 
-    # 5. Start continuous news ingestion
-    await news_hook.start()
-    logger.info("Continuous news ingestion started.")
+    if settings.ENABLE_NEWS_INGESTER:
+        await news_hook.start()
+        logger.info("Continuous news ingestion started.")
 
-    # 6. Start autonomous continuous research engine
-    await auto_research_hook.start()
-    logger.info("Autonomous research engine started.")
+    if settings.ENABLE_AUTONOMOUS_RESEARCH:
+        await auto_research_hook.start()
+        logger.info("Autonomous research engine started.")
 
     yield
 

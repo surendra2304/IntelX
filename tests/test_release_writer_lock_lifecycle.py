@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
 
 from intelx.core.enums import RunStatus
 from intelx.core.settings import get_settings
@@ -78,9 +77,7 @@ async def test_mid_pipeline_failure_still_reaches_a_persisted_terminal_state(ses
 
     # Fail after the planner boundary has already committed.
     monkeypatch.setattr(engine.planner, "execute", boom)
-    monkeypatch.setattr(
-        engine, "_check_gates", lambda *a, **k: _raise_after_first_gate()
-    )
+    monkeypatch.setattr(engine, "_check_gates", lambda *a, **k: _raise_after_first_gate())
 
     async def _raise_after_first_gate():
         raise RuntimeError("gate blew up")
@@ -178,8 +175,14 @@ async def test_two_runs_do_not_bleed_state_across_the_boundary(session):
 # "released" for stages that were holding the lock for 30s.
 
 STAGES = (
-    "planner", "scout", "retriever", "extractor",
-    "verifier", "analyst", "critic", "synthesizer",
+    "planner",
+    "scout",
+    "retriever",
+    "extractor",
+    "verifier",
+    "analyst",
+    "critic",
+    "synthesizer",
 )
 SLOW_SECONDS = 1.0
 
@@ -245,7 +248,12 @@ async def test_stage_does_not_hold_the_writer_lock(monkeypatch, stage, session):
         return await original(*args, **kwargs)
 
     monkeypatch.setattr(agent, method, slow_execute)
-    run_id = await _fresh_run(session, f"lock hold probe {stage}")
+    objective = f"lock hold probe {stage}"
+    if stage in {"retriever", "verifier"}:
+        # Keep these stages reachable with a supported local fixture even in
+        # topic-scoped mock-search mode, so each lock probe tests real stage work.
+        objective = f"silicon anode energy density lock hold probe {stage}"
+    run_id = await _fresh_run(session, objective)
 
     async with get_sessionmaker()() as s:
         try:
@@ -264,8 +272,9 @@ async def test_stage_does_not_hold_the_writer_lock(monkeypatch, stage, session):
 @pytest.mark.asyncio
 async def test_ecosystem_dispatch_does_not_hold_the_writer_lock(monkeypatch, session):
     """Delivery to peers is external HTTP; the lock must not span it."""
-    import intelx.orchestration.engine as engine_mod
     import threading
+
+    import intelx.orchestration.engine as engine_mod
 
     measured: list[float] = []
 

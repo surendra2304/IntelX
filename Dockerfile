@@ -16,7 +16,7 @@ COPY pyproject.toml requirements.txt* README.md* .
 COPY intelx/ ./intelx/
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir --no-deps .
+    pip install --no-cache-dir ".[llm]"
 
 # Final stage: Minimal runtime image
 FROM python:3.11-slim AS runner

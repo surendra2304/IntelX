@@ -56,14 +56,23 @@ async def readyz() -> dict[str, Any]:
     except Exception:
         storage_healthy = False
 
-    # 3. Model Provider Availability Check
-    # (Mock mode is always ready; live mode is ready if provider configured or fallback enabled)
-    provider_healthy = True
+    # 3. Model-provider configuration check. This does not probe upstream reachability;
+    # it only verifies that the selected live backend has the required endpoint/key.
+    provider_healthy = settings.MOCK_MODE
     if not settings.MOCK_MODE:
-        if settings.LLM_PROVIDER in ("ai_universe", "aiuniverse"):
-            provider_healthy = bool(settings.AI_UNIVERSE_BASE_URL)
-        elif settings.LLM_PROVIDER in ("openai_compatible", "anthropic"):
-            provider_healthy = bool(settings.LLM_API_KEY)
+        if settings.LLM_PROVIDER in ("inference", "ai_universe", "aiuniverse"):
+            provider_healthy = bool(settings.INFERENCE_URL and settings.INFERENCE_API_KEY)
+        elif settings.LLM_PROVIDER == "anthropic":
+            provider_healthy = bool(settings.get_llm_api_key("anthropic"))
+        elif settings.LLM_PROVIDER in {
+            "openai_compatible",
+            "openai",
+            "groq",
+            "vllm",
+            "ollama",
+            "openrouter",
+        }:
+            provider_healthy = bool(settings.get_llm_api_key("openai_compatible"))
 
     all_ready = db_healthy and storage_healthy and provider_healthy
 
@@ -74,7 +83,12 @@ async def readyz() -> dict[str, Any]:
         "ready": all_ready,
         "database": "ok" if db_healthy else "error",
         "storage": "ok" if storage_healthy else "error",
-        "model_provider": "ok" if provider_healthy else "degraded",
+        "model_provider": (
+            "mock"
+            if settings.MOCK_MODE
+            else ("configured" if provider_healthy else "misconfigured")
+        ),
+        "model_provider_check": "local_mock" if settings.MOCK_MODE else "configuration_only",
         "timestamp": datetime.now(UTC).isoformat(),
     }
 

@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from intelx.core.errors import StructuredOutputError
+from intelx.core.errors import ProviderError, StructuredOutputError
 from intelx.core.settings import Settings, get_settings
 from intelx.models.ai_universe_provider import AIUniverseProvider
 from intelx.models.providers import (
@@ -45,7 +45,7 @@ class ModelGateway:
         provider_name = (self.settings.LLM_PROVIDER or "mock").lower()
         if provider_name in ("inference", "ai_universe", "aiuniverse"):
             if self._ai_universe_provider is None:
-                self._ai_universe_provider = AIUniverseProvider()
+                self._ai_universe_provider = AIUniverseProvider(settings=self.settings)
             return "inference", self._ai_universe_provider
         elif provider_name in (
             "openai_compatible",
@@ -56,11 +56,11 @@ class ModelGateway:
             "openrouter",
         ):
             if self._openai_provider is None:
-                self._openai_provider = OpenAICompatibleProvider()
+                self._openai_provider = OpenAICompatibleProvider(settings=self.settings)
             return provider_name, self._openai_provider
         elif provider_name == "anthropic":
             if self._anthropic_provider is None:
-                self._anthropic_provider = AnthropicProvider()
+                self._anthropic_provider = AnthropicProvider(settings=self.settings)
             return "anthropic", self._anthropic_provider
 
         return "mock", self._mock_provider
@@ -74,9 +74,10 @@ class ModelGateway:
         schema_model: type[BaseModel] | None,
         temperature: float,
         max_tokens: int,
-    ) -> tuple[str, Usage, str]:
-        """Attempt primary provider with automated fallback chain: AI-Universe -> OpenAI/Anthropic -> Mock."""
+    ) -> tuple[str, Usage, str, dict[str, Any]]:
+        """Attempt configured providers and return metadata tied to the successful call."""
         primary_name, primary_provider = self._get_provider()
+        primary_error: Exception | None = None
 
         # Attempt 1: Primary provider
         try:
@@ -88,8 +89,10 @@ class ModelGateway:
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
-            return text_out, usage, primary_name
+            metadata = dict(getattr(primary_provider, "last_metadata", {}) or {})
+            return text_out, usage, primary_name, metadata
         except Exception as e:
+            primary_error = e
             logger.warning(
                 f"Primary provider [{primary_name}] failed for role [{role}]: {e}. "
                 "Executing fallback chain..."
@@ -97,10 +100,10 @@ class ModelGateway:
 
         # Attempt 2: Secondary direct LLM provider (if primary was AI-Universe/Inference and LLM keys exist)
         if primary_name in ("ai_universe", "inference"):
-            if self.settings.LLM_API_KEY:
+            if self.settings.get_llm_api_key("openai_compatible"):
                 try:
                     if self._openai_provider is None:
-                        self._openai_provider = OpenAICompatibleProvider()
+                        self._openai_provider = OpenAICompatibleProvider(settings=self.settings)
                     logger.info(
                         "Falling back from AI-Universe to secondary OpenAI-Compatible provider"
                     )
@@ -112,12 +115,18 @@ class ModelGateway:
                         temperature=temperature,
                         max_tokens=max_tokens,
                     )
-                    return text_out, usage, "openai_compatible"
+                    return text_out, usage, "openai_compatible", {}
                 except Exception as e2:
                     logger.warning(f"Secondary LLM provider fallback failed: {e2}")
 
-        # Attempt 3: Tertiary Mock provider fallback
-        logger.info(f"Falling back to Mock provider for role [{role}]")
+        # A provider outage must not be presented as a successful synthetic answer unless
+        # the operator explicitly opted into mock fallback for a non-production environment.
+        if self.settings.is_production() or not self.settings.ALLOW_MOCK_FALLBACK:
+            raise ProviderError(
+                f"All configured model providers failed for role [{role}]; mock fallback is disabled."
+            ) from primary_error
+
+        logger.warning("Explicit non-production mock fallback enabled for role [%s]", role)
         text_out, usage = await self._mock_provider.complete(
             messages=messages,
             model="mock-gpt-4o",
@@ -126,7 +135,7 @@ class ModelGateway:
             temperature=temperature,
             max_tokens=max_tokens,
         )
-        return text_out, usage, "mock"
+        return text_out, usage, "mock", {}
 
     async def complete(
         self,
@@ -144,7 +153,7 @@ class ModelGateway:
         logger.info(f"LLM request role=[{role}] model=[{model_name}]{log_suffix}")
 
         # 1. Completion attempt with fallback chain
-        text_output, usage, active_provider = await self._execute_with_fallback(
+        text_output, usage, active_provider, metadata = await self._execute_with_fallback(
             messages=messages,
             model_name=model_name,
             role=role,
@@ -173,7 +182,12 @@ class ModelGateway:
                     {"role": "user", "content": correction_prompt},
                 ]
 
-                retry_text, retry_usage, retry_provider = await self._execute_with_fallback(
+                (
+                    retry_text,
+                    retry_usage,
+                    retry_provider,
+                    retry_metadata,
+                ) = await self._execute_with_fallback(
                     messages=correction_messages,
                     model_name=model_name,
                     role=role,
@@ -182,6 +196,7 @@ class ModelGateway:
                     max_tokens=max_tokens,
                 )
                 active_provider = retry_provider
+                metadata = retry_metadata
 
                 # Accumulate usage from retry
                 usage = Usage(
@@ -193,9 +208,20 @@ class ModelGateway:
 
                 parsed_instance, retry_err = self._try_parse_schema(retry_text, schema_model)
                 if parsed_instance is None and active_provider != "mock":
+                    if self.settings.is_production() or not self.settings.ALLOW_MOCK_FALLBACK:
+                        raise StructuredOutputError(
+                            f"Provider output failed schema validation for {schema_model.__name__}; "
+                            "synthetic fallback is disabled.",
+                            details={
+                                "role": role,
+                                "model": model_name,
+                                "provider": active_provider,
+                                "error": str(retry_err),
+                            },
+                        )
                     logger.warning(
-                        f"Provider [{active_provider}] output failed schema validation for {schema_model.__name__}. "
-                        "Falling back to MockProvider safety net."
+                        "Explicit non-production mock fallback enabled after %s schema failures",
+                        schema_model.__name__,
                     )
                     mock_text, mock_usage = await self._mock_provider.complete(
                         messages=messages,
@@ -208,6 +234,7 @@ class ModelGateway:
                     text_output = mock_text
                     parsed_instance, retry_err = self._try_parse_schema(mock_text, schema_model)
                     active_provider = "mock"
+                    metadata = {}
 
                 if parsed_instance is None:
                     err_msg = (
@@ -239,6 +266,7 @@ class ModelGateway:
             usage=usage,
             provider=active_provider,
             model=model_name,
+            metadata=metadata,
         )
 
     @staticmethod

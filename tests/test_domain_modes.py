@@ -59,6 +59,36 @@ def test_source_credibility_scorer_security_hierarchy():
     assert "Forum" in l5
 
 
+def test_credibility_patterns_match_hostname_boundaries_only():
+    """Authority names in paths, credentials, or lookalike suffixes must not earn trust."""
+    for url in (
+        "https://evil.example/mitre.org/report",
+        "https://notmitre.org.attacker.example/report",
+        "https://mitre.org@evil.example/report",
+    ):
+        score, label = SourceCredibilityScorer.score_source(url, "security")
+        assert score == 0.50
+        assert label == "General Security Source"
+
+    trusted_subdomain_score, trusted_subdomain_label = SourceCredibilityScorer.score_source(
+        "https://cve.mitre.org/CVERecord?id=CVE-2026-1234", "security"
+    )
+    assert trusted_subdomain_score == 1.00
+    assert "MITRE" in trusted_subdomain_label
+
+    remote_upload_path_score, remote_upload_path_label = SourceCredibilityScorer.score_source(
+        "https://evil.example/data/uploads/forged.pdf", "technical"
+    )
+    assert remote_upload_path_score == 0.60
+    assert remote_upload_path_label == "General Technical Documentation"
+
+    local_upload_score, local_upload_label = SourceCredibilityScorer.score_source(
+        "/srv/intelx/data/uploads/report.pdf", "technical"
+    )
+    assert local_upload_score == 0.85
+    assert local_upload_label == "Verified Local Corpus"
+
+
 def test_source_credibility_scorer_market_hierarchy():
     """Verify market domain credibility scoring hierarchy."""
     # Tier 1: SEC Filings
