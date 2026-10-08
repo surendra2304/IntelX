@@ -1,5 +1,6 @@
 """Tests for INTELX Synthesis, Report Rendering, Citation Integrity, and Artifact Generation."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -139,6 +140,29 @@ def test_report_discloses_syndicated_duplicates_and_historical_citations():
     assert "90 Wh/kg in 2021" in md
     assert "160 Wh/kg in 2026" in md
     assert "not a like-for-like comparison" in md
+
+
+def test_report_distinguishes_mock_from_live_model_execution():
+    """A configured mock report must not be mistaken for live external research."""
+    common = {
+        "objective": "Assess evidence availability",
+        "executive_answer": "No verifiable finding established.",
+        "grounded_findings": [],
+        "unverified_findings": [],
+        "claims": [],
+        "sources": [],
+    }
+    mock = render_report_markdown(**common, execution_mode="MOCK")
+    assert "Execution mode: MOCK" in mock
+    assert "not live external research" in mock
+
+    live = render_report_markdown(**common, execution_mode="LIVE MODEL CALL")
+    assert "Execution mode: LIVE MODEL CALL" in live
+    assert "does not prove that sources were live-fetched" in live
+
+    fallback = render_report_markdown(**common, execution_mode="MOCK FALLBACK")
+    assert "Execution mode: MOCK FALLBACK" in fallback
+    assert "not treat this as a fully live-provider answer" in fallback
 
 
 def test_report_warns_when_cited_source_is_injection_flagged():
@@ -326,6 +350,11 @@ async def test_full_mock_mode_end_to_end_artifacts_and_headings(db_session_facto
             assert ArtifactType.REPORT in art_types
             assert ArtifactType.EVIDENCE_PACK in art_types
             assert ArtifactType.SOURCE_LIST in art_types
+
+            # Both human- and machine-readable outputs must disclose mock execution.
+            report_json_art = next(a for a in artifacts if a.format == ArtifactFormat.JSON)
+            report_json = json.loads(Path(report_json_art.path).read_text(encoding="utf-8"))
+            assert report_json["meta"]["execution_mode"] == "MOCK"
 
             # Verify files exist on disk
             report_md_art = next(a for a in artifacts if a.format == ArtifactFormat.MD)

@@ -180,6 +180,10 @@ class SynthesizerAgent(BaseAgent):
         valid_source_ids = {sid for sid in valid_source_ids if sid}
         valid_claim_ids = set(claims_by_id.keys())
 
+        # Keep execution provenance explicit even when the insufficient-evidence path
+        # skips the synthesis provider call entirely.
+        llm_res = None
+
         # Insufficient evidence path
         if not claims:
             insufficient_finding = DraftFinding(
@@ -372,6 +376,20 @@ class SynthesizerAgent(BaseAgent):
         # Render official report markdown
         critique_dict = critique.model_dump() if isinstance(critique, CritiqueReport) else critique
         mode = kwargs.get("research_mode") or kwargs.get("domain_hint")
+        gateway_settings = getattr(self.gateway, "settings", None)
+        if getattr(gateway_settings, "MOCK_MODE", False):
+            execution_mode = "MOCK"
+        elif llm_res is None:
+            execution_mode = "LIVE CONFIGURED / NO SYNTHESIS"
+        elif str(getattr(llm_res, "provider", "")).lower() == "mock":
+            execution_mode = "MOCK FALLBACK"
+        else:
+            execution_mode = "LIVE MODEL CALL"
+        configured_model = getattr(llm_res, "model", None)
+        if not configured_model and gateway_settings:
+            get_model_for_role = getattr(gateway_settings, "get_model_for_role", None)
+            if callable(get_model_for_role):
+                configured_model = get_model_for_role(self.role)
         report_md = render_report_markdown(
             objective=objective,
             executive_answer=clean_exec_answer,
@@ -383,6 +401,8 @@ class SynthesizerAgent(BaseAgent):
             critique=critique_dict,
             degradations=degradations,
             overall_confidence_label=overall_conf_label,
+            model_name=configured_model or "unknown",
+            execution_mode=execution_mode,
             research_mode=mode,
         )
 
@@ -439,6 +459,7 @@ class SynthesizerAgent(BaseAgent):
                     gaps=draft.gaps,
                     degradations=degradations,
                     overall_confidence_label=overall_conf_label,
+                    execution_mode=execution_mode,
                 )
 
         return SynthesisResult(

@@ -30,6 +30,7 @@ class ReportArtifactMeta(BaseModel):
     output_tokens: int = 0
     usd_cost: float = 0.0
     tool_calls: int = 0
+    execution_mode: str = "UNSPECIFIED"
 
 
 class ReportArtifact(BaseModel):
@@ -78,6 +79,7 @@ async def generate_and_save_artifacts(
     degradations: list[str] | None = None,
     overall_confidence_label: str = "Moderate",
     base_dir: Path | None = None,
+    execution_mode: str = "UNSPECIFIED",
 ) -> list[Artifact]:
     """Generate all 4 research artifacts, write atomically to disk, and register in database."""
     run_dir = (base_dir or Path("data/artifacts")) / run.id
@@ -111,6 +113,7 @@ async def generate_and_save_artifacts(
         output_tokens=run.output_tokens,
         usd_cost=run.usd_cost,
         tool_calls=run.tool_calls,
+        execution_mode=execution_mode,
     )
 
     claims_ref = [

@@ -109,6 +109,8 @@ async def test_friday_delegation_pipeline_e2e(tmp_path):
         assert "report_json" in report_data
         md = report_data["report_markdown"]
         assert "Research Report" in md
+        assert "Execution mode: MOCK" in md
+        assert "not live external research" in md
         assert "Key Findings" in md
         assert "[C:" in md or "[S:" in md
         # A benchmark question must retain its unit-bearing value even though the

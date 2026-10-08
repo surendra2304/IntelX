@@ -123,6 +123,7 @@ def render_report_markdown(
     degradations: list[str] | None = None,
     overall_confidence_label: str = "Moderate",
     model_name: str = "mock-gpt-4o",
+    execution_mode: str = "UNSPECIFIED",
     research_mode: str | ResearchMode | None = None,
 ) -> str:
     """Render the official INTELX research intelligence report markdown with domain-specific sections."""
@@ -442,7 +443,33 @@ def render_report_markdown(
             u_lines.append(f"- [Inference] {stmt} *(Reason: {reason})*")
         unverified_section = "\n\n## Unverified Observations & Inferences\n" + "\n".join(u_lines)
 
+    mode_label = execution_mode.strip().upper()
+    if mode_label == "MOCK":
+        mode_note = (
+            "Local fixtures/simulation were used. This report is not live external research."
+        )
+    elif mode_label == "MOCK FALLBACK":
+        mode_note = (
+            "A deterministic mock provider supplied synthesis after configured provider routing; "
+            "do not treat this as a fully live-provider answer."
+        )
+    elif mode_label == "LIVE MODEL CALL":
+        mode_note = (
+            "A non-mock model provider returned the synthesis call. This alone does not prove "
+            "that sources were live-fetched or that their assertions are true; inspect provenance."
+        )
+    elif mode_label == "LIVE CONFIGURED / NO SYNTHESIS":
+        mode_note = (
+            "Non-mock mode was configured, but no synthesis model call was made. This is not "
+            "evidence of successful live research."
+        )
+    else:
+        mode_label = "UNSPECIFIED"
+        mode_note = "Runtime provenance is unavailable; do not infer that this is live research."
+
     report_md = f"""# Research Report: {objective}
+
+> **Execution mode: {mode_label}.** {mode_note}
 
 ## Direct Answer (confidence: {overall_confidence_label})
 {clean_answer}

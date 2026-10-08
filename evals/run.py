@@ -340,6 +340,8 @@ async def run_evaluation_suite(
                 *expected.get("must_cite_domains", []),
                 *expected.get("must_include_report_phrases", []),
             ]
+            if settings.MOCK_MODE:
+                answer_expectations.append("Execution mode: MOCK")
             answer_coverage_expected += len(answer_expectations)
             if report_art and Path(report_art.path).exists():
                 md_content = Path(report_art.path).read_text(encoding="utf-8")
