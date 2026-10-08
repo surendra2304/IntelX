@@ -24,4 +24,4 @@ Improve agent usefulness on realistic, difficult, and dead-end research tasks. E
 - Branch: `arena/5808691e-intelx`; base HEAD at resume: `0921788bfd4c94bb93805493d43df2418495fb06`.
 - `AGENT_PROGRESS.md` did not exist at resume; this file reconstructs status from prior notes, working changes, and tests.
 - An eval attempt while the app and evaluator shared `data/intelx.db` raced the app worker and hit an invalid run-state transition. The evaluator now defaults to ignored `data/eval.db` (`INTELX_EVAL_DB_URL` can override it); a concurrent app+eval run passed, with 14 health checks returning successfully.
-- Local app preview is running in mock mode on port 8000 (process `intelx-app-5b251418`). This demonstrates mock/local-fixture behavior only, not live Internet/provider quality.
+- At this resume, the earlier app process (`intelx-app-5b251418`) is no longer present and `.venv/` is absent (ignored workspace artifact). The last verified application runs were mock-mode/local-fixture only; they do not establish live Internet/provider quality. Recreate the development venv if another local test run is needed.
