@@ -5,6 +5,9 @@
   "expected": {
     "must_find_claims": [],
     "must_cite_domains": [],
+    "must_include_report_phrases": [
+      "No verified claims were available; conclusions must remain unestablished."
+    ],
     "must_not_claim": [
       "perpetual energy verified",
       "over-unity confirmed"

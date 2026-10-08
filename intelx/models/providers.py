@@ -355,6 +355,7 @@ class MockProvider(BaseLLMProvider):
         full_prompt = "\n".join(m.get("content", "") for m in messages)
         claim_ids: list[str] = []
         claim_texts: list[str] = []
+        disputed_claim_texts: list[str] = []
 
         match_claims = re.search(
             r"VERIFIED EVIDENCE CLAIMS[^:]*:\s*(\[.*?\])\s*(?:Produce|\Z)",
@@ -367,7 +368,10 @@ class MockProvider(BaseLLMProvider):
                 for c in parsed_claims:
                     if isinstance(c, dict) and c.get("id"):
                         claim_ids.append(c["id"])
-                        claim_texts.append(c.get("text", ""))
+                        text = c.get("text", "")
+                        claim_texts.append(text)
+                        if str(c.get("status", "")).upper() == "DISPUTED":
+                            disputed_claim_texts.append(text)
             except Exception:
                 pass
 
@@ -404,11 +408,96 @@ class MockProvider(BaseLLMProvider):
                 }
             )
 
+        objective_match = re.search(
+            r"RESEARCH OBJECTIVE:\s*(.*?)(?:\n\n|\Z)", full_prompt, re.DOTALL
+        )
+        objective = (
+            objective_match.group(1).strip() if objective_match else "the research objective"
+        )
+        # Mock mode must never invent a task-specific conclusion or generic caveat.
+        # It has no inference capability: report the count, point to the grounded
+        # findings rendered below, and state the boundary of what it can conclude.
+        if disputed_claim_texts:
+            executive_answer = (
+                f"For the objective ‘{objective}’, the verification pipeline marked "
+                f"{len(disputed_claim_texts)} supplied claim(s) as DISPUTED. That is a "
+                "detected evidence conflict, not proof that the underlying measurements "
+                "are directly comparable. The disputed claims are listed in the report; "
+                "the mock synthesis does not independently resolve them."
+            )
+        else:
+            executive_answer = (
+                f"For the objective ‘{objective}’, the mock pipeline supplied "
+                f"{len(claim_ids)} verified claim(s). The findings below reproduce those "
+                "claims; this mock synthesis does not establish comparisons, causation, or "
+                "conclusions not explicitly represented in the verified evidence."
+            )
         return {
-            "executive_answer": f"Synthesized evidence from {len(claim_ids)} empirical observations establishes baseline performance parameters and verified operating bounds across evaluated benchmarks.",
+            "executive_answer": executive_answer,
             "key_findings": key_findings,
             "gaps": [
-                "Long-term multi-year fleet durability data remains subject to ongoing commercial trials."
+                "Mock synthesis does not perform semantic reasoning beyond the supplied verified claims.",
+                "Any comparison or conclusion not directly represented by those claims remains unverified.",
+            ],
+        }
+
+    @classmethod
+    def _mock_critic(cls, messages: list[dict[str, str]]) -> dict[str, Any]:
+        """Return a candid evidence-limited critique rather than fabricated approval."""
+        prompt = "\n".join(message.get("content", "") for message in messages)
+        count_match = re.search(r"AVAILABLE EVIDENCE CLAIMS \((\d+) items\)", prompt)
+        claim_count = int(count_match.group(1)) if count_match else 0
+        has_disputed = bool(re.search(r'"status"\s*:\s*"DISPUTED"', prompt, re.IGNORECASE))
+
+        if claim_count == 0:
+            return {
+                "unsupported_conclusions": ["No primary evidence claims are available."],
+                "overconfident_claims": [],
+                "missing_angles": ["No empirical source evidence was available to critique."],
+                "severity": "HIGH",
+                "summary": "No verified claims were available; conclusions must remain unestablished.",
+                "approved": False,
+                "critique": "No verified claims were available; conclusions must remain unestablished.",
+                "suggested_improvements": ["Retrieve authoritative evidence before answering."],
+            }
+        if has_disputed:
+            summary = (
+                "One or more supplied claims are DISPUTED. Disclose the evidence conflict; "
+                "mock critique cannot resolve comparability or determine which claim is correct."
+            )
+            return {
+                "unsupported_conclusions": [
+                    "Disputed claims cannot be presented as settled facts."
+                ],
+                "overconfident_claims": [],
+                "missing_angles": [
+                    "Comparable methods and independent adjudication are not established."
+                ],
+                "severity": "HIGH",
+                "summary": summary,
+                "approved": False,
+                "critique": summary,
+                "suggested_improvements": [
+                    "Compare source methods and resolve the conflicting evidence."
+                ],
+            }
+
+        summary = (
+            "Evidence claims are available, but mock mode cannot independently assess source quality, "
+            "methods, or corroboration. Treat them as attributed claims rather than independently verified conclusions."
+        )
+        return {
+            "unsupported_conclusions": [],
+            "overconfident_claims": [],
+            "missing_angles": [
+                "Independent source and methodology review is unavailable in mock mode."
+            ],
+            "severity": "MEDIUM",
+            "summary": summary,
+            "approved": False,
+            "critique": summary,
+            "suggested_improvements": [
+                "Verify the claims against the original source and methods."
             ],
         }
 
@@ -510,16 +599,7 @@ class MockProvider(BaseLLMProvider):
         elif normalized_role == "analyst":
             return cls._mock_analyze(msgs)
         elif normalized_role == "critic":
-            return {
-                "unsupported_conclusions": [],
-                "overconfident_claims": [],
-                "missing_angles": ["Long-term lifecycle degradation data"],
-                "severity": "LOW",
-                "summary": "Analysis is well-supported by primary evidence.",
-                "approved": True,
-                "critique": "Analysis is well-supported by primary evidence.",
-                "suggested_improvements": [],
-            }
+            return cls._mock_critic(msgs)
         elif normalized_role == "synthesizer":
             return cls._mock_synthesize(msgs)
 

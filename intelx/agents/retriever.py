@@ -127,6 +127,10 @@ class RetrieverAgent(BaseAgent):
         if existing_src:
             doc = await SourceRepo.get_document_by_source_id(session, existing_src.id)
             if doc:
+                if existing_src.published_at is None:
+                    from intelx.memory.normalize import _parse_published_at
+
+                    existing_src.published_at = _parse_published_at(doc.text)
                 stmt_c = select(Chunk).where(Chunk.document_id == doc.id).order_by(Chunk.idx.asc())
                 chunks = list((await session.execute(stmt_c)).scalars().all())
                 return CachedHit(

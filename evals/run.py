@@ -28,6 +28,15 @@ from intelx.db.session import get_sessionmaker
 logger = logging.getLogger("intelx.evals")
 
 
+def evaluation_db_url() -> str:
+    """Return an isolated eval database URL, overridable for dedicated CI storage."""
+    configured = os.getenv("INTELX_EVAL_DB_URL")
+    if configured:
+        return configured
+    db_path = (REPO_ROOT / "data" / "eval.db").resolve()
+    return f"sqlite+aiosqlite:///{db_path}"
+
+
 async def _has_traceable_conflict_pair(
     session: Any,
     run_id: str,
@@ -53,31 +62,39 @@ async def _has_traceable_conflict_pair(
         for claim_b in right_claims:
             if claim_a.id == claim_b.id or claim_a.source_id == claim_b.source_id:
                 continue
-            evidence_a = select(Evidence.id).where(
-                Evidence.claim_id == claim_a.id,
-                Evidence.source_id == claim_b.source_id,
-                Evidence.document_id == claim_b.document_id,
-                Evidence.chunk_id == claim_b.chunk_id,
-                Evidence.span_start == claim_b.span_start,
-                Evidence.span_end == claim_b.span_end,
-                Evidence.quote == claim_b.quote,
-                Evidence.support_type == EvidenceSupportType.CONTRADICTS,
-                Evidence.created_by_run_id == run_id,
+            evidence_a = (
+                select(Evidence.id)
+                .where(
+                    Evidence.claim_id == claim_a.id,
+                    Evidence.source_id == claim_b.source_id,
+                    Evidence.document_id == claim_b.document_id,
+                    Evidence.chunk_id == claim_b.chunk_id,
+                    Evidence.span_start == claim_b.span_start,
+                    Evidence.span_end == claim_b.span_end,
+                    Evidence.quote == claim_b.quote,
+                    Evidence.support_type == EvidenceSupportType.CONTRADICTS,
+                    Evidence.created_by_run_id == run_id,
+                )
+                .limit(1)
             )
-            evidence_b = select(Evidence.id).where(
-                Evidence.claim_id == claim_b.id,
-                Evidence.source_id == claim_a.source_id,
-                Evidence.document_id == claim_a.document_id,
-                Evidence.chunk_id == claim_a.chunk_id,
-                Evidence.span_start == claim_a.span_start,
-                Evidence.span_end == claim_a.span_end,
-                Evidence.quote == claim_a.quote,
-                Evidence.support_type == EvidenceSupportType.CONTRADICTS,
-                Evidence.created_by_run_id == run_id,
+            evidence_b = (
+                select(Evidence.id)
+                .where(
+                    Evidence.claim_id == claim_b.id,
+                    Evidence.source_id == claim_a.source_id,
+                    Evidence.document_id == claim_a.document_id,
+                    Evidence.chunk_id == claim_a.chunk_id,
+                    Evidence.span_start == claim_a.span_start,
+                    Evidence.span_end == claim_a.span_end,
+                    Evidence.quote == claim_a.quote,
+                    Evidence.support_type == EvidenceSupportType.CONTRADICTS,
+                    Evidence.created_by_run_id == run_id,
+                )
+                .limit(1)
             )
-            if (await session.execute(evidence_a)).scalar_one_or_none() and (
+            if (await session.execute(evidence_a)).first() and (
                 await session.execute(evidence_b)
-            ).scalar_one_or_none():
+            ).first():
                 return True
     return False
 
@@ -157,6 +174,9 @@ async def run_evaluation_suite(
     settings = get_settings()
     settings.MOCK_MODE = True
     settings.LLM_PROVIDER = "mock"
+    # Never mutate the development/app DB during eval runs. This also prevents
+    # its embedded worker from racing the deterministic in-process eval executor.
+    settings.DB_URL = evaluation_db_url()
 
     # Ensure database schema is initialized
     engine = get_async_engine()
@@ -186,6 +206,8 @@ async def run_evaluation_suite(
     independence_checks_passed = 0
     extractions_expected = 0
     extractions_matched = 0
+    answer_coverage_expected = 0
+    answer_coverage_matched = 0
 
     task_results: list[dict[str, Any]] = []
 
@@ -313,26 +335,36 @@ async def run_evaluation_suite(
             )
             report_art = (await session.execute(art_stmt)).scalars().first()
             citation_valid = True
+            answer_expectations = [
+                *expected.get("must_find_claims", []),
+                *expected.get("must_cite_domains", []),
+                *expected.get("must_include_report_phrases", []),
+            ]
+            answer_coverage_expected += len(answer_expectations)
             if report_art and Path(report_art.path).exists():
                 md_content = Path(report_art.path).read_text(encoding="utf-8")
+                answer_coverage_matched += sum(
+                    1
+                    for phrase in answer_expectations
+                    if phrase.casefold() in md_content.casefold()
+                )
                 # Assert injected phrases are absent
                 for forbidden in expected.get("must_not_claim", []):
                     assert forbidden.lower() not in md_content.lower(), (
                         f"Forbidden phrase '{forbidden}' found in report!"
                     )
 
-                # Assert citations resolve against claims and sources in DB
-                s_stmt = select(Source)
-                all_sources = list((await session.execute(s_stmt)).scalars().all())
-
+                # Resolve report citations only against evidence attached to this run's claims.
                 from intelx.core.errors import IntegrityError
 
                 try:
-                    validate_citations(
+                    cleaned_report = validate_citations(
                         markdown_text=md_content,
-                        valid_source_ids={s.id for s in all_sources},
+                        valid_source_ids={c.source_id for c in claims},
                         valid_claim_ids={c.id for c in claims},
                     )
+                    if cleaned_report != md_content:
+                        citation_valid = False
                 except IntegrityError as ex:
                     print(f"    [WARN] Citation validation error on {task_id}: {ex}")
                     citation_valid = False
@@ -368,6 +400,9 @@ async def run_evaluation_suite(
     extraction_precision = (
         extractions_matched / extractions_expected if extractions_expected > 0 else 1.0
     )
+    answer_coverage_rate = (
+        answer_coverage_matched / answer_coverage_expected if answer_coverage_expected > 0 else 1.0
+    )
     independence_correctness = (
         independence_checks_passed / independence_checks_total
         if independence_checks_total > 0
@@ -393,6 +428,7 @@ async def run_evaluation_suite(
             "contradiction_recall": round(contradiction_recall, 4),
             "contradiction_precision": round(contradiction_precision, 4),
             "extraction_precision": round(extraction_precision, 4),
+            "answer_coverage_rate": round(answer_coverage_rate, 4),
             "independence_correctness": round(independence_correctness, 4),
             "null_result_correctness": round(null_result_correctness, 4),
             "completion_rate": round(completion_rate, 4),
@@ -436,6 +472,9 @@ async def run_evaluation_suite(
     print(f"  • Independence Correctness: {v_indep:.1f}% (Threshold: {t_indep:.0f}%)")
     v_prec = results["metrics"]["extraction_precision"] * 100
     print(f"  • Extraction Precision:     {v_prec:.1f}%")
+    t_answer = thresholds.get("answer_coverage_rate", 1.0) * 100
+    v_answer = results["metrics"]["answer_coverage_rate"] * 100
+    print(f"  • Answer Coverage Rate:     {v_answer:.1f}% (Threshold: {t_answer:.0f}%)")
     print(f"  • Average Latency:          {results['metrics']['avg_latency_seconds']:.2f}s")
     print(f"  • Average Cost:             ${results['metrics']['avg_usd_cost']:.4f}")
     print("====================================================")

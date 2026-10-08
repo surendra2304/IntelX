@@ -56,6 +56,8 @@ export INTELX_INFERENCE_API_KEY="<inference-service-key>"
 ### 3. OpenAI / Compatible Inference (vLLM, Ollama, DeepSeek)
 ```bash
 export INTELX_MOCK_MODE=false
+export INTELX_LLM_PROVIDER=openai_compatible
+export INTELX_LLM_MODEL="<model-id-supported-by-your-endpoint>"
 export OPENAI_API_KEY="sk-..."
 export OPENAI_BASE_URL="http://localhost:8000/v1"  # Optional private LLM endpoint
 ```
@@ -63,6 +65,8 @@ export OPENAI_BASE_URL="http://localhost:8000/v1"  # Optional private LLM endpoi
 ### 4. Anthropic Claude Inference
 ```bash
 export INTELX_MOCK_MODE=false
+export INTELX_LLM_PROVIDER=anthropic
+export INTELX_LLM_MODEL="<model-id-supported-by-Anthropic>"
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 

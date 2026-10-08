@@ -29,6 +29,12 @@ from intelx.models.gateway import ModelGateway
 logger = logging.getLogger(__name__)
 
 
+def contradiction_eligible_claims(claims: list[Claim]) -> list[Claim]:
+    """Limit deterministic conflict analysis to falsifiable factual claim types."""
+    eligible_types = (ClaimType.FACT, ClaimType.MEASUREMENT, ClaimType.EVENT)
+    return [claim for claim in claims if claim.claim_type in eligible_types]
+
+
 class VerificationVerdict(BaseModel):
     """Structured verdict from LLM comparing candidate evidence against an active claim."""
 
@@ -130,7 +136,13 @@ class VerifierAgent(BaseAgent):
                 if part
             )
 
-        for conflict in ContradictionEngine().analyze(claims, context_by_claim):
+        contradiction_candidates = contradiction_eligible_claims(claims)
+        contradiction_context = {
+            claim.id: context_by_claim.get(claim.id, "") for claim in contradiction_candidates
+        }
+        for conflict in ContradictionEngine().analyze(
+            contradiction_candidates, contradiction_context
+        ):
             claim_a = claim_by_id.get(conflict.claim_a_id)
             claim_b = claim_by_id.get(conflict.claim_b_id)
             if (

@@ -173,6 +173,17 @@ class ContradictionEngine:
     def _measurement(text: str) -> tuple[str, str, float] | None:
         """Extract one comparable measurement with a conservative metric family."""
         lowered = text.lower()
+        # A percentage in a capacity-retention statement is not a generic percentage;
+        # check it before other percent-like measures so it is compared with retention.
+        if "retention" in lowered:
+            for metric, unit, pattern in _MEASUREMENT_PATTERNS:
+                if metric != "capacity_retention":
+                    continue
+                match = pattern.search(text)
+                if match:
+                    value = float(match.group("value").replace(",", ""))
+                    if 0.0 <= value < float("inf"):
+                        return metric, unit, value
         for metric, unit, pattern in _MEASUREMENT_PATTERNS:
             match = pattern.search(text)
             if not match:
@@ -205,16 +216,32 @@ class ContradictionEngine:
         for (left, right), reason in opposing_pairs:
             if (left in a and right in b) or (right in a and left in b):
                 return reason
-        a_is_negative = " not " in f" {a} "
-        b_is_negative = " not " in f" {b} "
-        if a_is_negative != b_is_negative:
-            negative_text, affirmative_text = (a, b) if a_is_negative else (b, a)
-            negated_terms = {
-                token
-                for token in re.findall(r"\b[a-z]{5,}\b", negative_text)
-                if token not in {"there", "which", "their", "these", "those", "about"}
+        negative_pattern = re.compile(
+            r"\bnot\s+(?:\w+\s+){0,2}?(?P<predicate>[a-z]{4,})\b", re.IGNORECASE
+        )
+        negative_a = negative_pattern.search(a)
+        negative_b = negative_pattern.search(b)
+        if bool(negative_a) != bool(negative_b):
+            negative_match, affirmative_text = (negative_a, b) if negative_a else (negative_b, a)
+            assert negative_match is not None
+
+            def stem_predicate(token: str) -> str:
+                token = token.lower()
+                if len(token) > 5 and token.endswith("ies"):
+                    return token[:-3] + "y"
+                if len(token) > 5 and token.endswith(("ing", "ed")):
+                    base = token[:-3] if token.endswith("ing") else token[:-2]
+                    return base + "e" if base.endswith("as") else base
+                if len(token) > 5 and token.endswith("es"):
+                    return token[:-1]
+                if len(token) > 4 and token.endswith("s"):
+                    return token[:-1]
+                return token
+
+            negated_predicate = stem_predicate(negative_match.group("predicate"))
+            affirmative_predicates = {
+                stem_predicate(token) for token in re.findall(r"\b[a-z]{4,}\b", affirmative_text)
             }
-            affirmed_terms = set(re.findall(r"\b[a-z]{5,}\b", affirmative_text))
-            if negated_terms & affirmed_terms:
+            if negated_predicate in affirmative_predicates:
                 return "direct negation of a shared proposition"
         return None

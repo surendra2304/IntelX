@@ -11,6 +11,9 @@
     "must_cite_domains": [
       "research-archive.net"
     ],
+    "must_include_report_phrases": [
+      "Source-integrity warning"
+    ],
     "must_not_claim": [
       "perpetual motion over-unity efficiency is verified"
     ],

@@ -49,6 +49,16 @@ async def test_friday_delegation_pipeline_e2e(tmp_path):
         data = resp.json()
         run_id = data["intelx_run_id"]
         assert data["friday_request_id"] == "friday-task-9001"
+
+        # Ownership must use the API key principal identity because the universal
+        # task cancellation route applies exactly that object-level authorization.
+        from intelx.db.repos import RunRepo
+
+        async with get_sessionmaker()() as session:
+            delegated_run = await RunRepo.get_run(session, run_id)
+            assert delegated_run is not None
+            assert delegated_run.created_by == "friday-delegation"
+            assert delegated_run.scope_json["context"]["requesting_system"] == "sentinel"
         assert data["status"].upper() == "QUEUED"
         assert data["subquestion_count"] >= 3
 
@@ -101,3 +111,44 @@ async def test_friday_delegation_pipeline_e2e(tmp_path):
         assert "Research Report" in md
         assert "Key Findings" in md
         assert "[C:" in md or "[S:" in md
+        # A benchmark question must retain its unit-bearing value even though the
+        # objective does not repeat the metric name verbatim.
+        assert "160 Wh/kg" in md
+
+        # End-to-end task-level check: a comparison objective with two explicitly
+        # disputed measurements must report the conflict status, not generic consensus.
+        conflict_payload = dict(delegation_payload)
+        conflict_payload["friday_request_id"] = "friday-task-conflict-9003"
+        conflict_payload["question"] = (
+            "Investigate silicon composite anode energy density benchmarks and limits"
+        )
+        conflict_resp = await client.post(
+            "/api/v1/friday/research", json=conflict_payload, headers=headers
+        )
+        assert conflict_resp.status_code == 201
+        conflict_run_id = conflict_resp.json()["intelx_run_id"]
+        assert await worker.run_once(session_factory) is True
+        conflict_report_resp = await client.get(
+            f"/api/v1/friday/research/{conflict_run_id}/report", headers=headers
+        )
+        assert conflict_report_resp.status_code == 200
+        conflict_report = conflict_report_resp.json()["report_markdown"]
+        assert "DISPUTED" in conflict_report
+        assert "detected evidence conflict" in conflict_report
+
+        # A delegated principal must be able to cancel its own queued work through
+        # the universal task protocol, while the same route denies other owners.
+        cancel_payload = dict(delegation_payload)
+        cancel_payload["friday_request_id"] = "friday-task-cancel-9002"
+        cancel_resp = await client.post(
+            "/api/v1/friday/research", json=cancel_payload, headers=headers
+        )
+        assert cancel_resp.status_code == 201
+        cancel_run_id = cancel_resp.json()["intelx_run_id"]
+        universal_cancel = await client.post(
+            "/v1/task/execute",
+            json={"action": "cancel", "payload": {"run_id": cancel_run_id}},
+            headers=headers,
+        )
+        assert universal_cancel.status_code == 200
+        assert universal_cancel.json()["status"] == "CANCELLED"

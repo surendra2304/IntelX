@@ -86,6 +86,88 @@ def test_groundedness_disputed_claim_moved_to_unverified():
     assert "unverified_reason" in unverified[0]
 
 
+def test_report_discloses_syndicated_duplicates_and_historical_citations():
+    """Do not call same-publisher repeats independent or stale evidence current."""
+    from datetime import UTC, datetime
+
+    claims = [
+        {
+            "id": "claim-one-123",
+            "text": "A measured result was 90 Wh/kg",
+            "quote": "A measured result was 90 Wh/kg",
+            "source_id": "source-one-123",
+        },
+        {
+            "id": "claim-two-456",
+            "text": "A measured result was 90 Wh/kg",
+            "quote": "A measured result was 90 Wh/kg",
+            "source_id": "source-two-456",
+        },
+        {
+            "id": "claim-current-789",
+            "text": "A newer formulation achieved 160 Wh/kg",
+            "quote": "A newer formulation achieved 160 Wh/kg",
+            "source_id": "source-current-789",
+        },
+    ]
+    sources = [
+        {
+            "id": "source-one-123",
+            "publisher": "Same Wire",
+            "domain": "wire-one.example",
+            "published_at": datetime(2021, 1, 10, tzinfo=UTC),
+        },
+        {"id": "source-two-456", "publisher": "Same Wire", "domain": "wire-two.example"},
+        {
+            "id": "source-current-789",
+            "publisher": "Current Research Lab",
+            "domain": "lab-current.example",
+            "published_at": datetime(2026, 4, 10, tzinfo=UTC),
+        },
+    ]
+    md = render_report_markdown(
+        objective="Check independent corroboration and compare current formulations",
+        executive_answer="The evidence supports the measured result.",
+        grounded_findings=[{"statement": claims[0]["text"], "claim_ids": ["claim-one-123"]}],
+        unverified_findings=[],
+        claims=claims,
+        sources=sources,
+    )
+    assert "does not establish independent corroboration" in md
+    assert "historical; not proof of current status" in md
+    assert "published 2021-01-10" in md
+    assert "90 Wh/kg in 2021" in md
+    assert "160 Wh/kg in 2026" in md
+    assert "not a like-for-like comparison" in md
+
+
+def test_report_warns_when_cited_source_is_injection_flagged():
+    """Prompt-injection risk should be prominent in answer prose, not buried in sources."""
+    md = render_report_markdown(
+        objective="Evaluate a sourced claim",
+        executive_answer="The source states that output reached 14 mW.",
+        grounded_findings=[{"statement": "Output reached 14 mW.", "claim_ids": ["claim-risk-123"]}],
+        unverified_findings=[],
+        claims=[
+            {
+                "id": "claim-risk-123",
+                "text": "Output reached 14 mW.",
+                "source_id": "source-risk-123",
+            }
+        ],
+        sources=[
+            {
+                "id": "source-risk-123",
+                "title": "Prompt-injection test source",
+                "domain": "risk.example",
+                "injection_risk": True,
+            }
+        ],
+    )
+    assert "Source-integrity warning" in md
+    assert "flagged for prompt-injection patterns" in md
+
+
 def test_contradicted_pair_rendered_in_contradictions_section():
     """Verify disputed claims appear in the Contradictions section with citations."""
     claims = [

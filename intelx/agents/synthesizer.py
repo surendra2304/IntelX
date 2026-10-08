@@ -228,6 +228,35 @@ class SynthesizerAgent(BaseAgent):
                     getattr(c, "text", None) or (c.get("text") if isinstance(c, dict) else "") or ""
                 ).lower()
                 matches = sum(1 for w in obj_words if w in txt)
+                # Query terms often omit the unit-bearing statement itself (e.g. a
+                # benchmark question may not literally say "Wh/kg"). Keep empirical
+                # measurements visible in the report instead of spending every finding
+                # slot on textually similar but less decision-relevant prose.
+                metric_focus = bool(
+                    obj_words
+                    & {
+                        "benchmark",
+                        "benchmarks",
+                        "measurement",
+                        "measurements",
+                        "performance",
+                        "compare",
+                        "comparison",
+                        "capacity",
+                        "density",
+                        "thermal",
+                        "cycle",
+                    }
+                )
+                has_measurement = bool(
+                    re.search(
+                        r"\b\d+(?:\.\d+)?\s*(?:%|wh\s*/\s*kg|wh/kg|m[sS]/cm|cycles?|qubits|m[wW]|degrees? Celsius|°C)(?=\W|$)",
+                        txt,
+                        re.IGNORECASE,
+                    )
+                )
+                if metric_focus and has_measurement:
+                    matches += 2
                 conf = (
                     getattr(c, "confidence", None)
                     or (c.get("confidence") if isinstance(c, dict) else 0.8)
@@ -247,7 +276,21 @@ class SynthesizerAgent(BaseAgent):
                 cconf = getattr(c, "confidence", 1.0) or (
                     c.get("confidence", 1.0) if isinstance(c, dict) else 1.0
                 )
-                formatted_claims.append({"id": cid, "text": ctext, "confidence": cconf})
+                status = getattr(c, "status", None) or (
+                    c.get("status") if isinstance(c, dict) else None
+                )
+                claim_type = getattr(c, "claim_type", None) or (
+                    c.get("claim_type") if isinstance(c, dict) else None
+                )
+                formatted_claims.append(
+                    {
+                        "id": cid,
+                        "text": ctext,
+                        "confidence": cconf,
+                        "status": getattr(status, "value", status),
+                        "claim_type": getattr(claim_type, "value", claim_type),
+                    }
+                )
 
             user_prompt = (
                 f"RESEARCH OBJECTIVE: {objective}\n\n"
@@ -344,7 +387,7 @@ class SynthesizerAgent(BaseAgent):
         )
 
         # CITATION INTEGRITY CHECK: Machine-enforced
-        validate_citations(
+        report_md = validate_citations(
             markdown_text=report_md,
             valid_source_ids=valid_source_ids,
             valid_claim_ids=valid_claim_ids,

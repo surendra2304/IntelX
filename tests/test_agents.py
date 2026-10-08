@@ -1,6 +1,7 @@
 """Tests for INTELX First Four Agents (Planner, Scout, Retriever, Extractor)."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -15,6 +16,7 @@ from intelx.agents.extractor import (
 from intelx.agents.planner import Plan, PlannerAgent
 from intelx.agents.retriever import RetrieverAgent
 from intelx.agents.scout import ScoutAgent, SourceCandidate
+from intelx.agents.verifier import contradiction_eligible_claims
 from intelx.connectors.search import SearchResult
 from intelx.core.enums import ClaimType, SourceKind, TaskErrorClass
 from intelx.core.errors import ProviderError
@@ -31,6 +33,36 @@ from intelx.models.types import Usage
 def db_session_factory():
     """Get active async sessionmaker."""
     return get_sessionmaker()
+
+
+@pytest.mark.asyncio
+async def test_retriever_cache_enriches_missing_publication_metadata(db_session_factory):
+    """Cached documents still backfill explicit date headers needed for temporal caveats."""
+    from datetime import UTC, datetime
+
+    location = "file:///fixtures/cached-publication-metadata.txt"
+    async with db_session_factory() as session:
+        source = await SourceRepo.create_source(
+            session=session,
+            kind=SourceKind.FILE,
+            location=location,
+            domain="archive.example",
+            title="Historical fixture",
+            fingerprint="cached-published-date-test",
+        )
+        await SourceRepo.create_document(
+            session=session,
+            source_id=source.id,
+            text_content="# Historical fixture\nPublished: 2021-01-10\nEvidence text.",
+        )
+        result = await RetrieverAgent().execute(
+            candidates=[
+                SourceCandidate(location=location, title="Historical fixture", reason="test")
+            ],
+            session=session,
+        )
+        assert len(result.retrieved) == 1
+        assert source.published_at == datetime(2021, 1, 10, tzinfo=UTC)
 
 
 def test_contradiction_engine_matches_subject_and_metric_before_disputing_values():
@@ -522,3 +554,47 @@ async def test_retriever_snippet_fallback_on_fetch_failure(db_session_factory):
         source = await SourceRepo.get_source(session, ret_doc.source_id)
         assert source is not None
         assert source.license_note == "search-engine-snippet"
+
+
+def test_retention_percentages_are_parsed_as_capacity_retention():
+    """Retention % claims must not be classified as generic percentages."""
+    assert ContradictionEngine._measurement("Capacity retention was 82% after cycling.") == (
+        "capacity_retention",
+        "%",
+        82.0,
+    )
+    assert ContradictionEngine._measurement("Capacity retention was 61% after cycling.") == (
+        "capacity_retention",
+        "%",
+        61.0,
+    )
+
+
+def test_direct_negation_compares_the_negated_predicate_not_shared_nouns():
+    """Only opposing polarity on the same predicate creates a negation conflict."""
+    assert (
+        ContradictionEngine._qualitative_conflict(
+            "The sodium cell does not increase capacity retention.",
+            "The sodium cell increases capacity retention.",
+        )
+        == "direct negation of a shared proposition"
+    )
+    assert (
+        ContradictionEngine._qualitative_conflict(
+            "The sodium cell does not increase capacity retention.",
+            "The sodium cell shows high capacity retention.",
+        )
+        is None
+    )
+
+
+def test_deterministic_contradiction_scan_excludes_opinions_and_forecasts():
+    claims = [
+        SimpleNamespace(claim_type=ClaimType.FACT),
+        SimpleNamespace(claim_type=ClaimType.MEASUREMENT),
+        SimpleNamespace(claim_type=ClaimType.EVENT),
+        SimpleNamespace(claim_type=ClaimType.STATEMENT_OF_OPINION),
+        SimpleNamespace(claim_type=ClaimType.FORECAST),
+    ]
+    eligible = contradiction_eligible_claims(claims)
+    assert eligible == claims[:3]

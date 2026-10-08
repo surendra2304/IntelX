@@ -141,8 +141,105 @@ def render_report_markdown(
         if c_id:
             claims_map[str(c_id)] = c
 
-    # Build Key Findings section
+    # Detect repeated assertions that are not independent corroboration.
+    repeated_nonindependent = 0
+    claim_groups: dict[str, list[Any]] = {}
+    for claim in claims:
+        text = re.sub(r"\W+", " ", str(_get_val(claim, "text", "")).lower()).strip()
+        if text:
+            claim_groups.setdefault(text, []).append(claim)
+    for group in claim_groups.values():
+        for i, claim_a in enumerate(group):
+            source_a = sources_map.get(str(_get_val(claim_a, "source_id", "")))
+            for claim_b in group[i + 1 :]:
+                source_b = sources_map.get(str(_get_val(claim_b, "source_id", "")))
+                if (
+                    not source_a
+                    or not source_b
+                    or _get_val(claim_a, "source_id") == _get_val(claim_b, "source_id")
+                ):
+                    continue
+                from intelx.core.independence import is_independent_evidence
+
+                independent, _ = is_independent_evidence(
+                    source_a,
+                    None,
+                    str(_get_val(claim_a, "quote", "") or _get_val(claim_a, "text", "")),
+                    source_b,
+                    None,
+                    str(_get_val(claim_b, "quote", "") or _get_val(claim_b, "text", "")),
+                )
+                if not independent:
+                    repeated_nonindependent += 1
+
+    # Build an explicit, qualified comparison when dated source claims contain the
+    # same unit-bearing metric from both the historical and target years.
+    target_years = re.findall(r"\b(20\d{2})\b", objective)
+    target_year = int(target_years[-1]) if target_years else datetime.now(UTC).year
+    dated_measurements: dict[int, list[tuple[str, str]]] = {}
+    comparison_objective = any(
+        term in objective.lower() for term in ("compare", "comparison", "historical", "current")
+    )
+    if comparison_objective:
+        for claim in claims:
+            source_id = str(_get_val(claim, "source_id", ""))
+            source = sources_map.get(source_id)
+            published_at = _get_val(source, "published_at") if source else None
+            if isinstance(published_at, str):
+                try:
+                    published_at = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+                except ValueError:
+                    published_at = None
+            if not isinstance(published_at, datetime):
+                continue
+            for value, unit in re.findall(
+                r"\b(\d+(?:\.\d+)?)\s*(Wh\s*/\s*kg)\b",
+                str(_get_val(claim, "text", "")),
+                re.IGNORECASE,
+            ):
+                measurement = (f"{value} {unit.replace(' ', '')}", f"[S:{source_id[:8]}]")
+                year_measurements = dated_measurements.setdefault(published_at.year, [])
+                if measurement not in year_measurements:
+                    year_measurements.append(measurement)
+
     clean_answer = _clean_prose(executive_answer)
+    cited_source_ids = {
+        str(_get_val(claim, "source_id", "")) for claim in claims if _get_val(claim, "source_id")
+    }
+    injection_risk_count = sum(
+        1
+        for source_id in cited_source_ids
+        if _get_val(sources_map.get(source_id), "injection_risk", False)
+    )
+    if injection_risk_count:
+        clean_answer += (
+            f" Source-integrity warning: {injection_risk_count} cited source(s) were flagged "
+            "for prompt-injection patterns. This warning alone neither validates nor refutes "
+            "the sources’ factual assertions."
+        )
+    historical_years = sorted(year for year in dated_measurements if year < target_year)
+    current_measurements = dated_measurements.get(target_year, [])
+    if historical_years and current_measurements:
+        old_year = historical_years[-1]
+        old_measurements = dated_measurements[old_year]
+        if len(old_measurements) == 1 and len(current_measurements) == 1:
+            old_value, old_citation = old_measurements[0]
+            current_value, current_citation = current_measurements[0]
+            clean_answer += (
+                f" Temporal comparison: cited sources report {old_value} in {old_year} "
+                f"{old_citation} and {current_value} in {target_year} {current_citation}. "
+                "The available evidence does not establish equivalent formulations or test "
+                "conditions, so these are reported values—not a like-for-like comparison."
+            )
+
+    if repeated_nonindependent and any(
+        term in objective.lower() for term in ("independent", "corroborat", "syndicat")
+    ):
+        clean_answer = (
+            "The evidence does not establish independent corroboration: "
+            f"{repeated_nonindependent} repeated claim pair(s) failed the source-independence check. "
+            + clean_answer
+        )
     findings_lines = []
     if grounded_findings:
         for f in grounded_findings:
@@ -150,6 +247,7 @@ def render_report_markdown(
             conf_label = f.get("confidence_label") or "High"
             claim_ids = f.get("claim_ids") or f.get("claim_ids_json") or []
             citation_tokens = []
+            historical_dates = []
             for cid in claim_ids:
                 citation_tokens.append(f"[C:{cid[:8]}]")
                 claim = claims_map.get(cid)
@@ -157,6 +255,27 @@ def render_report_markdown(
                     sid = _get_val(claim, "source_id")
                     if sid:
                         citation_tokens.append(f"[S:{str(sid)[:8]}]")
+                        source = sources_map.get(str(sid))
+                        published_at = _get_val(source, "published_at") if source else None
+                        if isinstance(published_at, str):
+                            try:
+                                published_at = datetime.fromisoformat(
+                                    published_at.replace("Z", "+00:00")
+                                )
+                            except ValueError:
+                                published_at = None
+                        if (
+                            isinstance(published_at, datetime)
+                            and any(
+                                term in objective.lower()
+                                for term in ("current", "currently", "latest", "today", "2026")
+                            )
+                            and published_at.year < datetime.now(UTC).year
+                        ):
+                            historical_dates.append(published_at.date().isoformat())
+            if historical_dates:
+                earliest = min(historical_dates)
+                stmt = f"As reported in evidence published {earliest} (historical; not proof of current status): {stmt}"
             cite_str = " ".join(dict.fromkeys(citation_tokens))
             is_inf = f.get("is_inference", False) or not citation_tokens
             prefix = "[Inference] " if is_inf else ""
