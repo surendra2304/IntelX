@@ -15,10 +15,10 @@ Improve agent usefulness on realistic, difficult, and dead-end research tasks. E
 - [x] Current code verification: Ruff check and format pass; **269 tests passed, 2 skipped**; all eight golden eval tasks passed all configured thresholds, including citation validity, answer coverage, and required report-specific caveats.
 - [x] Current app verification: eight distinct tasks submitted through the running HTTP API; **8/8 completed**, including no-evidence, disputed, poisoned-source, syndicated-source, and historical/current comparison cases. Each report met all required phrases and contained no forbidden phrases.
 - [~] Live-provider research remains blocked: no OpenAI/Anthropic/Tavily/search credentials are configured, `MOCK_MODE=True`, and the sandbox only permits outbound hosts `github.com`, `codeload.github.com`, `api.github.com`, `registry.npmjs.org`, `pypi.org`, and `files.pythonhosted.org`. Therefore no authentic external-search/provider result can be obtained here without misrepresenting the environment.
-- [~] Final review, checkpoint commit/push on the fixed branch, and concise state update. Do not claim all-quality completion while live-provider behavior remains unverified.
+- [x] Final diff/secret-safe review and checkpoint commit/push to the fixed branch completed: `3ad7e44` (`Improve research answer quality and evaluation integrity`) pushed to `origin/arena/5808691e-intelx`.
 
 ## Current step
-[~] Final diff/secret-safe review, commit the verified local checkpoint to `arena/5808691e-intelx`, and push only to that branch if remote access succeeds. Preserve the explicit live-provider blocker and avoid claiming end-to-end real-web validation.
+[~] Live-provider behavior remains unverified and cannot be exercised in this environment (no provider/search credentials; outbound egress allowlist excludes provider/search hosts). Do not claim full real-web task completion or conflate this blocker with mock-mode test coverage. Resume live-provider verification only if the execution environment changes.
 
 ## Key verification facts
 - Branch: `arena/5808691e-intelx`; base HEAD at resume: `0921788bfd4c94bb93805493d43df2418495fb06`.
