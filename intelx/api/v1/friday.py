@@ -500,7 +500,9 @@ async def delegate_research_from_friday(
                     session=session,
                     objective=payload.question,
                     scope_json=scope_data,
-                    created_by=f"friday:{payload.context.requesting_system}",
+                    # Match the stable identity used by the API-key ownership checks.
+                    # Keep requesting_system as metadata in scope_json, not as the owner ID.
+                    created_by=_api_key.name,
                 )
                 run.idempotency_key = effective_idempotency_key
                 await session.commit()

@@ -1,5 +1,6 @@
 """Tests for INTELX Synthesis, Report Rendering, Citation Integrity, and Artifact Generation."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -84,6 +85,111 @@ def test_groundedness_disputed_claim_moved_to_unverified():
     assert len(unverified) == 1
     assert unverified[0]["statement"] == "Contested finding"
     assert "unverified_reason" in unverified[0]
+
+
+def test_report_discloses_syndicated_duplicates_and_historical_citations():
+    """Do not call same-publisher repeats independent or stale evidence current."""
+    from datetime import UTC, datetime
+
+    claims = [
+        {
+            "id": "claim-one-123",
+            "text": "A measured result was 90 Wh/kg",
+            "quote": "A measured result was 90 Wh/kg",
+            "source_id": "source-one-123",
+        },
+        {
+            "id": "claim-two-456",
+            "text": "A measured result was 90 Wh/kg",
+            "quote": "A measured result was 90 Wh/kg",
+            "source_id": "source-two-456",
+        },
+        {
+            "id": "claim-current-789",
+            "text": "A newer formulation achieved 160 Wh/kg",
+            "quote": "A newer formulation achieved 160 Wh/kg",
+            "source_id": "source-current-789",
+        },
+    ]
+    sources = [
+        {
+            "id": "source-one-123",
+            "publisher": "Same Wire",
+            "domain": "wire-one.example",
+            "published_at": datetime(2021, 1, 10, tzinfo=UTC),
+        },
+        {"id": "source-two-456", "publisher": "Same Wire", "domain": "wire-two.example"},
+        {
+            "id": "source-current-789",
+            "publisher": "Current Research Lab",
+            "domain": "lab-current.example",
+            "published_at": datetime(2026, 4, 10, tzinfo=UTC),
+        },
+    ]
+    md = render_report_markdown(
+        objective="Check independent corroboration and compare current formulations",
+        executive_answer="The evidence supports the measured result.",
+        grounded_findings=[{"statement": claims[0]["text"], "claim_ids": ["claim-one-123"]}],
+        unverified_findings=[],
+        claims=claims,
+        sources=sources,
+    )
+    assert "does not establish independent corroboration" in md
+    assert "historical; not proof of current status" in md
+    assert "published 2021-01-10" in md
+    assert "90 Wh/kg in 2021" in md
+    assert "160 Wh/kg in 2026" in md
+    assert "not a like-for-like comparison" in md
+
+
+def test_report_distinguishes_mock_from_live_model_execution():
+    """A configured mock report must not be mistaken for live external research."""
+    common = {
+        "objective": "Assess evidence availability",
+        "executive_answer": "No verifiable finding established.",
+        "grounded_findings": [],
+        "unverified_findings": [],
+        "claims": [],
+        "sources": [],
+    }
+    mock = render_report_markdown(**common, execution_mode="MOCK")
+    assert "Execution mode: MOCK" in mock
+    assert "not live external research" in mock
+
+    live = render_report_markdown(**common, execution_mode="LIVE MODEL CALL")
+    assert "Execution mode: LIVE MODEL CALL" in live
+    assert "does not prove that sources were live-fetched" in live
+
+    fallback = render_report_markdown(**common, execution_mode="MOCK FALLBACK")
+    assert "Execution mode: MOCK FALLBACK" in fallback
+    assert "not treat this as a fully live-provider answer" in fallback
+
+
+def test_report_warns_when_cited_source_is_injection_flagged():
+    """Prompt-injection risk should be prominent in answer prose, not buried in sources."""
+    md = render_report_markdown(
+        objective="Evaluate a sourced claim",
+        executive_answer="The source states that output reached 14 mW.",
+        grounded_findings=[{"statement": "Output reached 14 mW.", "claim_ids": ["claim-risk-123"]}],
+        unverified_findings=[],
+        claims=[
+            {
+                "id": "claim-risk-123",
+                "text": "Output reached 14 mW.",
+                "source_id": "source-risk-123",
+            }
+        ],
+        sources=[
+            {
+                "id": "source-risk-123",
+                "title": "Prompt-injection test source",
+                "domain": "risk.example",
+                "injection_risk": True,
+            }
+        ],
+    )
+    assert "Source-integrity warning" in md
+    assert "flagged for prompt-injection patterns" in md
 
 
 def test_contradicted_pair_rendered_in_contradictions_section():
@@ -244,6 +350,11 @@ async def test_full_mock_mode_end_to_end_artifacts_and_headings(db_session_facto
             assert ArtifactType.REPORT in art_types
             assert ArtifactType.EVIDENCE_PACK in art_types
             assert ArtifactType.SOURCE_LIST in art_types
+
+            # Both human- and machine-readable outputs must disclose mock execution.
+            report_json_art = next(a for a in artifacts if a.format == ArtifactFormat.JSON)
+            report_json = json.loads(Path(report_json_art.path).read_text(encoding="utf-8"))
+            assert report_json["meta"]["execution_mode"] == "MOCK"
 
             # Verify files exist on disk
             report_md_art = next(a for a in artifacts if a.format == ArtifactFormat.MD)

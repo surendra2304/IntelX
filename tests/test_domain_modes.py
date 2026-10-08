@@ -88,6 +88,28 @@ def test_credibility_patterns_match_hostname_boundaries_only():
     assert local_upload_score == 0.85
     assert local_upload_label == "Verified Local Corpus"
 
+    # File URLs must not bypass the same local corpus path allowlist.
+    for file_url in (
+        "file:///etc/passwd",
+        "file:///tmp/evals/fixtures/../../etc/passwd",
+        "file://remote-host/data/uploads/private.pdf",
+    ):
+        score, label = SourceCredibilityScorer.score_source(file_url, "technical")
+        assert score == 0.60
+        assert label == "General Technical Documentation"
+
+    corpus_file_url = SourceCredibilityScorer.score_source(
+        "file:///srv/intelx/data/uploads/report.pdf", "technical"
+    )
+    assert corpus_file_url == (0.85, "Verified Local Corpus")
+
+    for advisory_url, expected_score in (
+        ("https://github.com/advisories/GHSA-1234", 0.80),
+        ("https://github.com/foo/advisories/GHSA-1234", 0.50),
+        ("https://github.com/advisories-fake/GHSA-1234", 0.50),
+    ):
+        assert SourceCredibilityScorer.score_source(advisory_url, "security")[0] == expected_score
+
 
 def test_source_credibility_scorer_market_hierarchy():
     """Verify market domain credibility scoring hierarchy."""

@@ -22,7 +22,11 @@ from intelx.core.errors import (
 )
 from intelx.core.settings import Settings
 from intelx.db.session import get_sessionmaker
-from intelx.memory.normalize import chunk_text_with_offsets, ingest_and_normalize
+from intelx.memory.normalize import (
+    _parse_published_at,
+    chunk_text_with_offsets,
+    ingest_and_normalize,
+)
 
 
 @pytest.fixture
@@ -248,6 +252,18 @@ def test_chunking_offset_integrity():
         slice_text = sample_text[c.start_char : c.end_char]
         assert slice_text == c.text
         assert len(c.text) == (c.end_char - c.start_char)
+
+
+def test_parse_explicit_publication_date():
+    """Publication dates in fixture/document metadata must survive ingestion."""
+    assert (
+        _parse_published_at("# Study\nPublished: 2021-01-10\nDomain: example.org")
+        .date()
+        .isoformat()
+        == "2021-01-10"
+    )
+    assert _parse_published_at("Publication date: 2021") is not None
+    assert _parse_published_at("No date supplied") is None
 
 
 @pytest.mark.asyncio

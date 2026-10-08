@@ -80,10 +80,26 @@ class CriticAgent(BaseAgent):
         for c in claims:
             if isinstance(c, dict):
                 formatted_claims.append(
-                    {"id": c.get("id"), "text": c.get("text"), "confidence": c.get("confidence")}
+                    {
+                        "id": c.get("id"),
+                        "text": c.get("text"),
+                        "confidence": c.get("confidence"),
+                        "status": c.get("status"),
+                        "claim_type": c.get("claim_type"),
+                    }
                 )
             else:
-                formatted_claims.append({"id": c.id, "text": c.text, "confidence": c.confidence})
+                status = getattr(c, "status", None)
+                claim_type = getattr(c, "claim_type", None)
+                formatted_claims.append(
+                    {
+                        "id": c.id,
+                        "text": c.text,
+                        "confidence": c.confidence,
+                        "status": getattr(status, "value", status),
+                        "claim_type": getattr(claim_type, "value", claim_type),
+                    }
+                )
 
         user_prompt = (
             f"DRAFT FINDINGS / CONCLUSIONS:\n"

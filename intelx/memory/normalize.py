@@ -20,6 +20,26 @@ from intelx.db.repos import SourceRepo
 logger = logging.getLogger(__name__)
 
 
+def _parse_published_at(text: str):
+    """Parse explicit ISO publication metadata from common document headers."""
+    import re
+    from datetime import UTC, datetime
+
+    for line in text.splitlines()[:10]:
+        match = re.match(
+            r"\s*(?:published|publication date)\s*:\s*(\d{4}(?:-\d{2}-\d{2})?)",
+            line,
+            re.I,
+        )
+        if match:
+            value = match.group(1)
+            try:
+                return datetime.fromisoformat(value).replace(tzinfo=UTC)
+            except ValueError:
+                return datetime(int(value), 1, 1, tzinfo=UTC)
+    return None
+
+
 async def _adopt_existing(
     session: AsyncSession,
     fingerprint: str,
@@ -201,13 +221,16 @@ async def ingest_and_normalize(
     """Normalize raw content, enforce deduplication, persist document and chunk hierarchy."""
     cfg = settings or get_settings()
 
-    # 1. Normalize plain text
+    # 1. Normalize text and extract explicit publication-date metadata before deduplication.
     normalized_text = normalize_text_content(raw_bytes, content_type, filename=location)
     fingerprint = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
+    published_at = _parse_published_at(normalized_text)
 
-    # 2. Check for deduplication
+    # 2. Check for deduplication; enrich a previously ingested source with explicit metadata.
     adopted = await _adopt_existing(session, fingerprint, normalized_text)
     if adopted:
+        if adopted[0].published_at is None and published_at:
+            adopted[0].published_at = published_at
         return (*adopted, False)
 
     # 2.5 Redact high-entropy secrets while preserving character offsets
@@ -267,6 +290,7 @@ async def ingest_and_normalize(
         domain=domain,
         publisher=publisher,
         title=title,
+        published_at=published_at,
         content_type=content_type,
         fingerprint=fingerprint,
         trust_tier=trust_tier,

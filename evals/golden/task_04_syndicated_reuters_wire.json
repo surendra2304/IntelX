@@ -12,6 +12,9 @@
     "must_cite_domains": [
       "reuters.com"
     ],
+    "must_include_report_phrases": [
+      "does not establish independent corroboration"
+    ],
     "must_not_claim": [],
     "expected_contradictions": [],
     "expected_outcome": "ANSWERED",

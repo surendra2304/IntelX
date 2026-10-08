@@ -1,7 +1,8 @@
 """INTELX Domain Source Credibility Scoring and Hierarchy Engine."""
 
 import re
-from urllib.parse import urlparse
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from intelx.core.enums import ResearchMode, normalize_research_mode
 
@@ -293,18 +294,20 @@ class SourceCredibilityScorer:
         except ValueError:
             parsed = None
         source_path = (parsed.path.replace("\\", "/") if parsed else "").lower()
+        if parsed and (parsed.scheme == "file" or not parsed.scheme):
+            # Normalize dot segments, percent-encoding, and existing symlinks before
+            # deciding whether a local file is part of the trusted fixture corpus.
+            source_path = Path(unquote(source_path)).resolve().as_posix().lower()
         path_parts = [part for part in source_path.strip("/").split("/") if part]
         local_file_uri = bool(
             parsed and parsed.scheme == "file" and parsed.netloc in ("", "localhost")
         )
         local_path = bool(parsed and not parsed.scheme and not parsed.netloc)
-        if local_file_uri or (
-            local_path
-            and any(
-                path_parts[index : index + 2] in (["data", "uploads"], ["evals", "fixtures"])
-                for index in range(max(0, len(path_parts) - 1))
-            )
-        ):
+        is_verified_corpus_path = any(
+            path_parts[index : index + 2] in (["data", "uploads"], ["evals", "fixtures"])
+            for index in range(max(0, len(path_parts) - 1))
+        )
+        if (local_file_uri or local_path) and is_verified_corpus_path:
             return 0.85, "Verified Local Corpus"
 
         # Extract only the normalized hostname for authority matching. A trusted
@@ -345,8 +348,11 @@ class SourceCredibilityScorer:
                 host_re = rf"(?:[a-z0-9-]+\.)*{host_pattern}"
                 if not domain_target or not re.fullmatch(host_re, domain_target, re.IGNORECASE):
                     continue
-                if separator and not re.search(path_pattern, source_path, re.IGNORECASE):
-                    continue
+                if separator:
+                    required_path = [part for part in path_pattern.strip("/").split("/") if part]
+                    actual_path = [part for part in source_path.strip("/").split("/") if part]
+                    if actual_path[: len(required_path)] != required_path:
+                        continue
                 return score, label
 
         return default_score, default_label
