@@ -10,6 +10,36 @@ from intelx.db.models import ApiKey
 
 root_api_router = APIRouter()
 
+
+def _task_receipt(
+    *,
+    requested_action: str,
+    target: str = "intelx",
+    authorization_decision: str = "AUTHORIZED",
+    result: dict | None = None,
+    verification_evidence: dict | None = None,
+    failure_reason: str | None = None,
+) -> dict:
+    """Signed-in-spirit receipt for the Universal Task Protocol.
+
+    FRIDAY's cognitive mesh refuses to call a task COMPLETED unless the peer answers
+    with a receipt naming the same action it dispatched, targeting this agent, carrying
+    non-empty verification evidence and no failure reason (see friday.cognition.mesh.
+    verify_receipt). The schema mirrors FRIDAY's ActionReceipt so the caller can parse
+    it without translation.
+    """
+    from datetime import datetime, timezone
+
+    return {
+        "requested_action": requested_action,
+        "target": target,
+        "authorization_decision": authorization_decision,
+        "execution_timestamp": datetime.now(timezone.utc).isoformat(),
+        "result": dict(result or {}),
+        "verification_evidence": dict(verification_evidence or {}),
+        "failure_reason": failure_reason,
+    }
+
 # Root health endpoints (/healthz, /readyz)
 root_api_router.include_router(health_root_router)
 
@@ -67,6 +97,16 @@ async def execute_task(body: dict, api_key: ApiKey = Depends(get_friday_api_key)
                     },
                     "summary": f"Research task '{run.id}' cancelled; partial evidence preserved.",
                     "execution_time_ms": int((time.time() - t0) * 1000),
+                    "receipt": _task_receipt(
+                        requested_action=action,
+                        authorization_decision="AUTHORIZED",
+                        result={"run_id": run.id, "cancelled": True},
+                        verification_evidence={
+                            "run_id": run.id,
+                            "run_status": "cancelled",
+                            "partial_evidence_preserved": True,
+                        },
+                    ),
                 }
 
     # 2. Action = Research / Query
@@ -230,6 +270,7 @@ async def execute_task(body: dict, api_key: ApiKey = Depends(get_friday_api_key)
 
     lat = int((time.time() - t0) * 1000)
     summary = f"IntelX synthesized evidence-driven research for query '{query}' with {len(sources_data)} cited sources."
+    completed_run_ids = [str(run_id) for run_id in run_ids]
 
     return {
         "task_id": task_id,
@@ -246,4 +287,21 @@ async def execute_task(body: dict, api_key: ApiKey = Depends(get_friday_api_key)
         },
         "summary": summary,
         "execution_time_ms": lat,
+        "receipt": _task_receipt(
+            requested_action=action,
+            authorization_decision="AUTHORIZED",
+            result={
+                "query": query,
+                "citations_count": len(sources_data),
+                "findings_count": len(findings_items),
+            },
+            verification_evidence={
+                "task_id": task_id,
+                "completed_run_ids": completed_run_ids,
+                "sources_count": len(sources_data),
+                "provenance_chain_length": len(provenance_chain),
+                "findings_count": len(findings_items),
+                "summary": summary,
+            },
+        ),
     }
