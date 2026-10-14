@@ -125,7 +125,7 @@ class Settings(BaseSettings):
 
     # Inference Multi-Agent Gateway Provider
     INFERENCE_URL: str = Field(
-        default="https://inference-h7bn.onrender.com",
+        default="http://inference:8000",
         validation_alias=AliasChoices(
             "INTELX_INFERENCE_URL",
             "INFERENCE_URL",
@@ -172,7 +172,7 @@ class Settings(BaseSettings):
 
     # Memora Cloud Memory Integration
     MEMORA_URL: str = Field(
-        default="https://memora-cavc.onrender.com",
+        default="http://memora:8000",
         validation_alias=AliasChoices("INTELX_MEMORA_URL", "MEMORA_URL", "MEMORA_BASE_URL"),
         description="Base URL for Memora persistent memory server",
     )
@@ -184,7 +184,7 @@ class Settings(BaseSettings):
 
     # Futuris Forecasting Integration
     FUTURIS_BASE_URL: str = Field(
-        default="https://futuris-th6f.onrender.com",
+        default="http://futuris:8000",
         validation_alias=AliasChoices("INTELX_FUTURIS_BASE_URL", "FUTURIS_BASE_URL", "FUTURIS_URL"),
         description="Base URL for Futuris predictive forecasting engine",
     )
@@ -194,14 +194,14 @@ class Settings(BaseSettings):
         description="API key for Futuris integration",
     )
     FUTURIS_WEBHOOK_URL: str | None = Field(
-        default="https://futuris-th6f.onrender.com/api/v1/webhooks/research-finding-relevant",
+        default="http://futuris:8000/api/v1/webhooks/research-finding-relevant",
         validation_alias=AliasChoices("INTELX_FUTURIS_WEBHOOK_URL", "FUTURIS_WEBHOOK_URL"),
         description="Webhook URL on Futuris for research-triggered notifications",
     )
 
     # StrateX Algorithmic Trading Integration
     STRATEX_BASE_URL: str = Field(
-        default="https://stratex-8wj1.onrender.com",
+        default="http://stratex:8000",
         validation_alias=AliasChoices("INTELX_STRATEX_BASE_URL", "STRATEX_BASE_URL", "STRATEX_URL"),
         description="Base URL for StrateX trading engine",
     )
@@ -211,9 +211,24 @@ class Settings(BaseSettings):
         description="API key for StrateX integration",
     )
     STRATEX_WEBHOOK_URL: str | None = Field(
-        default="https://stratex-8wj1.onrender.com/api/v1/webhooks/intelx-signal",
+        default="http://stratex:8000/api/v1/webhooks/intelx-signal",
         validation_alias=AliasChoices("INTELX_STRATEX_WEBHOOK_URL", "STRATEX_WEBHOOK_URL"),
         description="Webhook URL on StrateX for automated trade execution triggers",
+    )
+
+    # CORS Whitelist Configuration
+    CORS_ORIGINS: list[str] = Field(
+        default=[
+            "https://friday-universe.duckdns.org",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+            "http://localhost:8005",
+            "http://127.0.0.1:8005",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        validation_alias=AliasChoices("INTELX_CORS_ORIGINS", "CORS_ORIGINS"),
+        description="Whitelisted origins for CORS requests",
     )
 
     # Per-Role LLM Model Overrides

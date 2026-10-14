@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import logging
 import os
 import shutil
 import subprocess
@@ -11,6 +12,8 @@ from pathlib import Path
 from intelx.core.logging import setup_logging
 from intelx.core.settings import get_settings
 
+logger = logging.getLogger("intelx.cli")
+
 
 def run_serve(args: argparse.Namespace) -> None:
     """Launch the FastAPI application server via Uvicorn."""
@@ -19,7 +22,7 @@ def run_serve(args: argparse.Namespace) -> None:
     setup_logging()
     host = args.host or "0.0.0.0"
     port = args.port if args.port is not None else int(os.getenv("PORT", "8000"))
-    print(f"[INTELX] Starting server on http://{host}:{port}")
+    logger.info(f"Starting server on http://{host}:{port}")
     uvicorn.run(
         "intelx.app.main:app",
         host=host,
@@ -34,18 +37,18 @@ def run_worker(_args: argparse.Namespace) -> None:
     from intelx.orchestration.worker import OrchestrationWorker
 
     setup_logging()
-    print("[INTELX] Starting background orchestration worker daemon...")
+    logger.info("Starting background orchestration worker daemon...")
     worker = OrchestrationWorker()
     try:
         asyncio.run(worker.start())
     except KeyboardInterrupt:
         worker.stop()
-        print("\n[INTELX] Worker shutdown gracefully.")
+        logger.info("Worker shutdown gracefully.")
 
 
 def run_migrate(_args: argparse.Namespace) -> None:
     """Execute Alembic database migrations."""
-    print("[INTELX] Applying database migrations...")
+    logger.info("Applying database migrations...")
     res = subprocess.run(["alembic", "upgrade", "head"])
     sys.exit(res.returncode)
 

@@ -162,8 +162,12 @@ def test_gateway_propagates_injected_provider_settings():
     assert anthropic_provider.settings is anthropic_settings
 
 
-def test_provider_specific_credentials_do_not_cross_contaminate():
+def test_provider_specific_credentials_do_not_cross_contaminate(monkeypatch):
     """When both keys are configured, each backend must receive its own credential."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("INTELX_ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("INTELX_OPENAI_API_KEY", raising=False)
     settings = Settings(
         LLM_PROVIDER="anthropic",
         LLM_API_KEY="local-generic-test-key",

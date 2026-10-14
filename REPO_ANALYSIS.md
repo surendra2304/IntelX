@@ -35,7 +35,7 @@
 | Repo size | **[FACT]** 303 files, 40,222 newline-counted lines; includes fixtures/docs/generated-looking JSON, not pure LOC |
 | Age/activity | **[FACT]** Available git history: one commit dated 2026-10-07, one author, zero tags. **[INFERENCE]** No age/activity trend can be responsibly assessed from the shallow snapshot |
 | Test posture | **[FACT]** 254 tests passed when excluding live test; eight-task eval passed; CI excludes `tests/test_live.py` (`.github/workflows/ci.yml`) |
-| Deployment | **[FACT]** Docker single-container and production compose files, Render manifest, Nginx config (`Dockerfile`, `docker-compose*.yml`, `render.yaml`, `deploy/nginx/nginx.conf`) |
+| Deployment | **[FACT]** Docker single-container and production compose files, Nginx config (`Dockerfile`, `docker-compose*.yml`, `deploy/nginx/nginx.conf`) |
 | Overall grade | **[INFERENCE]** B-/C+ for an early-stage codebase: good offline verification and clear domain model; production security/scalability and reproducibility need work. Not a formal external audit grade |
 
 ## 3. Architecture
@@ -151,7 +151,7 @@ All settings use Pydantic `BaseSettings`, `.env`, `INTELX_` prefix, case-insensi
 
 ### Environments
 
-**[FACT]** Development defaults to mock mode and SQLite. README says Docker Compose is production mode and requires service secrets/provider credentials (`README.md:29-44`). **[FACT]** Separate production compose defines API/worker/PostgreSQL/Redis services (`docker-compose.production.yml`); `render.yaml` is another deployment manifest. **[INFERENCE]** The configurations represent more than one topology, and their actual health under a cloud platform was not exercised.
+**[FACT]** Development defaults to mock mode and SQLite. README says Docker Compose is production mode and requires service secrets/provider credentials (`README.md:29-44`). **[FACT]** Separate production compose defines API/worker/PostgreSQL/Redis services (`docker-compose.production.yml`). **[INFERENCE]** The configurations represent more than one topology, and their actual health under a cloud platform was not exercised.
 
 ## 5. Deep Dives
 
@@ -298,7 +298,7 @@ All settings use Pydantic `BaseSettings`, `.env`, `INTELX_` prefix, case-insensi
 
 ## 9. Operations & Infrastructure
 
-**[FACT]** Infrastructure includes `Dockerfile`, `docker-compose.yml`, `docker-compose.production.yml`, `render.yaml`, and Nginx config (`deploy/nginx/nginx.conf`). The README documents a local compose setup and a separate PostgreSQL/Redis deployment (`README.md:29-44`). **[FACT]** Data/artifacts persist under `data/`; `.gitignore` excludes runtime raw data and DB files (`.gitignore`). **[FACT]** Health, readiness, and metrics endpoints exist (`intelx/api/v1/health.py:17-105`).
+**[FACT]** Infrastructure includes `Dockerfile`, `docker-compose.yml`, `docker-compose.production.yml`, and Nginx config (`deploy/nginx/nginx.conf`). The README documents a local compose setup and a separate PostgreSQL/Redis deployment (`README.md:29-44`). **[FACT]** Data/artifacts persist under `data/`; `.gitignore` excludes runtime raw data and DB files (`.gitignore`). **[FACT]** Health, readiness, and metrics endpoints exist (`intelx/api/v1/health.py:17-105`).
 
 **[INFERENCE]** Logs and Prometheus metrics are present, but no evidence of distributed tracing, alert definitions, SLOs, or centralized log backend was found in the inspected manifests. Secret delivery appears environment-based; no Vault/KMS integration was established. **[FACT]** README states production compose rejects mock provider and requires credentials, but this was not exercised (`README.md:31-44`). Resource requests/limits and autoscaling should be checked in deployment configs before cost/operational approval.
 

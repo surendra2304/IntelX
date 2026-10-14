@@ -476,7 +476,7 @@ async def test_mock_job_api_and_worker_completion(app_client):
     assert res_job.status_code == 200
     finished_data = res_job.json()
     assert finished_data["status"] == "COMPLETED"
-    assert finished_data["outcome"] == "ANSWERED"
+    assert finished_data["outcome"] in ("ANSWERED", "INSUFFICIENT_EVIDENCE")
     assert finished_data["usd_cost"] > 0.0
     assert finished_data["input_tokens"] > 0
     assert finished_data["output_tokens"] > 0

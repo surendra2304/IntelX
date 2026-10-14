@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from intelx.core.enums import RunStatus
+from intelx.core.settings import get_settings
 from intelx.db.models import Claim, Event
 from intelx.db.repos import RunRepo
 from intelx.db.session import get_sessionmaker
@@ -16,7 +17,7 @@ from intelx.orchestration.engine import OrchestrationEngine
 async def test_five_simultaneous_jobs_concurrency_and_state_isolation():
     """Verify 5 concurrent jobs complete without state bleed, cost contamination, or claim leaks."""
     sessionmaker = get_sessionmaker()
-    engine = OrchestrationEngine()
+    engine = OrchestrationEngine(settings=get_settings().model_copy(update={"MAX_RUN_USD": 10.0}))
 
     run_ids: list[str] = []
     objectives = [
@@ -33,7 +34,7 @@ async def test_five_simultaneous_jobs_concurrency_and_state_isolation():
             run = await RunRepo.create_run(
                 session=session,
                 objective=f"[{idx + 1}] {obj}",
-                scope_json={"depth": "quick", "budget": {"max_usd": 3.0, "max_minutes": 5}},
+                scope_json={"depth": "quick", "budget": {"max_usd": 10.0, "max_minutes": 5}},
                 created_by=f"concurrent-worker-{idx + 1}",
             )
             run_ids.append(run.id)

@@ -26,7 +26,7 @@ class DuplicateEvidenceSession:
 def test_eval_database_isolated_from_development_database(monkeypatch):
     """Golden evaluation must not share the running app's SQLite database."""
     monkeypatch.delenv("INTELX_EVAL_DB_URL", raising=False)
-    assert evaluation_db_url().endswith("/data/eval.db")
+    assert evaluation_db_url().replace("\\", "/").endswith("/data/eval.db")
     monkeypatch.setenv("INTELX_EVAL_DB_URL", "sqlite+aiosqlite:///custom-eval.db")
     assert evaluation_db_url() == "sqlite+aiosqlite:///custom-eval.db"
 

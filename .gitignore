@@ -1,4 +1,4 @@
-# Python
+# Python caches and bytecode
 __pycache__/
 *.py[cod]
 *$py.class
@@ -28,6 +28,14 @@ venv/
 ENV/
 env/
 
+# Testing and Linters
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+crawl_cache/
+
 # IDE / Editor
 .idea/
 .vscode/
@@ -38,22 +46,25 @@ env/
 # Environment & Secrets
 .env
 .env.*
+.env.production
 *.local
 secrets.json
 
 # Database & SQLite files
 *.db
-*.db-shm
-*.db-wal
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
 data/*.db
 data/*.db-shm
 data/*.db-wal
-# Runtime-ingested, content-addressed source snapshots can include external/user data.
-data/raw/
 
-# OS specific
+# Runtime raw data and artifacts
+data/raw/
+crawl_cache/
+
+# OS specific & logs
 Thumbs.db
 .DS_Store
 *.log

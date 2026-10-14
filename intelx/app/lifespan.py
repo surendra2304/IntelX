@@ -183,10 +183,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    # Shutdown sequence
+    # Shutdown sequence: abort active tasks gracefully and flush SQLite handles within 5s
     logger.info("Initiating INTELX shutdown sequence...")
-    await auto_research_hook.stop()
-    await news_hook.stop()
-    await worker_hook.stop()
-    await dispose_engine()
+    try:
+        async with asyncio.timeout(5.0):
+            await auto_research_hook.stop()
+            await news_hook.stop()
+            await worker_hook.stop()
+            await dispose_engine()
+    except (TimeoutError, Exception) as e:
+        logger.warning(f"Graceful shutdown exceeded 5s or encountered error: {e}")
+        try:
+            await dispose_engine()
+        except Exception:
+            pass
     logger.info("INTELX shutdown complete.")

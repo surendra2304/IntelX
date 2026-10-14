@@ -26,6 +26,7 @@ from intelx.core.errors import (
 from intelx.core.settings import Settings, get_settings
 from intelx.db.models import Chunk, Document, Source
 from intelx.db.repos import SourceRepo
+from intelx.db.session import get_sqlite_write_lock
 from intelx.memory.normalize import ingest_and_normalize
 from intelx.models.gateway import ModelGateway
 
@@ -322,17 +323,21 @@ class RetrieverAgent(BaseAgent):
                 )
             )
 
-        for plan in plans:
-            try:
-                output.retrieved.append(await self._persist(plan, session, run_id))
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(f"Snippet fallback failed for {plan.location}: {exc}")
-                output.failures.append(
-                    FetchFailure(
-                        location=plan.location,
-                        error_class=TaskErrorClass.LOGICAL,
-                        reason=str(exc),
-                    )
-                )
+        if plans:
+            async with get_sqlite_write_lock():
+                for plan in plans:
+                    try:
+                        output.retrieved.append(await self._persist(plan, session, run_id))
+                    except Exception as exc:  # noqa: BLE001
+                        await session.rollback()
+                        logger.warning(f"Snippet fallback failed for {plan.location}: {exc}")
+                        output.failures.append(
+                            FetchFailure(
+                                location=plan.location,
+                                error_class=TaskErrorClass.LOGICAL,
+                                reason=str(exc),
+                            )
+                        )
+                await session.commit()
 
         return output

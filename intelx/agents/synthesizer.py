@@ -19,6 +19,7 @@ from intelx.core.report import (
     validate_citations,
 )
 from intelx.db.models import Claim, Evidence, Finding, ResearchRun, Source
+from intelx.db.session import get_sqlite_write_lock
 from intelx.memory.artifacts import generate_and_save_artifacts
 from intelx.models.gateway import ModelGateway
 
@@ -441,26 +442,28 @@ class SynthesizerAgent(BaseAgent):
                 )
                 session.add(finding_row)
 
-            await session.flush()
+            async with get_sqlite_write_lock():
+                await session.flush()
 
-            # Generate and register all 4 artifacts
-            stmt_r = select(ResearchRun).where(ResearchRun.id == run_id)
-            run_obj = (await session.execute(stmt_r)).scalar_one_or_none()
-            if run_obj:
-                await generate_and_save_artifacts(
-                    session=session,
-                    run=run_obj,
-                    report_markdown=report_md,
-                    grounded_findings=grounded_findings,
-                    unverified_findings=unverified_findings,
-                    claims=claims,
-                    sources=all_sources,
-                    evidence_items=all_evidence,
-                    gaps=draft.gaps,
-                    degradations=degradations,
-                    overall_confidence_label=overall_conf_label,
-                    execution_mode=execution_mode,
-                )
+                # Generate and register all 4 artifacts
+                stmt_r = select(ResearchRun).where(ResearchRun.id == run_id)
+                run_obj = (await session.execute(stmt_r)).scalar_one_or_none()
+                if run_obj:
+                    await generate_and_save_artifacts(
+                        session=session,
+                        run=run_obj,
+                        report_markdown=report_md,
+                        grounded_findings=grounded_findings,
+                        unverified_findings=unverified_findings,
+                        claims=claims,
+                        sources=all_sources,
+                        evidence_items=all_evidence,
+                        gaps=draft.gaps,
+                        degradations=degradations,
+                        overall_confidence_label=overall_conf_label,
+                        execution_mode=execution_mode,
+                    )
+                await session.commit()
 
         return SynthesisResult(
             executive_summary=draft.executive_answer,

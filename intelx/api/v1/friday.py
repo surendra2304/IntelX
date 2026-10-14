@@ -27,7 +27,7 @@ from intelx.db.models import (
     Task,
 )
 from intelx.db.repos import RunRepo
-from intelx.db.session import get_db_session, get_sessionmaker
+from intelx.db.session import get_db_session, get_sessionmaker, get_sqlite_write_lock
 
 logger = logging.getLogger(__name__)
 
@@ -355,7 +355,7 @@ def map_run_phase(run_status: RunStatus) -> str:
 
 # Serializes research-run creation across concurrent delegations. SQLite allows a
 # single writer, so without this, simultaneous submissions collide on that lock.
-_RUN_WRITE_LOCK = asyncio.Lock()
+_RUN_WRITE_LOCK = get_sqlite_write_lock()
 _RUN_WRITE_ATTEMPTS = 4
 
 

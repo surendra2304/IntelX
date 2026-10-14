@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select, update
-from sqlalchemy.exc import PendingRollbackError
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.agents.analyst import AnalystAgent
@@ -35,7 +35,7 @@ from intelx.core.errors import (
 from intelx.core.settings import Settings, get_settings
 from intelx.db.models import Chunk, Claim, Document, ResearchRun, Source, Task
 from intelx.db.repos import RunRepo, SourceRepo
-from intelx.db.session import release_writer_lock
+from intelx.db.session import get_sqlite_write_lock, release_writer_lock
 from intelx.orchestration.events import (
     emit_budget_warning,
     emit_event,
@@ -179,6 +179,7 @@ class OrchestrationEngine:
         writes: the same status UPDATE and event INSERT were already issued,
         they are just committed at the point they are made.
         """
+        run_id = run.id
         current_status = run.status
         if current_status == new_status:
             return run
@@ -190,18 +191,22 @@ class OrchestrationEngine:
                 f"Invalid state transition: '{current_status}' -> '{new_status}' is not permitted"
             )
 
-        # The commit and the two writes below are one write phase, so they share the
-        # block. The commit is inside it because it flushes whatever the stage
-        # left pending -- the scout task rows, for instance -- and that flush is
-        # itself a batched INSERT that must not be the first write of a deferred
-        # transaction. See db.engine.write_transaction: writing on a stale read
-        # snapshot is refused outright under concurrency and "database is locked"
-        # then poisons the session. Same writes as before, only the transaction
-        # opener changes.
-        updated_run = await RunRepo.set_status(session, run.id, new_status)
-        await emit_stage_changed(session, run.id, current_status, new_status)
-        await session.commit()
-        return updated_run
+        for attempt in range(5):
+            try:
+                async with get_sqlite_write_lock():
+                    updated_run = await RunRepo.set_status(session, run_id, new_status)
+                    await emit_stage_changed(session, run_id, current_status, new_status)
+                    await session.commit()
+                    return updated_run
+            except OperationalError as exc:
+                if "locked" not in str(exc).lower() or attempt == 4:
+                    raise
+                await session.rollback()
+                await asyncio.sleep(0.05 * (2**attempt))
+                logger.warning(
+                    "State transition write contended on the database lock; retry %d/5",
+                    attempt + 1,
+                )
 
     async def _check_gates(self, session: AsyncSession, run_id: str) -> ResearchRun:
         """Check budget ceilings, cancellation signals, and time constraints between stages."""
@@ -220,11 +225,7 @@ class OrchestrationEngine:
 
         # 0. Sync usage from Gateway
         usage = self.gateway.get_usage(run_id)
-        if usage.input_tokens > 0 or usage.output_tokens > 0 or usage.usd_cost > 0:
-            run.input_tokens = max(run.input_tokens, usage.input_tokens)
-            run.output_tokens = max(run.output_tokens, usage.output_tokens)
-            run.usd_cost = max(run.usd_cost, usage.usd_cost)
-            await session.flush()
+        current_usd = max(run.usd_cost, usage.usd_cost)
 
         # 2. Apply both caller-requested and operator-defined budget ceilings.
         run_budget = (run.scope_json or {}).get("budget") or {}
@@ -237,8 +238,8 @@ class OrchestrationEngine:
             raise ValidationError(f"Run {run_id} has an invalid budget configuration")
         max_usd = min(requested_usd, self.settings.MAX_RUN_USD)
         max_minutes = min(requested_minutes, self.settings.MAX_RUN_MINUTES)
-        if run.usd_cost >= max_usd:
-            logger.warning(f"Run {run_id} exceeded budget (${run.usd_cost:.4f} >= ${max_usd:.4f})")
+        if current_usd >= max_usd:
+            logger.warning(f"Run {run_id} exceeded budget (${current_usd:.4f} >= ${max_usd:.4f})")
             await RunRepo.set_status(
                 session,
                 run_id,
@@ -246,7 +247,7 @@ class OrchestrationEngine:
                 outcome=RunOutcome.FAILED,
                 error_json={
                     "reason": "budget_exceeded",
-                    "spent_usd": run.usd_cost,
+                    "spent_usd": current_usd,
                     "max_usd": max_usd,
                 },
             )
@@ -254,14 +255,14 @@ class OrchestrationEngine:
                 session,
                 run_id,
                 "budget.exceeded",
-                {"spent_usd": run.usd_cost, "max_usd": max_usd},
+                {"spent_usd": current_usd, "max_usd": max_usd},
             )
-            raise BudgetExceededError(f"Run {run_id} exceeded budget ceiling (${run.usd_cost:.2f})")
+            raise BudgetExceededError(f"Run {run_id} exceeded budget ceiling (${current_usd:.2f})")
 
         # 3. Budget 80% Warning
-        if run.usd_cost >= (0.80 * max_usd) and max_usd > 0:
-            pct = (run.usd_cost / max_usd) * 100
-            await emit_budget_warning(session, run_id, pct, run.usd_cost, max_usd)
+        if current_usd >= (0.80 * max_usd) and max_usd > 0:
+            pct = (current_usd / max_usd) * 100
+            await emit_budget_warning(session, run_id, pct, current_usd, max_usd)
 
         # 4. Max Execution Time Limit
         if run.started_at:
@@ -313,37 +314,33 @@ class OrchestrationEngine:
         """
 
         async def _write() -> ResearchRun:
-            updated = await RunRepo.set_status(
-                session=session,
-                run_id=run_id,
-                status=status,
-                outcome=outcome,
-                error_json=error_json,
-            )
-            await session.commit()
-            return updated
+            async with get_sqlite_write_lock():
+                updated = await RunRepo.set_status(
+                    session=session,
+                    run_id=run_id,
+                    status=status,
+                    outcome=outcome,
+                    error_json=error_json,
+                )
+                await session.commit()
+                return updated
 
         label = getattr(status, "value", status)
         try:
             return await _write()
-        except PendingRollbackError:
-            # The failure came out of the database itself, so SQLAlchemy has
-            # deactivated this session's transaction and every further write on it
-            # raises. Rolling back is the only way back to a usable transaction.
+        except Exception as exc:
             logger.warning(
-                "Session transaction poisoned by run failure; rolling back to "
-                "persist %s for run %s",
+                "Initial attempt to persist %s for run %s failed (%s); rolling back session to retry",
                 label,
                 run_id,
+                exc,
             )
-        except Exception:
-            logger.exception(
-                "Could not persist %s for run %s; it remains non-terminal", label, run_id
-            )
-            return None
+            try:
+                await session.rollback()
+            except Exception:
+                pass
 
         try:
-            await session.rollback()
             return await _write()
         except Exception:
             logger.exception(
@@ -437,12 +434,10 @@ class OrchestrationEngine:
                 .where(ResearchRun.id == run_id)
                 .values(plan_json=plan.model_dump())
             )
-            await session.execute(stmt)
-            await session.flush()
-            # Same reason transition_state commits: this is the last write of the
-            # planning stage, so end the transaction here rather than letting it
-            # run on into the discovering transition below.
-            await session.commit()
+            async with get_sqlite_write_lock():
+                await session.execute(stmt)
+                await session.flush()
+                await session.commit()
             run = await self._check_gates(session, run_id)
 
             # Subquestion discovery & retrieval loop (with potential replan)
@@ -467,53 +462,65 @@ class OrchestrationEngine:
                 # for extra write transactions, which is what made five concurrent
                 # workers collide. no_autoflush stops the SELECTs the scout runs from
                 # forcing the pending rows out early.
-                with session.no_autoflush:
-                    for idx, subq in enumerate(scouting_targets):
-                        scout_task = Task(
+                scout_tasks: list[Task] = []
+                for idx, subq in enumerate(scouting_targets):
+                    started_at = datetime.now(UTC)
+                    try:
+                        scout_res = await self.scout.execute(
+                            subquestion=subq,
+                            plan=plan,
+                            session=session,
                             run_id=run_id,
-                            type=TaskType.SCOUT,
-                            status=TaskStatus.RUNNING,
-                            payload_json={"subquestion": subq, "branch": idx},
-                            started_at=datetime.now(UTC),
                         )
-                        session.add(scout_task)
-
-                        try:
-                            scout_res = await self.scout.execute(
-                                subquestion=subq,
-                                plan=plan,
-                                session=session,
+                        scout_tasks.append(
+                            Task(
                                 run_id=run_id,
+                                type=TaskType.SCOUT,
+                                status=TaskStatus.SUCCEEDED,
+                                payload_json={"subquestion": subq, "branch": idx},
+                                result_json={
+                                    "candidates_count": len(scout_res.candidates),
+                                    "search_failures": scout_res.search_failures,
+                                },
+                                started_at=started_at,
+                                finished_at=datetime.now(UTC),
                             )
-                            scout_task.status = TaskStatus.SUCCEEDED
-                            scout_task.result_json = {
-                                "candidates_count": len(scout_res.candidates),
-                                "search_failures": scout_res.search_failures,
-                            }
-                            scout_task.finished_at = datetime.now(UTC)
-                            all_candidates.extend(scout_res.candidates)
-                            if scout_res.search_failures:
-                                failed_scout_branches += 1
-                                degradations.append(
-                                    f"Scout search providers failed for subquestion: {subq}"
-                                )
-                        except Exception as e:
-                            logger.error(f"Scout task failed for '{subq}': {e}")
-                            scout_task.status = TaskStatus.FAILED
-                            scout_task.error_class = (
-                                TaskErrorClass.TRANSIENT
-                                if isinstance(e, ProviderError)
-                                else TaskErrorClass.LOGICAL
+                        )
+                        all_candidates.extend(scout_res.candidates)
+                        if scout_res.search_failures:
+                            failed_scout_branches += 1
+                            degradations.append(
+                                f"Scout search providers failed for subquestion: {subq}"
                             )
-                            scout_task.error_json = {
-                                "type": type(e).__name__,
-                                "error": str(e),
-                                "details": getattr(e, "details", {}),
-                            }
-                            scout_task.finished_at = datetime.now(UTC)
-                            degradations.append(f"Scout failed for subquestion: {subq}")
-                            if isinstance(e, ProviderError):
-                                failed_scout_branches += 1
+                    except Exception as e:
+                        logger.error(f"Scout task failed for '{subq}': {e}")
+                        err_class = (
+                            TaskErrorClass.TRANSIENT
+                            if isinstance(e, ProviderError)
+                            else TaskErrorClass.LOGICAL
+                        )
+                        scout_tasks.append(
+                            Task(
+                                run_id=run_id,
+                                type=TaskType.SCOUT,
+                                status=TaskStatus.FAILED,
+                                error_class=err_class,
+                                payload_json={"subquestion": subq, "branch": idx},
+                                error_json={
+                                    "type": type(e).__name__,
+                                    "error": str(e),
+                                    "details": getattr(e, "details", {}),
+                                },
+                                started_at=started_at,
+                                finished_at=datetime.now(UTC),
+                            )
+                        )
+                        degradations.append(f"Scout failed for subquestion: {subq}")
+                        if isinstance(e, ProviderError):
+                            failed_scout_branches += 1
+
+                for st in scout_tasks:
+                    session.add(st)
 
                 if failed_scout_branches and not all_candidates:
                     raise ProviderError(
@@ -538,18 +545,7 @@ class OrchestrationEngine:
                         unique_candidates.append(cand)
 
                 if unique_candidates:
-                    ret_task = Task(
-                        run_id=run_id,
-                        type=TaskType.RETRIEVE,
-                        status=TaskStatus.RUNNING,
-                        payload_json={"candidates_count": len(unique_candidates)},
-                        started_at=datetime.now(UTC),
-                    )
-                    # Left pending: flushing here takes SQLite's single writer lock
-                    # before the retriever's first HTTP fetch and holds it for the
-                    # whole batch. The row is written by the EXTRACTING boundary.
-                    session.add(ret_task)
-
+                    started_at = datetime.now(UTC)
                     ret_res = await self.retriever.execute(
                         candidates=unique_candidates,
                         session=session,
@@ -562,12 +558,19 @@ class OrchestrationEngine:
                             f"{fail.location} - {fail.reason}"
                         )
 
-                    ret_task.status = TaskStatus.SUCCEEDED
-                    ret_task.result_json = {
-                        "retrieved_count": len(ret_res.retrieved),
-                        "failures_count": len(ret_res.failures),
-                    }
-                    ret_task.finished_at = datetime.now(UTC)
+                    ret_task = Task(
+                        run_id=run_id,
+                        type=TaskType.RETRIEVE,
+                        status=TaskStatus.SUCCEEDED,
+                        payload_json={"candidates_count": len(unique_candidates)},
+                        result_json={
+                            "retrieved_count": len(ret_res.retrieved),
+                            "failures_count": len(ret_res.failures),
+                        },
+                        started_at=started_at,
+                        finished_at=datetime.now(UTC),
+                    )
+                    session.add(ret_task)
 
                     for item in ret_res.retrieved:
                         source = await SourceRepo.get_source(session, item.source_id)
@@ -616,12 +619,13 @@ class OrchestrationEngine:
 
                 run = await self._check_gates(session, run_id)
 
-                stmt_claims = select(Claim).where(Claim.run_id == run_id)
-                claims = list((await session.execute(stmt_claims)).scalars().all())
-
                 # 5. VERIFYING STAGE
                 run = await self.transition_state(session, run, RunStatus.VERIFYING)
                 run = await release_writer_lock(session, run)
+
+                stmt_claims = select(Claim).where(Claim.run_id == run_id)
+                claims = list((await session.execute(stmt_claims)).scalars().all())
+
                 if claims:
                     await self.verifier.execute(
                         claims=claims,
@@ -631,6 +635,7 @@ class OrchestrationEngine:
                         depth=scope.get("depth", "standard"),
                     )
                 run = await self._check_gates(session, run_id)
+                run = await release_writer_lock(session, run)
 
                 # 6. ANALYZING STAGE
                 run = await self.transition_state(session, run, RunStatus.ANALYZING)
@@ -645,16 +650,21 @@ class OrchestrationEngine:
                     claims=claims,
                     run_id=run_id,
                 )
-                await emit_event(session, run_id, "critic.evaluated", critique.model_dump())
+                should_replan = False
+                async with get_sqlite_write_lock():
+                    await emit_event(session, run_id, "critic.evaluated", critique.model_dump())
+                    if critique.severity == "HIGH" and replan_count < 1:
+                        replan_count += 1
+                        should_replan = True
+                        await emit_event(
+                            session,
+                            run_id,
+                            "orchestrator.replan_triggered",
+                            {"replan_iteration": replan_count},
+                        )
+                    await session.commit()
 
-                if critique.severity == "HIGH" and replan_count < 1:
-                    replan_count += 1
-                    await emit_event(
-                        session,
-                        run_id,
-                        "orchestrator.replan_triggered",
-                        {"replan_iteration": replan_count},
-                    )
+                if should_replan:
                     continue
 
                 break
@@ -726,23 +736,20 @@ class OrchestrationEngine:
                     outcome = RunOutcome.ANSWERED
 
             if degradations:
-                await emit_event(
-                    session,
-                    run_id,
-                    "run.degradations_recorded",
-                    {"degradations": degradations},
-                )
+                async with get_sqlite_write_lock():
+                    await emit_event(
+                        session,
+                        run_id,
+                        "run.degradations_recorded",
+                        {"degradations": degradations},
+                    )
+                    await session.commit()
 
             # 10. COMPLETED STAGE
             usage = self.gateway.get_usage(run_id)
             run.input_tokens = usage.input_tokens
             run.output_tokens = usage.output_tokens
             run.usd_cost = usage.usd_cost
-
-            run = await self.transition_state(session, run, RunStatus.COMPLETED)
-            run.outcome = outcome
-            run.completed_at = datetime.now(UTC)
-            await session.flush()
 
             cost_summary = {
                 "input_tokens": run.input_tokens,
@@ -751,7 +758,21 @@ class OrchestrationEngine:
                 "tool_calls": run.tool_calls,
                 "outcome": str(outcome),
             }
-            await emit_research_completed(session, run_id, outcome, cost_summary)
+            async with get_sqlite_write_lock():
+                run = await RunRepo.set_status(
+                    session=session,
+                    run_id=run_id,
+                    status=RunStatus.COMPLETED,
+                    outcome=outcome,
+                )
+                run.input_tokens = usage.input_tokens
+                run.output_tokens = usage.output_tokens
+                run.usd_cost = usage.usd_cost
+                await emit_stage_changed(
+                    session, run_id, RunStatus.SYNTHESIZING, RunStatus.COMPLETED
+                )
+                await emit_research_completed(session, run_id, outcome, cost_summary)
+                await session.commit()
 
             # 11. External Integrations (Memora, Futuris, StrateX, FRIDAY Universe)
             if outcome == RunOutcome.ANSWERED:

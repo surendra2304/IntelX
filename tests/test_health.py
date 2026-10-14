@@ -71,6 +71,12 @@ async def test_readyz_requires_selected_provider_credentials(
     monkeypatch, tmp_path, provider, provider_keys, expected_ready
 ):
     """Readiness checks the selected provider's config, not a different provider's key."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("INTELX_ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("INTELX_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("INTELX_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
     settings = Settings(
         MOCK_MODE=False,
         LLM_PROVIDER=provider,

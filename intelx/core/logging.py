@@ -97,8 +97,18 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_entry, default=str)
 
 
-def setup_logging(level: str = "INFO") -> None:
-    """Configure root and application loggers with JSON formatter."""
+class IntelXStructuredFormatter(logging.Formatter):
+    """Formats log records as [%(asctime)s] [%(levelname)s] [intelx]: %(message)s."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            fmt="[%(asctime)s] [%(levelname)s] [intelx]: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+
+
+def setup_logging(level: str = "INFO", format_style: str = "structured") -> None:
+    """Configure root and application loggers with structured logging."""
     root_logger = logging.getLogger()
     root_logger.setLevel(level.upper())
 
@@ -107,7 +117,10 @@ def setup_logging(level: str = "INFO") -> None:
         root_logger.removeHandler(handler)
 
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(JSONFormatter())
+    if format_style == "json":
+        console_handler.setFormatter(JSONFormatter())
+    else:
+        console_handler.setFormatter(IntelXStructuredFormatter())
     root_logger.addHandler(console_handler)
 
     # Attach global regex secret scrubber

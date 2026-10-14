@@ -81,12 +81,16 @@ async def test_research_answer_carries_a_mesh_verifiable_receipt(friday_client):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     receipt = body.get("receipt")
-    assert isinstance(receipt, dict), "IntelX answered without a receipt; FRIDAY will read this as UNVERIFIED"
+    assert isinstance(receipt, dict), (
+        "IntelX answered without a receipt; FRIDAY will read this as UNVERIFIED"
+    )
     assert receipt["requested_action"] == "research"
     assert receipt["target"] == "intelx"
     assert receipt["authorization_decision"].upper() in REQUIRED_DECISIONS
     assert isinstance(receipt["verification_evidence"], dict)
-    assert receipt["verification_evidence"], "empty verification evidence counts as unproven to FRIDAY"
+    assert receipt["verification_evidence"], (
+        "empty verification evidence counts as unproven to FRIDAY"
+    )
     assert not receipt.get("failure_reason")
     assert receipt.get("execution_timestamp")
 

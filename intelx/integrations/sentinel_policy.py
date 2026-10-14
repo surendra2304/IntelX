@@ -14,7 +14,7 @@ class SentinelSecurityClient:
     """Interoperates with Sentinel security system for high-risk connector authorization and incident reporting."""
 
     def __init__(self, base_url: str | None = None, api_key: str | None = None) -> None:
-        self.base_url = base_url or "https://sentinel-security.onrender.com"
+        self.base_url = base_url or "http://sentinel:8000"
         self.api_key = api_key
 
     async def authorize_connector_action(

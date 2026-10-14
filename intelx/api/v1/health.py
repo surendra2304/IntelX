@@ -63,7 +63,7 @@ async def readyz() -> dict[str, Any]:
         if settings.LLM_PROVIDER in ("inference", "ai_universe", "aiuniverse"):
             provider_healthy = bool(settings.INFERENCE_URL and settings.INFERENCE_API_KEY)
         elif settings.LLM_PROVIDER == "anthropic":
-            provider_healthy = bool(settings.get_llm_api_key("anthropic"))
+            provider_healthy = bool(settings.ANTHROPIC_API_KEY)
         elif settings.LLM_PROVIDER in {
             "openai_compatible",
             "openai",

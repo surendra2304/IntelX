@@ -24,6 +24,7 @@ from intelx.core.enums import (
 from intelx.core.independence import is_independent_evidence
 from intelx.db.models import Chunk, Claim, Document, Evidence, Source
 from intelx.db.repos import EvidenceRepo, RunRepo, SourceRepo
+from intelx.db.session import get_sqlite_write_lock
 from intelx.models.gateway import ModelGateway
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,19 @@ class VerifierAgent(BaseAgent):
         contradiction_context = {
             claim.id: context_by_claim.get(claim.id, "") for claim in contradiction_candidates
         }
+        existing_keys = set()
+        existing_stmt = select(
+            Evidence.claim_id,
+            Evidence.source_id,
+            Evidence.document_id,
+            Evidence.quote,
+        ).where(
+            Evidence.created_by_run_id == run_id,
+            Evidence.support_type == EvidenceSupportType.CONTRADICTS,
+        )
+        for r in (await session.execute(existing_stmt)).all():
+            existing_keys.add(tuple(r))
+
         for conflict in ContradictionEngine().analyze(
             contradiction_candidates, contradiction_context
         ):
@@ -194,16 +208,15 @@ class VerifierAgent(BaseAgent):
             )
             created_any = False
             for target_claim, opposing_claim, target_source in evidence_specs:
-                stmt = select(Evidence.id).where(
-                    Evidence.claim_id == target_claim.id,
-                    Evidence.source_id == opposing_claim.source_id,
-                    Evidence.document_id == opposing_claim.document_id,
-                    Evidence.quote == opposing_claim.quote,
-                    Evidence.support_type == EvidenceSupportType.CONTRADICTS,
-                    Evidence.created_by_run_id == run_id,
+                key = (
+                    target_claim.id,
+                    opposing_claim.source_id,
+                    opposing_claim.document_id,
+                    opposing_claim.quote,
                 )
-                if (await session.execute(stmt)).scalar_one_or_none():
+                if key in existing_keys:
                     continue
+                existing_keys.add(key)
                 await EvidenceRepo.create_evidence(
                     session=session,
                     claim_id=target_claim.id,
@@ -495,6 +508,8 @@ class VerifierAgent(BaseAgent):
                 claim.confidence = score
                 claim.confidence_method = "v1-composite"
 
-        await self._record_deterministic_conflicts(claims, session, run_id)
-        await session.flush()
+        async with get_sqlite_write_lock():
+            await self._record_deterministic_conflicts(claims, session, run_id)
+            await session.flush()
+            await session.commit()
         return claims

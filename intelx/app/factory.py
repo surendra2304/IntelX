@@ -14,12 +14,14 @@ from intelx.core.errors import (
     generic_exception_handler,
     intelx_exception_handler,
 )
+from intelx.core.settings import get_settings
 from intelx.core.version import PROJECT_NAME, __version__
 from intelx.web.routes import web_router
 
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application instance."""
+    settings = get_settings()
     app = FastAPI(
         title=PROJECT_NAME,
         version=__version__,
@@ -34,7 +36,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

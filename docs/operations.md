@@ -18,7 +18,7 @@ This document details runtime configuration, environment variables, provider set
 | `INTELX_SECRET_KEY` | String | Empty | HMAC signing secret for web sessions; required in production, at least 32 characters, and unique from API keys. |
 | `INTELX_LLM_PROVIDER` | String | `inference` | LLM backend (`inference`, `ai_universe`, `openai_compatible`, or `anthropic`). |
 | `INTELX_LLM_MODEL` | String | `mock-gpt-4o` | Model identifier. Production must set a non-mock model supported by the chosen provider. |
-| `INTELX_INFERENCE_URL` | String | `https://inference-h7bn.onrender.com` | Inference/AI-Universe endpoint; override for a private or self-hosted gateway. |
+| `INTELX_INFERENCE_URL` | String | `http://inference:8000` | Inference/AI-Universe endpoint; override for a private or self-hosted gateway (e.g. `https://friday-universe.duckdns.org/inference`). |
 | `INTELX_INFERENCE_API_KEY` | String | Empty | Inference/AI-Universe credential; required when that provider is used in production. |
 | `INTELX_LLM_API_KEY` | String | Empty | Generic LLM credential fallback when no matching provider-specific key is set. |
 | `INTELX_OPENAI_API_KEY` / `OPENAI_API_KEY` | String | Empty | OpenAI-compatible provider credential; takes precedence over the generic LLM key for those providers. |

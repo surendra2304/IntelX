@@ -19,6 +19,7 @@ from intelx.core.enums import (
 )
 from intelx.db.models import Chunk, Document
 from intelx.db.repos import ClaimRepo, EvidenceRepo, RunRepo
+from intelx.db.session import get_sqlite_write_lock
 from intelx.models.gateway import ModelGateway
 
 logger = logging.getLogger(__name__)
@@ -441,18 +442,21 @@ class ExtractorAgent(BaseAgent):
             for source_id, document, chunks in documents
         ]
 
-        return [
-            await self.execute(
-                document=document,
-                chunks=chunks,
-                run_id=run_id,
-                source_id=source_id,
-                session=session,
-                extractions=extractions,
-                **kwargs,
-            )
-            for source_id, document, chunks, extractions in prepared
-        ]
+        async with get_sqlite_write_lock():
+            results = [
+                await self.execute(
+                    document=document,
+                    chunks=chunks,
+                    run_id=run_id,
+                    source_id=source_id,
+                    session=session,
+                    extractions=extractions,
+                    **kwargs,
+                )
+                for source_id, document, chunks, extractions in prepared
+            ]
+            await session.commit()
+        return results
 
     async def execute(
         self,

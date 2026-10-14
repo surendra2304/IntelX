@@ -5,54 +5,40 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: intelx-app
+    container_name: intelx
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8005:8000"
     environment:
+      - PORT=8000
       - INTELX_ENV=production
       - INTELX_MOCK_MODE=false
       - INTELX_DB_URL=sqlite+aiosqlite:////app/data/intelx.db
       - INTELX_DATA_DIR=/app/data
       - INTELX_API_KEYS=${INTELX_API_KEYS:-}
-      - INTELX_API_KEY=${INTELX_API_KEY:?Set INTELX_API_KEY in the deployment environment}
-      - INTELX_SECRET_KEY=${INTELX_SECRET_KEY:?Set INTELX_SECRET_KEY in the deployment environment}
+      - INTELX_API_KEY=${INTELX_API_KEY:-}
+      - INTELX_SECRET_KEY=${INTELX_SECRET_KEY:-}
       - INTELX_LLM_PROVIDER=inference
-      - INTELX_INFERENCE_URL=${INTELX_INFERENCE_URL:-https://inference-h7bn.onrender.com}
-      - INTELX_LLM_MODEL=${INTELX_LLM_MODEL:?Set a non-mock INTELX_LLM_MODEL}
-      - INTELX_INFERENCE_API_KEY=${INTELX_INFERENCE_API_KEY:?Set INTELX_INFERENCE_API_KEY}
+      - INTELX_INFERENCE_URL=${INTELX_INFERENCE_URL:-http://inference:8000}
+      - INTELX_LLM_MODEL=${INTELX_LLM_MODEL:-auto}
+      - INTELX_INFERENCE_API_KEY=${INTELX_INFERENCE_API_KEY:-}
+      - INTELX_MEMORA_URL=${INTELX_MEMORA_URL:-http://memora:8000}
       - INTELX_RUN_EMBEDDED_WORKER=true
     volumes:
       - intelx_data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
-      interval: 15s
+      interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
-
-  postgres:
-    image: postgres:16-alpine
-    container_name: intelx-postgres
-    restart: unless-stopped
-    profiles:
-      - postgres
-    environment:
-      - POSTGRES_USER=intelx
-      - POSTGRES_PASSWORD
-      - POSTGRES_DB=intelx
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U intelx -d intelx"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    networks:
+      - friday_mesh
 
 volumes:
   intelx_data:
     driver: local
-  postgres_data:
-    driver: local
+
+networks:
+  friday_mesh:
+    external: true

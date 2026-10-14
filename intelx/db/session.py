@@ -1,5 +1,4 @@
-"""Database Session Management and Dependencies."""
-
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 
@@ -12,6 +11,13 @@ from intelx.db.models import ResearchRun
 logger = logging.getLogger(__name__)
 
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
+_SQLITE_WRITE_LOCK = asyncio.Lock()
+
+
+def get_sqlite_write_lock() -> asyncio.Lock:
+    """Return process-wide mutex for serializing write transactions on SQLite."""
+    global _SQLITE_WRITE_LOCK
+    return _SQLITE_WRITE_LOCK
 
 
 def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
@@ -55,17 +61,7 @@ async def check_database_health() -> bool:
 
 
 async def release_writer_lock(session: AsyncSession, run: ResearchRun) -> ResearchRun:
-    """End the open write transaction so SQLite's single writer lock is freed.
-
-    SQLite permits exactly one writer. A pipeline stage that performs external calls
-    -- model gateways, web fetches -- must not hold this transaction across them, or
-    every other writer (including concurrent research submissions) blocks for the
-    whole stage and then fails with "database is locked".
-
-    The orchestrator decides *when* a stage boundary is; this owns *how* the
-    transaction ends, so the rule lives with the session rather than being restated
-    at each call site.
-    """
-    await session.commit()
-    await session.refresh(run)
+    """End the open write transaction so SQLite's single writer lock is freed."""
+    async with get_sqlite_write_lock():
+        await session.commit()
     return run

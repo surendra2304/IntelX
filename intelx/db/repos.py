@@ -71,9 +71,7 @@ class RunRepo:
     @staticmethod
     async def get_run(session: AsyncSession, run_id: str) -> ResearchRun | None:
         """Retrieve research run by ID."""
-        stmt = select(ResearchRun).where(ResearchRun.id == run_id)
-        result = await session.execute(stmt)
-        return result.scalar_one_or_none()
+        return await session.get(ResearchRun, run_id)
 
     @staticmethod
     async def get_or_claim_next_queued_job(

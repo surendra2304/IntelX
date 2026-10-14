@@ -1,151 +1,208 @@
-# INTELX
+# 🔍 IntelX — Live Intelligence & OSINT Synthesis Engine
 
-**INTELX** is an evidence-driven intelligence research monolith that decomposes complex research questions into structured subquestions, retrieves and normalizes heterogeneous source documents, extracts atomic propositions with machine-verified verbatim spans, scores claims using a deterministic mathematical confidence ledger, resolves opposing contradictions, and generates fully cited intelligence reports with atomic multi-format exports.
+[![IntelX CI](https://github.com/surendra2304/IntelX/actions/workflows/ci.yml/badge.svg)](https://github.com/surendra2304/IntelX/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
+[![SQLite 3 WAL](https://img.shields.io/badge/SQLite_3-WAL_Mode-003B57.svg)](https://www.sqlite.org/wal.html)
+
+**IntelX** is the dedicated live intelligence gathering, search indexing, rate-limited web scraping, and OSINT knowledge synthesis specialist of the **FRIDAY Universe**.
+
+It decomposes complex investigative objectives into targeted queries, crawls and scrapes external web assets while respecting robots.txt and SSRF defenses, indexes claims and evidence in local SQLite 3 WAL storage, cross-checks facts across multiple independent sources, resolves contradictions, and delivers machine-verified intelligence reports.
 
 ---
 
-## ⚡ Quickstart (Zero External API Keys Needed)
+## 🏛️ Ecosystem Topology & Ground Truth
 
-INTELX comes pre-configured with **Mock Mode** by default, allowing you to run full end-to-end research pipelines, web workspace sessions, and automated quality benchmarks out of the box with zero external dependencies:
+IntelX operates as a containerized microservice deployed to **Oracle Cloud Always Free** under the private Docker network mesh (`friday_mesh`), routed through **Caddy** and the **FRIDAY Core** gateway.
+
+| Attribute | Deployment Ground Truth |
+| :--- | :--- |
+| **Identity** | `intelx` (Specialist Agent) |
+| **Public Gateway URL** | `https://friday-universe.duckdns.org/intelx` |
+| **Container Mesh URL** | `http://intelx:8000` |
+| **Internal Container Port** | `8000` |
+| **Host Port Mapping** | `8005` (`8005:8000`) |
+| **Gateway Proxy** | FRIDAY Core (`http://friday:10000`) / Caddy HTTPS |
+| **Database Engine** | Local SQLite 3 with WAL Mode (`./data/intelx.db`) |
+| **Container Network** | `friday_mesh` |
+
+---
+
+## 🚀 Key Capabilities
+
+1. **Live Search Indexing**: Multi-engine search capability over local knowledge bases and live web providers (Tavily, Wikipedia, DuckDuckGo).
+2. **Hardened Web Scraping**: Rate-limited, asynchronous HTML and PDF extraction featuring SSRF socket-level protection, content sanitization, and robots.txt politeness.
+3. **Verbatim Evidence Extraction**: Immutable provenance chains down to character offsets:
+   $$\text{Finding} \longrightarrow \text{Claim} \longrightarrow \text{Evidence (Verbatim Span)} \longrightarrow \text{Document} \longrightarrow \text{Source}$$
+4. **Contradiction Resolution**: Automated detection of conflicting numerical data, temporal changes, and disputed facts with reciprocal links.
+5. **OSINT Synthesis**: Generation of structured intelligence briefs, spoken executive briefs, and multi-format exports (Markdown, JSON, CSV).
+
+---
+
+## 📡 API Specification & Curl Reference
+
+All requests accept JSON and require an Authorization header in production: `Authorization: Bearer <INTELX_API_KEY>`.
+
+### 1. Health & Liveness Probe (`GET /healthz`)
+Verifies process health and database connectivity.
 
 ```bash
-# 1. Install dependencies & run database migrations
-make setup
-make migrate
-
-# 2. Seed realistic evaluation fixture documents & queue a demo job
-make seed-demo
-
-# 3. Launch the web workspace & API server
-make dev
+curl -X GET "https://friday-universe.duckdns.org/intelx/healthz"
 ```
 
-Now navigate to **[http://localhost:8000](http://localhost:8000)** in your browser:
-- **Default Seeded Admin Key**: `dev-admin-key`
-- **Default Seeded Member Key**: `dev-member-key`
+**Response (`200 OK`):**
+```json
+{
+  "status": "ok",
+  "service": "intelx",
+  "evidence_class": "process_liveness",
+  "observed_at": "2026-10-14T21:00:00.000000Z",
+  "version": "2.0.0",
+  "mock_mode": false,
+  "database": "ok",
+  "timestamp": "2026-10-14T21:00:00.000000Z"
+}
+```
+
+### 2. Search Indexing (`POST /search`)
+Executes full-text keyword and semantic discovery across indexed sources and live web feeds.
+
+```bash
+curl -X POST "https://friday-universe.duckdns.org/intelx/search" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dev-admin-key" \
+  -d '{
+    "query": "solid-state battery energy density",
+    "limit": 5
+  }'
+```
+
+**Response (`200 OK`):**
+```json
+{
+  "status": "ok",
+  "query": "solid-state battery energy density",
+  "total_results": 2,
+  "results": [
+    {
+      "id": "src_8f9c12",
+      "title": "Solid-State Electrolyte Breakthroughs 2026",
+      "url": "https://example.com/energy/solid-state",
+      "publisher": "Energy Tech Review",
+      "trust_tier": "verified"
+    }
+  ]
+}
+```
+
+### 3. Rate-Limited Scraping (`POST /scrape`)
+Safely extracts readable text content from an external web page with strict SSRF socket validation, robots.txt compliance, and size caps.
+
+```bash
+curl -X POST "https://friday-universe.duckdns.org/intelx/scrape" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dev-admin-key" \
+  -d '{
+    "url": "https://en.wikipedia.org/wiki/Artificial_intelligence",
+    "max_bytes": 1000000
+  }'
+```
+
+**Response (`200 OK`):**
+```json
+{
+  "status": "ok",
+  "url": "https://en.wikipedia.org/wiki/Artificial_intelligence",
+  "title": "Artificial intelligence - Wikipedia",
+  "content_length": 48201,
+  "text": "Artificial intelligence (AI) is the intelligence of machines or software...",
+  "status_code": 200
+}
+```
+
+### 4. OSINT Synthesis & Summarization (`POST /summarize`)
+Extracts verifiable claims, propositions, and synthesized findings from raw text or knowledge base queries.
+
+```bash
+curl -X POST "https://friday-universe.duckdns.org/intelx/summarize" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dev-admin-key" \
+  -d '{
+    "text": "GigaWatt Labs achieved 520 Wh/kg in solid-state cell testing during Q3 2026.",
+    "max_length": 200
+  }'
+```
+
+**Response (`200 OK`):**
+```json
+{
+  "status": "ok",
+  "summary": "GigaWatt Labs achieved 520 Wh/kg in solid-state cell testing during Q3 2026.",
+  "evidence_claims": [],
+  "confidence": 0.85
+}
+```
 
 ---
 
-## 🐳 Docker Deployment
+## 🗄️ Database Architecture (SQLite 3 WAL)
 
-The single-container Compose file runs in production mode with SQLite and an embedded worker. Unlike `make dev`, it requires strong service secrets and a real inference-provider credential/model. It uses the configured inference gateway by default; set `INTELX_INFERENCE_URL` to override it for a private/self-hosted gateway. Generate distinct secrets and supply credentials from your provider; keep them in your shell or an untracked `.env` file, never in Git:
+IntelX leverages **SQLite 3** running in **Write-Ahead Logging (WAL)** mode for low latency, zero external database overhead, and resilient concurrent reads:
 
+- **Storage Location**: `./data/intelx.db`
+- **WAL Journaling**: `PRAGMA journal_mode = WAL;` (enables non-blocking reads alongside single writes).
+- **Busy Timeout**: `PRAGMA busy_timeout = 5000;` (prevents indefinite locking).
+- **Integrity**: `PRAGMA synchronous = NORMAL;` and `PRAGMA foreign_keys = ON;`.
+- **Full-Text Search (FTS5)**: Integrated virtual tables (`chunks_fts`, `claims_fts`) with automatic trigger synchronization.
+
+---
+
+## ⚙️ Environment Variables Reference
+
+| Variable | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `PORT` | Integer | `8000` | Internal HTTP container binding port. |
+| `INTELX_ENV` | String | `production` | Deployment mode: `development`, `staging`, `production`. |
+| `INTELX_MOCK_MODE` | Boolean | `false` | When true, mock generators simulate research. Must be `false` in production. |
+| `INTELX_DB_URL` | String | `sqlite+aiosqlite:///./data/intelx.db` | SQLAlchemy async connection string. |
+| `INTELX_DATA_DIR` | String | `./data` | File storage path for artifacts, raw files, and uploads. |
+| `INTELX_SECRET_KEY` | String | *(Required)* | HMAC signing key for sessions and cryptographic audits. |
+| `INTELX_API_KEY` | String | *(Required)* | Bearer authentication key for IntelX REST endpoints. |
+| `INTELX_API_KEYS` | String | *(Optional)* | Comma-separated secondary authorized API keys. |
+| `INTELX_CORS_ORIGINS` | JSON List | `["https://friday-universe.duckdns.org", ...]` | CORS allowed origin domains. |
+| `INTELX_LLM_PROVIDER` | String | `inference` | Active provider: `inference`, `openai_compatible`, `anthropic`, `mock`. |
+| `INTELX_INFERENCE_URL` | String | `http://inference:8000` | Internal mesh URL to Inference gateway. |
+| `INTELX_INFERENCE_API_KEY` | String | *(Optional)* | Secret key for Inference gateway access. |
+| `INTELX_MEMORA_URL` | String | `http://memora:8000` | Internal mesh URL for Memora persistent memory. |
+| `INTELX_FUTURIS_BASE_URL` | String | `http://futuris:8000` | Internal mesh URL for Futuris predictive engine. |
+| `INTELX_STRATEX_BASE_URL` | String | `http://stratex:8000` | Internal mesh URL for StrateX trading platform. |
+| `INTELX_FRIDAY_URL` | String | `http://friday:10000` | Gateway URL for FRIDAY central control. |
+| `INTELX_RUN_EMBEDDED_WORKER` | Boolean | `true` | Runs the orchestration worker in-process inside the FastAPI event loop. |
+| `INTELX_MAX_CONCURRENT_RUNS` | Integer | `5` | Maximum active concurrent research runs. |
+
+---
+
+## 🐳 Quickstart & Local Verification
+
+### Running with Docker Compose
 ```bash
-export POSTGRES_PASSWORD="$(openssl rand -hex 32)" # required by the optional Compose Postgres profile; hex is URL-safe
-export INTELX_API_KEY="$(openssl rand -hex 32)"
-export INTELX_SECRET_KEY="$(openssl rand -hex 32)"
-export INTELX_LLM_MODEL="<model-id-supported-by-your-inference-service>"
-export INTELX_INFERENCE_API_KEY="<your-inference-service-key>"
-
+# 1. Start IntelX on the friday_mesh container network
 docker compose up -d
-curl -f http://localhost:8000/healthz
+
+# 2. Check container liveness
+curl -f http://localhost:8005/healthz
 ```
 
-For the multi-container PostgreSQL/Redis deployment with separate API replicas and worker, also set `INTELX_DB_URL` in the deployment environment to `postgresql+asyncpg://intelx:<URL-encoded-POSTGRES_PASSWORD>@postgres:5432/intelx`, then run `docker compose -f docker-compose.production.yml up -d`. Compose passes `POSTGRES_PASSWORD` through from the environment; the connection URL is supplied separately and is never embedded in the Compose file. Production Compose and Render explicitly reject mock models/providers and fail startup when required credentials are missing.
-
----
-
-## 📊 Baseline Quality Gate Results (`evals/results.json`)
-
-INTELX enforces mechanical quality gates across 8 golden benchmark tasks (`evals/golden/*.json`) covering contradiction detection, citation resolution, independence heuristics, and prompt injection resistance:
-
+### Local Development
 ```bash
-make eval    # Run deterministic golden evaluation suite
-```
+# 1. Activate Python 3.11 virtual environment
+.\.venv\Scripts\Activate.ps1   # Windows
+source .venv/bin/activate      # Linux / macOS
 
-| Evaluation Metric | Baseline Score | Quality Gate Threshold | Status | Description |
-|---|---|---|---|---|
-| **Citation Validity Rate** | **100.0%** | $\ge 100.0\%$ | `PASS` | All `[S:id]` / `[C:id]` citations resolve to valid database entities. |
-| **Groundedness Rate** | **100.0%** | $\ge 90.0\%$ | `PASS` | Key report findings backed by $\ge 1$ active primary claim. |
-| **Contradiction Recall** | **100.0%** | $\ge 75.0\%$ | `PASS` | Golden opposing measurements are disputed with reciprocal, exact-span evidence links. |
-| **Contradiction Precision** | **100.0%** | $\ge 100.0\%$ | `PASS` | No unrelated or different-chemistry fixture pairs are falsely disputed. |
-| **Null Result Correctness** | **100.0%** | $\ge 100.0\%$ | `PASS` | Impossible/zero-evidence objectives yield `INSUFFICIENT_EVIDENCE`. |
-| **Independence Correctness** | **100.0%** | $\ge 100.0\%$ | `PASS` | Syndicated wire copies rejected from independent corroboration counts. |
-| **Extraction Precision** | **100.0%** | — | `PASS` | Primary assertions matching expected benchmark propositions. |
-| **Completion Rate** | **100.0%** | $\ge 100.0\%$ | `PASS` | All golden benchmark investigations run successfully to completion. |
+# 2. Install dependencies
+pip install -r requirements.txt
+pip install -e ".[dev]"
 
-### 🎯 What Mock Mode Evals Prove
-Mock Mode evals verify **controlled fixture behavior and pipeline invariants**: citation validity, exact verbatim character spans (`doc.text[start:end] == quote`), traceable contradiction recall/precision on known fixture pairs, null results on unprovable queries, and syndicated-wire independence. They do **not** establish broad real-world research quality, live-provider behavior, or the correctness of claims outside this fixture set; those still require live, representative evaluations.
-
-### ⚡ Run Latency Drop Explained
-The latest controlled fixture run averaged ~0.13s per research task. Earlier mock runs averaged ~19.2s because they emitted synthetic public web URLs (`https://en.wikipedia.org/...`) that triggered live socket calls and TCP timeouts. Topic-scoped `file://` fixtures now resolve from disk and avoid unrelated evidence.
-
----
-
-## 🏛️ Architecture & Component Flow
-
-```
-intelx/
-  ├── agents/          # Typed agent fleet (Planner, Scout, Retriever, Extractor, Verifier, Analyst, Critic, Synthesizer)
-  ├── api/v1/          # REST API endpoints (15 operations) & OpenAPI schema
-  ├── app/             # FastAPI application factory, lifespan management, and security middlewares
-  ├── cli/             # Unified console CLI ('intelx serve', 'intelx worker', 'intelx seed-demo', etc.)
-  ├── connectors/      # Search providers, HTTP crawlers, SSRF socket defenses, injection scanner
-  ├── core/            # Settings, Bearer auth, PolicyEngine, confidence formula v1, secret redactor
-  ├── db/              # SQLAlchemy 2.0 models (18 tables), async engine, sessionmaker, Alembic migrations, repos
-  ├── memory/          # Offset normalizer, entity resolution graph, atomic multi-format artifact manager
-  ├── models/          # Model gateway, role-based LLM routing, and Mock/OpenAI/Anthropic provider adapters
-  └── web/             # Server-rendered Jinja2 templates, offline vanilla JS, and citation drawer
-```
-
-### The Provenance Chain
-Every statement in an INTELX report resolves down a five-level immutable provenance chain:
-$$\text{Finding} \longrightarrow \text{Claim} \longrightarrow \text{Evidence (Verbatim Span)} \longrightarrow \text{Document} \longrightarrow \text{Source}$$
-
-Verbatim span matches are enforced at the database level: $\text{document.text}[\text{span\_start} : \text{span\_end}] == \text{quote}$.
-
----
-
-## 🛠️ CLI Reference (`intelx`)
-
-```bash
-intelx serve               # Start FastAPI application server on port 8000
-intelx worker              # Start background orchestration execution worker
-intelx migrate             # Apply database migrations via Alembic
-intelx seed-demo           # Seed local fixture data and queue a demo run
-intelx eval                # Run deterministic golden evaluation benchmark suite
-intelx purge --days 30     # Run retention purge for stale raw cached files
-intelx verify-audit        # Cryptographically verify tamper-evident audit ledger
-intelx smoke-llm           # Smoke test live LLM providers across all 6 agent roles
-intelx smoke-live          # Execute complete live research investigation against real providers
-```
-
----
-
-## 📚 Documentation Index
-
-- 🏛️ **System Architecture**: [docs/architecture.md](docs/architecture.md)
-- 🔗 **Evidence Provenance & Data Model**: [docs/evidence-model.md](docs/evidence-model.md)
-- 🧮 **Confidence Scoring Formula**: [docs/confidence-methodology.md](docs/confidence-methodology.md)
-- 📡 **REST API Reference & Curl Guide**: [docs/api.md](docs/api.md)
-- ⚙️ **Operations & Provider Configuration**: [docs/operations.md](docs/operations.md)
-- 🛡️ **Threat Model & Security Hardening**: [docs/threat-model.md](docs/threat-model.md)
-- ⚖️ **Legal, Crawling & Ingestion Posture**: [docs/legal-crawling-posture.md](docs/legal-crawling-posture.md)
-- 🚀 **Getting Started Walkthrough**: [docs/getting-started.md](docs/getting-started.md)
-- 📝 **Architecture Decision Records (ADRs)**: [docs/adr/](docs/adr/)
-- 📖 **Engineering Diary Master Index**: [INTELX_DIARY.md](INTELX_DIARY.md)
-
----
-
-## 🗺️ Roadmap to Production
-
-- [x] **Step 1–12**: Monolith foundations, evidence schema, role routing, agent fleet, trust layer, orchestration, artifacts, API, Web UI, security hardening, and eval harness.
-- [x] **Step 13**: Architecture documentation, ADRs, Dockerization, console CLI, and release polish.
-- [x] **Phase 2, Step F**: Real-Provider bring-up (`OpenAICompatibleProvider`, `AnthropicProvider`), quote alignment fuzzy snapping, snippet fallback retrieval, and live smoke CLI (`smoke-llm`, `smoke-live`).
-- [ ] **Multi-Tenant Partitioning**: Indexed `tenant_id` namespaces and PostgreSQL Row-Level Security (RLS) policies.
-- [ ] **Production Search Scale**: Distributed search connectors (Brave Search, Bing Search, Google Serper) with token bucket rate limiters.
-- [ ] **Dense Vector Embeddings**: Hybrid sparse (FTS5 BM25) + dense vector (HNSW / pgvector) hybrid reranking.
-- [ ] **Continuous Research Subscriptions**: Recurring cron triggers with automated delta diffing on historical claim graphs.
-
----
-
-## 🧪 Testing & Linting
-
-```bash
-make test          # Run full pytest test battery
-make eval          # Run golden evaluation benchmark harness
-make lint          # Verify formatting and lint rules via ruff
-make verify-audit  # Verify cryptographic audit chain integrity
-make smoke-llm     # Diagnostic LLM gateway role checks
-make smoke-live    # Full live pipeline execution with real keys
+# 3. Run test suite
+pytest -q
 ```

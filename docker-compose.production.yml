@@ -61,7 +61,7 @@ services:
       - INTELX_API_KEY=${INTELX_API_KEY:?Set INTELX_API_KEY in the deployment environment}
       - INTELX_API_KEYS=${INTELX_API_KEYS:-}
       - INTELX_LLM_PROVIDER=inference
-      - INTELX_INFERENCE_URL=${INTELX_INFERENCE_URL:-https://inference-h7bn.onrender.com}
+      - INTELX_INFERENCE_URL=${INTELX_INFERENCE_URL:-http://inference:8000}
       - INTELX_LLM_MODEL=${INTELX_LLM_MODEL:?Set a non-mock INTELX_LLM_MODEL}
       - INTELX_INFERENCE_API_KEY=${INTELX_INFERENCE_API_KEY:?Set INTELX_INFERENCE_API_KEY}
     volumes:
@@ -94,7 +94,7 @@ services:
       - INTELX_API_KEY=${INTELX_API_KEY:?Set INTELX_API_KEY in the deployment environment}
       - INTELX_API_KEYS=${INTELX_API_KEYS:-}
       - INTELX_LLM_PROVIDER=inference
-      - INTELX_INFERENCE_URL=${INTELX_INFERENCE_URL:-https://inference-h7bn.onrender.com}
+      - INTELX_INFERENCE_URL=${INTELX_INFERENCE_URL:-http://inference:8000}
       - INTELX_LLM_MODEL=${INTELX_LLM_MODEL:?Set a non-mock INTELX_LLM_MODEL}
       - INTELX_INFERENCE_API_KEY=${INTELX_INFERENCE_API_KEY:?Set INTELX_INFERENCE_API_KEY}
     volumes:
@@ -127,7 +127,7 @@ services:
       - INTELX_API_KEY=${INTELX_API_KEY:?Set INTELX_API_KEY in the deployment environment}
       - INTELX_API_KEYS=${INTELX_API_KEYS:-}
       - INTELX_LLM_PROVIDER=inference
-      - INTELX_INFERENCE_URL=${INTELX_INFERENCE_URL:-https://inference-h7bn.onrender.com}
+      - INTELX_INFERENCE_URL=${INTELX_INFERENCE_URL:-http://inference:8000}
       - INTELX_LLM_MODEL=${INTELX_LLM_MODEL:?Set a non-mock INTELX_LLM_MODEL}
       - INTELX_INFERENCE_API_KEY=${INTELX_INFERENCE_API_KEY:?Set INTELX_INFERENCE_API_KEY}
     volumes:

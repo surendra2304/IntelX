@@ -1,4 +1,4 @@
-# Multi-stage Dockerfile for INTELX Intelligence Platform
+# Multi-stage Dockerfile for IntelX Intelligence Platform
 # Build stage: Install dependencies in a clean virtualenv
 FROM python:3.11-slim AS builder
 
@@ -12,16 +12,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-COPY pyproject.toml requirements.txt* README.md* .
+COPY pyproject.toml requirements.txt README.md ./
 COPY intelx/ ./intelx/
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir ".[llm]"
+    pip install --no-cache-dir .
 
-# Final stage: Minimal runtime image
+# Final stage: Minimal hardened runtime image
 FROM python:3.11-slim AS runner
 
 WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8000 \
+    PATH="/opt/venv/bin:$PATH" \
+    INTELX_DATA_DIR="/app/data" \
+    INTELX_DB_URL="sqlite+aiosqlite:////app/data/intelx.db"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -30,25 +37,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-ENV PYTHONUNBUFFERED=1
-ENV INTELX_DATA_DIR="/app/data"
-ENV INTELX_DB_URL="sqlite+aiosqlite:////app/data/intelx.db"
 
-# Create unprivileged application user
-RUN groupadd -g 10001 intelx && \
-    useradd -u 10001 -g intelx -s /bin/bash -m intelx && \
+RUN useradd -m -u 1000 appuser && \
     mkdir -p /app/data /app/data/raw /app/data/artifacts /app/data/uploads && \
-    chown -R intelx:intelx /app
+    chown -R appuser:appuser /app
 
-COPY --chown=intelx:intelx . /app
+COPY --chown=appuser:appuser . /app
 
-# Switch to non-root user
-USER intelx
+USER appuser
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/healthz || exit 1
 
 ENTRYPOINT ["tini", "--", "python", "-m", "intelx.cli.main"]

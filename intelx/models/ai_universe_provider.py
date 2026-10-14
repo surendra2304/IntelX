@@ -40,7 +40,7 @@ class AIUniverseProvider(BaseLLMProvider):
     ) -> None:
         self.settings = settings or get_settings()
         self.base_url = (
-            base_url or self.settings.AI_UNIVERSE_BASE_URL or "https://friday-zw59.onrender.com"
+            base_url or self.settings.AI_UNIVERSE_BASE_URL or "https://friday-universe.duckdns.org"
         ).rstrip("/")
         self.api_key = api_key or self.settings.AI_UNIVERSE_API_KEY
         self.timeout_seconds = timeout_seconds
