@@ -450,7 +450,11 @@ async def test_robots_server_error_fails_closed(resolve_example_com):
         if request.url.path == "/robots.txt":
             return httpx.Response(503, text="temporarily unavailable")
         article_requests.append(request.url.path)
-        return httpx.Response(200, headers={"Content-Type": "text/plain"}, text="should not fetch")
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "text/plain"},
+            text="should not fetch",
+        )
 
     connector = HttpFetchConnector(
         settings=Settings(_env_file=None, RESPECT_ROBOTS=True, PER_DOMAIN_DELAY_S=0),
@@ -493,7 +497,11 @@ async def test_missing_robots_file_is_treated_as_unavailable_not_server_failure(
         requested_paths.append(request.url.path)
         if request.url.path == "/robots.txt":
             return httpx.Response(404, text="not found")
-        return httpx.Response(200, headers={"Content-Type": "text/plain"}, text="content")
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "text/plain"},
+            text="content",
+        )
 
     connector = HttpFetchConnector(
         settings=Settings(_env_file=None, RESPECT_ROBOTS=True, PER_DOMAIN_DELAY_S=0),
