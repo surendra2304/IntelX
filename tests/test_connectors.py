@@ -483,7 +483,9 @@ async def test_robots_network_failure_fails_closed(resolve_example_com):
 
 
 @pytest.mark.asyncio
-async def test_missing_robots_file_is_treated_as_unavailable_not_server_failure(resolve_example_com):
+async def test_missing_robots_file_is_treated_as_unavailable_not_server_failure(
+    resolve_example_com,
+):
     """HTTP 404 means no robots resource is published, unlike a 5xx outage."""
     requested_paths = []
 
