@@ -440,7 +440,6 @@ async def test_web_search_connector_mock_routing():
     assert len(results[0].snippet) > 0
 
 
-
 @pytest.mark.asyncio
 async def test_robots_server_error_fails_closed(resolve_example_com):
     """An unreachable robots policy must not grant crawl permission."""
