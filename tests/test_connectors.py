@@ -88,7 +88,7 @@ async def test_ssrf_protection_on_redirect(resolve_example_com):
         )
     )
 
-    connector = HttpFetchConnector()
+    connector = HttpFetchConnector(settings=Settings(_env_file=None, RESPECT_ROBOTS=False))
     with pytest.raises(SSRFBlockedError) as exc_info:
         await connector.fetch("http://example.com/redirect-to-private")
     assert "127.0.0.1" in str(exc_info.value)
@@ -206,7 +206,7 @@ async def test_oversized_body_and_content_type_rejection(resolve_example_com):
         )
     )
 
-    settings = Settings(MAX_PAGE_BYTES=5000)
+    settings = Settings(MAX_PAGE_BYTES=5000, RESPECT_ROBOTS=False)
     connector = HttpFetchConnector(settings=settings)
 
     with pytest.raises(ContentSizeExceededError) as exc_size:
