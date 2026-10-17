@@ -229,10 +229,27 @@ class HttpFetchConnector(BaseConnector):
                 if res.status_code == 200:
                     body = await res.aread()
                     rp.parse(body.decode("utf-8", errors="replace").splitlines())
-                else:
+                elif 400 <= res.status_code < 500:
+                    # RFC 9309 treats 4xx as an unavailable robots resource; the
+                    # publisher has not provided a policy to apply.
                     rp.allow_all = True
-        except Exception:
-            rp.allow_all = True
+                else:
+                    # 5xx and unexpected redirects/statuses make robots policy
+                    # unreachable or ambiguous. Fail closed instead of scraping.
+                    logger.warning(
+                        "Robots policy unavailable for %s (HTTP %s); denying fetch until retried.",
+                        domain,
+                        res.status_code,
+                    )
+                    rp.disallow_all = True
+        except Exception as exc:
+            # DNS/network/timeouts must not silently grant crawl permission.
+            logger.warning(
+                "Robots policy check failed for %s (%s); denying fetch until retried.",
+                domain,
+                type(exc).__name__,
+            )
+            rp.disallow_all = True
 
         self._robots_cache[domain] = (rp, now)
         return rp.can_fetch(self.settings.USER_AGENT, url)
