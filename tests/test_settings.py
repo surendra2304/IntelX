@@ -133,6 +133,7 @@ def test_redacted_dict_hides_secrets():
         assert redacted[key] == "[REDACTED]"
     assert redacted["LLM_MODEL"] == "mock-gpt-4o"
 
+
 def test_turso_database_url_has_no_external_default(monkeypatch):
     """Self-hosted deployments must not inherit a hosted database endpoint."""
     from intelx.core.settings import Settings
