@@ -49,7 +49,7 @@ class Settings(BaseSettings):
         description="Async SQLAlchemy database URL (SQLite or PostgreSQL)",
     )
     TURSO_DATABASE_URL: str | None = Field(
-        default="https://intelx-db-surendra2304.aws-ap-south-1.turso.io",
+        default=None,
         validation_alias=AliasChoices("TURSO_DATABASE_URL", "INTELX_TURSO_DATABASE_URL"),
         description="Turso LibSQL cloud database URL",
     )
