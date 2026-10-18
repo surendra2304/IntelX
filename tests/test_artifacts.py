@@ -270,7 +270,7 @@ def test_report_json_schema_validation(tmp_path):
 async def test_full_mock_mode_end_to_end_artifacts_and_headings(db_session_factory, tmp_path):
     """Verify full end-to-end run produces all 4 artifacts with all 9 required section headings."""
     async with db_session_factory() as session:
-        fixture_path = Path("./tests/fixtures/docs/quantum_report.md").resolve()
+        fixture_path = (Path(__file__).resolve().parent / "fixtures" / "docs" / "quantum_report.md").resolve()
         run = await RunRepo.create_run(
             session,
             objective="Assess quantum error correction progress",

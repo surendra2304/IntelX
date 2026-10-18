@@ -432,7 +432,11 @@ class WebSearchConnector(BaseConnector):
         self._google_news = GoogleNewsSearchConnector()
         self._wikipedia = WikipediaSearchConnector()
         self._ddg = DuckDuckGoSearchConnector(transport=transport)
-        self._fixtures_dir = Path("./tests/fixtures/search_results").resolve()
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        fixtures_dir = Path("./tests/fixtures/search_results").resolve()
+        if not fixtures_dir.exists():
+            fixtures_dir = (repo_root / "tests" / "fixtures" / "search_results").resolve()
+        self._fixtures_dir = fixtures_dir
 
     def _load_mock_results(self, query: str) -> list[SearchResult]:
         """Load matching real local fixture files as search candidates in Mock Mode."""
@@ -455,9 +459,12 @@ class WebSearchConnector(BaseConnector):
             return []
 
         # Find real local fixture files
+        repo_root = Path(__file__).resolve().parent.parent.parent
         fixtures_dir = Path("./evals/fixtures").resolve()
         if not fixtures_dir.exists():
-            fixtures_dir = Path("./data/uploads").resolve()
+            fixtures_dir = (repo_root / "evals" / "fixtures").resolve()
+        if not fixtures_dir.exists():
+            fixtures_dir = (repo_root / "data" / "uploads").resolve()
 
         matched_files: list[Path] = []
         if fixtures_dir.exists():

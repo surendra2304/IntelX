@@ -262,6 +262,7 @@ class OrchestrationEngine:
                 "budget.exceeded",
                 {"spent_usd": current_usd, "max_usd": max_usd},
             )
+            await session.commit()
             raise BudgetExceededError(f"Run {run_id} exceeded budget ceiling (${current_usd:.2f})")
 
         # 3. Budget 80% Warning

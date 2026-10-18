@@ -305,7 +305,7 @@ async def test_ingest_and_deduplication(db_session_factory):
 
 def test_injection_corpus_detection_and_content_immutability():
     """Verify all injection fixtures are flagged without altering content."""
-    fixtures_dir = Path("./tests/fixtures/injection").resolve()
+    fixtures_dir = (Path(__file__).resolve().parent / "fixtures" / "injection").resolve()
     fixture_files = list(fixtures_dir.glob("*.txt"))
     assert len(fixture_files) == 6
 

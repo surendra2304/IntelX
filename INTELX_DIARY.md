@@ -51,10 +51,10 @@ Welcome to the engineering diary of **IntelX**. This document tracks daily progr
 ---
 
 ### 📈 [Day 2 — 2026-08-29: FRIDAY Delegation, Specialized Domain Modes, AI-Universe Multi-Agent Provider, Production Infrastructure, and Futuris Context Exchange](diary/2026-08-29.md)
-- **🎯 Focus**: Production deployment stack, PostgreSQL 15, Redis 7, Nginx reverse proxy, Prometheus `/metrics` telemetry, health/readiness probes (`/healthz`, `/readyz`), data retention purger (`intelx/db/retention.py`), concurrent run management with priority queueing, graceful cancellation, FRIDAY delegation API (`POST /api/v1/friday/research`), domain research modes (Security, Market, Competitive, Technical), AI-Universe multi-agent intelligence adapter with fallback chain, and Futuris context exchange (`FuturisContextProvider`, catalyst webhooks, and combined intelligence briefs).
+- **🎯 Focus**: Production deployment stack, PostgreSQL 18, Redis 7, Nginx reverse proxy, Prometheus `/metrics` telemetry, health/readiness probes (`/healthz`, `/readyz`), data retention purger (`intelx/db/retention.py`), concurrent run management with priority queueing, graceful cancellation, FRIDAY delegation API (`POST /api/v1/friday/research`), domain research modes (Security, Market, Competitive, Technical), AI-Universe multi-agent intelligence adapter with fallback chain, and Futuris context exchange (`FuturisContextProvider`, catalyst webhooks, and combined intelligence briefs).
 - **💡 What I Accomplished**:
   - I built the production multi-stage Docker deployment with unprivileged runtime security and `tini` signal handling.
-  - I authored `docker-compose.production.yml` orchestrating 2 API replicas, PostgreSQL 15, Redis 7, and Nginx.
+  - I authored `docker-compose.production.yml` orchestrating 2 API replicas, PostgreSQL 18, Redis 7, and Nginx.
   - I configured Nginx reverse proxy with least-connections load balancing and unbuffered SSE event streaming.
   - I developed Prometheus telemetry metrics in `intelx/core/metrics.py` exporting run counters, duration histograms, and active gauges.
   - I implemented `/healthz` (liveness) and `/readyz` (readiness) checking database, storage writeability, and model providers.

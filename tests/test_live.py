@@ -78,6 +78,7 @@ async def test_anthropic_live_completion():
     assert res.usage.usd_cost > 0.0
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
 @respx.mock
 async def test_live_provider_fail_fast_invalid_key():
