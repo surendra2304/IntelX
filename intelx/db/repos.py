@@ -200,6 +200,14 @@ class RunRepo:
         run = await RunRepo.get_run(session, run_id)
         if not run:
             raise NotFoundError(f"Run {run_id} not found")
+        # Bulk arithmetic UPDATEs can leave expression-updated ORM attributes
+        # expired even when the entity is still present in the identity map.
+        # Explicit async refresh prevents a later attribute access from trying
+        # to perform database I/O outside SQLAlchemy's greenlet context.
+        await session.refresh(
+            run,
+            attribute_names=["input_tokens", "output_tokens", "usd_cost", "tool_calls"],
+        )
         return run
 
     @staticmethod

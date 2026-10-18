@@ -88,7 +88,7 @@ async def test_ssrf_protection_on_redirect(resolve_example_com):
         )
     )
 
-    connector = HttpFetchConnector()
+    connector = HttpFetchConnector(settings=Settings(_env_file=None, RESPECT_ROBOTS=False))
     with pytest.raises(SSRFBlockedError) as exc_info:
         await connector.fetch("http://example.com/redirect-to-private")
     assert "127.0.0.1" in str(exc_info.value)
@@ -206,7 +206,7 @@ async def test_oversized_body_and_content_type_rejection(resolve_example_com):
         )
     )
 
-    settings = Settings(MAX_PAGE_BYTES=5000)
+    settings = Settings(MAX_PAGE_BYTES=5000, RESPECT_ROBOTS=False)
     connector = HttpFetchConnector(settings=settings)
 
     with pytest.raises(ContentSizeExceededError) as exc_size:
@@ -438,3 +438,76 @@ async def test_web_search_connector_mock_routing():
     assert results[0].url.startswith(("http", "file://"))
     assert len(results[0].title) > 0
     assert len(results[0].snippet) > 0
+
+
+@pytest.mark.asyncio
+async def test_robots_server_error_fails_closed(resolve_example_com):
+    """An unreachable robots policy must not grant crawl permission."""
+    article_requests = []
+
+    async def handler(request):
+        if request.url.path == "/robots.txt":
+            return httpx.Response(503, text="temporarily unavailable")
+        article_requests.append(request.url.path)
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "text/plain"},
+            text="should not fetch",
+        )
+
+    connector = HttpFetchConnector(
+        settings=Settings(_env_file=None, RESPECT_ROBOTS=True, PER_DOMAIN_DELAY_S=0),
+        transport=httpx.MockTransport(handler),
+    )
+    result = await connector.fetch("http://example.com/private/data")
+
+    assert result.robots_ok is False
+    assert result.status_code == 403
+    assert article_requests == []
+
+
+@pytest.mark.asyncio
+async def test_robots_network_failure_fails_closed(resolve_example_com):
+    """A robots network failure must not silently become allow-all."""
+
+    async def handler(request):
+        if request.url.path == "/robots.txt":
+            raise httpx.ConnectError("simulated robots outage")
+        pytest.fail("the article request must not run when robots policy is unreachable")
+
+    connector = HttpFetchConnector(
+        settings=Settings(_env_file=None, RESPECT_ROBOTS=True, PER_DOMAIN_DELAY_S=0),
+        transport=httpx.MockTransport(handler),
+    )
+    result = await connector.fetch("http://example.com/private/data")
+
+    assert result.robots_ok is False
+    assert result.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_missing_robots_file_is_treated_as_unavailable_not_server_failure(
+    resolve_example_com,
+):
+    """HTTP 404 means no robots resource is published, unlike a 5xx outage."""
+    requested_paths = []
+
+    async def handler(request):
+        requested_paths.append(request.url.path)
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404, text="not found")
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "text/plain"},
+            text="content",
+        )
+
+    connector = HttpFetchConnector(
+        settings=Settings(_env_file=None, RESPECT_ROBOTS=True, PER_DOMAIN_DELAY_S=0),
+        transport=httpx.MockTransport(handler),
+    )
+    result = await connector.fetch("http://example.com/article")
+
+    assert result.robots_ok is True
+    assert result.content == b"content"
+    assert requested_paths == ["/robots.txt", "/article"]

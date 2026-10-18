@@ -213,6 +213,11 @@ class OrchestrationEngine:
         run = await RunRepo.get_run(session, run_id)
         if not run:
             raise NotFoundError(f"Run {run_id} not found")
+        # This gate is often called after bulk SQL updates or commits in the
+        # orchestration flow. Refresh explicitly so expired scalar attributes
+        # are loaded inside the async session rather than triggering implicit
+        # I/O when the budget or deadline checks read them.
+        await session.refresh(run)
 
         # 1. Cancellation Check
         if run.status == RunStatus.CANCELLED or (
