@@ -149,7 +149,9 @@ async def test_rate_limiter_429(app_client):
 @pytest.mark.asyncio
 async def test_full_api_lifecycle_and_artifact_download(app_client):
     """Verify submit -> execute -> poll events -> download report.md + report.json."""
-    fixture_path = (Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt").resolve()
+    fixture_path = (
+        Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt"
+    ).resolve()
     payload = {
         "objective": "Evaluate solid-state electrolyte conductivity",
         "scope": {"depth": "standard", "allowed_domains": ["local"]},

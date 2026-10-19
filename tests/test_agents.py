@@ -203,7 +203,9 @@ async def test_retriever_agent_error_tolerance(db_session_factory):
     """Verify RetrieverAgent handles transient and logical failures gracefully without crashing."""
     async with db_session_factory() as session:
         run = await RunRepo.create_run(session, objective="Retriever test run")
-        fixture_doc = (Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt").resolve()
+        fixture_doc = (
+            Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt"
+        ).resolve()
 
         candidates = [
             # 1. Valid local file
@@ -303,7 +305,9 @@ async def test_end_to_end_micro_run(db_session_factory):
     """Execute micro pipeline: Plan -> Scout -> Retrieve -> Extract with DB verification."""
     async with db_session_factory() as session:
         run = await RunRepo.create_run(session, objective="Evaluate solid-state batteries")
-        fixture_path = (Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt").resolve()
+        fixture_path = (
+            Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt"
+        ).resolve()
 
         # 1. Planner
         planner = PlannerAgent()
