@@ -109,7 +109,9 @@ async def test_role_based_navigation_and_action_guards(web_client):
 @pytest.mark.asyncio
 async def test_full_web_lifecycle_and_citation_drawer(web_client):
     """Verify complete web flow: submit research -> poll job -> open report -> inspect citations."""
-    fixture_path = (Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt").resolve()
+    fixture_path = (
+        Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt"
+    ).resolve()
 
     # 1. Login as Admin
     res_login = await web_client.post("/login", data={"api_key": web_client.admin_key})
