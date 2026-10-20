@@ -151,6 +151,73 @@ class DuckDuckGoSearchConnector(BaseConnector):
             ) from e
 
 
+class SearXNGSearchConnector(BaseConnector):
+    """SearXNG metasearch instance integration."""
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            name="searxng_search",
+            capabilities=["web_search", "unauthenticated", "metasearch"],
+            required_credentials=[],
+            classification="EXTERNAL_SEARCH",
+            **kwargs,
+        )
+        self.base_url = (base_url or "").rstrip("/")
+        self._transport = transport
+
+    async def fetch(self, target: str, **kwargs: Any) -> list[SearchResult]:
+        """Execute search query against configured SearXNG instance."""
+        if not self.base_url:
+            return []
+        max_results = min(kwargs.get("max_results", 10), 20)
+        url = f"{self.base_url}/search"
+        params = {
+            "q": target,
+            "format": "json",
+        }
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/json",
+        }
+        try:
+            async with httpx.AsyncClient(
+                transport=self._transport, timeout=10.0, headers=headers
+            ) as client:
+                resp = await client.get(url, params=params)
+                if resp.status_code != 200:
+                    raise ProviderError(
+                        "SearXNG search returned a non-success response",
+                        details={"provider": "searxng", "status_code": resp.status_code},
+                    )
+                data = resp.json()
+                results: list[SearchResult] = []
+                for item in data.get("results", []):
+                    u = item.get("url", "")
+                    t = item.get("title", "")
+                    s = item.get("content", "") or item.get("snippet", "")
+                    if u and t:
+                        results.append(SearchResult(url=u, title=t, snippet=s))
+                    if len(results) >= max_results:
+                        break
+                return results
+        except ProviderError:
+            raise
+        except Exception as e:
+            logger.warning("SearXNG search request failed (%s)", type(e).__name__)
+            raise ProviderError(
+                "SearXNG search request failed",
+                details={"provider": "searxng", "error_class": type(e).__name__},
+            ) from e
+
+
 def clean_rss_text(raw_text: str) -> str:
     """Unescape HTML entities, strip tags and embedded URLs from RSS feed entries."""
     if not raw_text:
@@ -429,6 +496,9 @@ class WebSearchConnector(BaseConnector):
         )
         self.settings = settings or get_settings()
         self._tavily = TavilySearchConnector(api_key=self.settings.TAVILY_API_KEY)
+        self._searxng = SearXNGSearchConnector(
+            base_url=self.settings.SEARXNG_URL, transport=transport
+        )
         self._google_news = GoogleNewsSearchConnector()
         self._wikipedia = WikipediaSearchConnector()
         self._ddg = DuckDuckGoSearchConnector(transport=transport)
@@ -610,7 +680,13 @@ class WebSearchConnector(BaseConnector):
             if results:
                 return results
 
-        # 2. Google News RSS + Wikipedia, then DuckDuckGo as a fallback.
+        # 2. SearXNG if instance URL configured
+        if self.settings.SEARXNG_URL:
+            results = await fetch_provider("searxng", self._searxng)
+            if results:
+                return results
+
+        # 3. Google News RSS + Wikipedia, then DuckDuckGo as a fallback.
         results: list[SearchResult] = []
         news_results = await fetch_provider("google_news", self._google_news)
         if news_results:

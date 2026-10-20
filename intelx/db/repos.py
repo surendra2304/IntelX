@@ -612,21 +612,23 @@ class ClaimRepo:
     @staticmethod
     async def search_claims_fts(session: AsyncSession, search_query: str) -> list[Claim]:
         """Search claims using FTS5 match where available, falling back to LIKE query."""
-        try:
-            raw_stmt = text(
-                "SELECT claims.* FROM claims "
-                "JOIN claims_fts ON claims.id = claims_fts.id "
-                "WHERE claims_fts MATCH :query"
-            )
-            result = await session.execute(raw_stmt, {"query": search_query})
-            claim_ids = [row.id for row in result.fetchall()]
-            if claim_ids:
-                stmt = select(Claim).where(Claim.id.in_(claim_ids))
-                res = await session.execute(stmt)
-                return list(res.scalars().all())
-        except Exception:
-            # Fallback to standard substring search if FTS5 is not available
-            pass
+        dialect_name = session.get_bind().dialect.name
+        if dialect_name == "sqlite":
+            try:
+                raw_stmt = text(
+                    "SELECT claims.* FROM claims "
+                    "JOIN claims_fts ON claims.id = claims_fts.id "
+                    "WHERE claims_fts MATCH :query"
+                )
+                result = await session.execute(raw_stmt, {"query": search_query})
+                claim_ids = [row.id for row in result.fetchall()]
+                if claim_ids:
+                    stmt = select(Claim).where(Claim.id.in_(claim_ids))
+                    res = await session.execute(stmt)
+                    return list(res.scalars().all())
+            except Exception:
+                # Fallback to standard substring search if FTS5 is not available
+                pass
 
         stmt = select(Claim).where(Claim.text.ilike(f"%{search_query}%"))
         result = await session.execute(stmt)
@@ -635,21 +637,23 @@ class ClaimRepo:
     @staticmethod
     async def search_chunks_fts(session: AsyncSession, search_query: str) -> list[Chunk]:
         """Search text chunks using FTS5 match where available, falling back to LIKE query."""
-        try:
-            raw_stmt = text(
-                "SELECT chunks.* FROM chunks "
-                "JOIN chunks_fts ON chunks.id = chunks_fts.id "
-                "WHERE chunks_fts MATCH :query"
-            )
-            result = await session.execute(raw_stmt, {"query": search_query})
-            chunk_ids = [row.id for row in result.fetchall()]
-            if chunk_ids:
-                stmt = select(Chunk).where(Chunk.id.in_(chunk_ids))
-                res = await session.execute(stmt)
-                return list(res.scalars().all())
-        except Exception:
-            # Fallback to substring query
-            pass
+        dialect_name = session.get_bind().dialect.name
+        if dialect_name == "sqlite":
+            try:
+                raw_stmt = text(
+                    "SELECT chunks.* FROM chunks "
+                    "JOIN chunks_fts ON chunks.id = chunks_fts.id "
+                    "WHERE chunks_fts MATCH :query"
+                )
+                result = await session.execute(raw_stmt, {"query": search_query})
+                chunk_ids = [row.id for row in result.fetchall()]
+                if chunk_ids:
+                    stmt = select(Chunk).where(Chunk.id.in_(chunk_ids))
+                    res = await session.execute(stmt)
+                    return list(res.scalars().all())
+            except Exception:
+                # Fallback to substring query
+                pass
 
         stmt = select(Chunk).where(Chunk.text.ilike(f"%{search_query}%"))
         result = await session.execute(stmt)

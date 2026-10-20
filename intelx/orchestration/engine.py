@@ -70,13 +70,14 @@ async def _dispatch_external_research(
         [
             (
                 "Memora",
-                lambda: memory.store_research_memory(
+                lambda: memory.publish_research_handoff(
                     run_id=run_id,
                     objective=objective,
                     summary=finding_text,
-                    evidence_count=evidence_count,
-                    claims_count=claims_count,
-                    namespace="memora://intelx/shared",
+                    claims=extra_context.get("top_claims") if extra_context else None,
+                    findings=extra_context.get("findings") if extra_context else None,
+                    sources=extra_context.get("sources") if extra_context else None,
+                    namespace_prefix="intelx://research",
                     tags=tags,
                 ),
             ),

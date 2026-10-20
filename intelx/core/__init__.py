@@ -2,6 +2,14 @@
 
 from intelx.core.auth import get_current_api_key, hash_api_key, require_role
 from intelx.core.confidence import compute_confidence_score, get_confidence_label
+from intelx.core.contradiction import (
+    Conflict,
+    ContradictionEngine,
+    apply_contradiction_resolutions,
+    calculate_contradiction_confidence,
+    detect_contradictions,
+    resolve_claim_conflicts,
+)
 from intelx.core.errors import (
     BudgetExceededError,
     ConfigError,
@@ -38,6 +46,12 @@ __all__ = [
     "setup_logging",
     "compute_confidence_score",
     "get_confidence_label",
+    "Conflict",
+    "ContradictionEngine",
+    "calculate_contradiction_confidence",
+    "detect_contradictions",
+    "resolve_claim_conflicts",
+    "apply_contradiction_resolutions",
     "compute_3gram_jaccard",
     "is_independent_evidence",
     "render_report_markdown",
