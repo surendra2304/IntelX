@@ -377,27 +377,27 @@ async def auto_seed_demonstrations_if_empty(session: AsyncSession) -> bool:
     report_md_content1 = f"""# Research Report: Next-Generation Sodium-Ion Cathode Performance
 
 ## Direct Answer
-Next-generation sodium-ion cathodes—particularly titanium-stabilized O3-type layered oxides [S:{s1_1.id[:8]}] and Na3V2(PO4)3 polyanion frameworks [S:{s1_3.id[:8]}]—have reached commercial production readiness for stationary grid storage and urban electric transport. Validated operational data confirms gravimetric energy densities of 160–175 Wh/kg, retention exceeding 2,000 cycles at 1C [C:{clm1_1.id[:8]}], and an exceptional 35°C thermal safety margin over high-nickel NMC chemistries during thermal abuse testing [C:{clm1_2.id[:8]}].
+Next-generation sodium-ion cathodes—particularly titanium-stabilized O3-type layered oxides [S:{s1_1.id}] and Na3V2(PO4)3 polyanion frameworks [S:{s1_3.id}]—have reached commercial production readiness for stationary grid storage and urban electric transport. Validated operational data confirms gravimetric energy densities of 160–175 Wh/kg, retention exceeding 2,000 cycles at 1C [C:{clm1_1.id}], and an exceptional 35°C thermal safety margin over high-nickel NMC chemistries during thermal abuse testing [C:{clm1_2.id}].
 
 ## Executive Summary
-This intelligence synthesis reviews empirical validation data across academic literature and commercial production trials for sodium-ion energy storage systems. While sodium-ion cells maintain a volumetric energy density penalty (~320 Wh/L vs 650 Wh/L in premium NMC) [C:{clm1_4.id[:8]}], their raw precursor cost advantage of 68% and exceptional -20°C discharge kinetics [C:{clm1_3.id[:8]}] make them the optimal solution for stationary BESS and light commercial fleets.
+This intelligence synthesis reviews empirical validation data across academic literature and commercial production trials for sodium-ion energy storage systems. While sodium-ion cells maintain a volumetric energy density penalty (~320 Wh/L vs 650 Wh/L in premium NMC) [C:{clm1_4.id}], their raw precursor cost advantage of 68% and exceptional -20°C discharge kinetics [C:{clm1_3.id}] make them the optimal solution for stationary BESS and light commercial fleets.
 
 ## Key Performance Benchmarks
 | Metric | Sodium-Ion (O3 Layered) | Sodium-Ion (Polyanion NFPP) | Li-Ion (NMC811 Baseline) | Backing Evidence |
-| Gravimetric Density | 165 Wh/kg | 135 Wh/kg | 260 Wh/kg | [C:{clm1_1.id[:8]}] |
-| Volumetric Density | 320 Wh/L | 280 Wh/L | 650 Wh/L | [C:{clm1_4.id[:8]}] |
-| Cycle Life (1C) | 2,000 cycles (88% ret) | 4,500 cycles (85% ret) | 1,500 cycles (80% ret) | [C:{clm1_1.id[:8]}] |
-| Thermal Runaway Onset | 165°C | 210°C | 130°C | [C:{clm1_2.id[:8]}] |
-| Retention at -20°C | 82.0% | 91.4% | 64.0% | [C:{clm1_3.id[:8]}] |
-| Cathode Raw Material Cost | ~$3.20 / kWh eq | ~$4.10 / kWh eq | ~$18.50 / kWh eq | [S:{s1_1.id[:8]}] |
+| Gravimetric Density | 165 Wh/kg | 135 Wh/kg | 260 Wh/kg | [C:{clm1_1.id}] |
+| Volumetric Density | 320 Wh/L | 280 Wh/L | 650 Wh/L | [C:{clm1_4.id}] |
+| Cycle Life (1C) | 2,000 cycles (88% ret) | 4,500 cycles (85% ret) | 1,500 cycles (80% ret) | [C:{clm1_1.id}] |
+| Thermal Runaway Onset | 165°C | 210°C | 130°C | [C:{clm1_2.id}] |
+| Retention at -20°C | 82.0% | 91.4% | 64.0% | [C:{clm1_3.id}] |
+| Cathode Raw Material Cost | ~$3.20 / kWh eq | ~$4.10 / kWh eq | ~$18.50 / kWh eq | [S:{s1_1.id}] |
 
 ## Critical Findings & Synthesis
-- **Thermal Abuse & Safety Profile**: Abuse tests confirm self-heating onset at 165°C with no catastrophic oxygen liberation [S:{s1_2.id[:8]}], eliminating violent thermal runaway propagation in modular packs.
-- **Sub-Zero Discharge Resilience**: Polyanion tunnel structures preserve fast Na+ hopping even in frozen electrolytes, retaining 91.4% nominal capacity at -20°C [S:{s1_4.id[:8]}].
+- **Thermal Abuse & Safety Profile**: Abuse tests confirm self-heating onset at 165°C with no catastrophic oxygen liberation [S:{s1_2.id}], eliminating violent thermal runaway propagation in modular packs.
+- **Sub-Zero Discharge Resilience**: Polyanion tunnel structures preserve fast Na+ hopping even in frozen electrolytes, retaining 91.4% nominal capacity at -20°C [S:{s1_4.id}].
 - **Supply Chain Independence**: Eliminates nickel, cobalt, and lithium supply constraints, shifting reliance to abundant soda ash and synthetic hard carbon precursors.
 
 ## Methodological Notes & Confidence
-Synthesized across 4 peer-reviewed and industrial telemetry sources [S:{s1_1.id[:8]}] [S:{s1_2.id[:8]}] [S:{s1_3.id[:8]}] [S:{s1_4.id[:8]}]. All backing claims achieved verifier groundedness scores ≥0.91 with cryptographic quote span validation.
+Synthesized across 4 peer-reviewed and industrial telemetry sources [S:{s1_1.id}] [S:{s1_2.id}] [S:{s1_3.id}] [S:{s1_4.id}]. All backing claims achieved verifier groundedness scores ≥0.91 with cryptographic quote span validation.
 """
     (dir1 / "report.md").write_text(report_md_content1, encoding="utf-8")
 
@@ -717,11 +717,11 @@ Synthesized across 4 peer-reviewed and industrial telemetry sources [S:{s1_1.id[
     report_md_content2 = f"""# Research Report: Solid-State Battery Electrolyte Stability
 
 ## Direct Answer
-Halide-substituted argyrodite solid electrolytes (specifically Li6PS5Cl0.5Br0.5) [S:{s2_1.id[:8]}] demonstrate room-temperature ionic conductivities of 10.2 mS/cm [C:{clm2_1.id[:8]}]. Conformal atomic-layer-deposited LiNbO3 interface layers prevent lithium dendrite penetration up to 4.2 mA/cm2 [C:{clm2_2.id[:8]}], enabling full solid-state cells with >84% capacity retention over 1,000 cycles.
+Halide-substituted argyrodite solid electrolytes (specifically Li6PS5Cl0.5Br0.5) [S:{s2_1.id}] demonstrate room-temperature ionic conductivities of 10.2 mS/cm [C:{clm2_1.id}]. Conformal atomic-layer-deposited LiNbO3 interface layers prevent lithium dendrite penetration up to 4.2 mA/cm2 [C:{clm2_2.id}], enabling full solid-state cells with >84% capacity retention over 1,000 cycles.
 
 ## Key Findings
 - Dual halide substitution dramatically lowers grain-boundary resistance.
-- Critical current density for dendrite propagation is elevated from 0.8 mA/cm2 to 4.2 mA/cm2 via interface passivation [S:{s2_2.id[:8]}].
+- Critical current density for dendrite propagation is elevated from 0.8 mA/cm2 to 4.2 mA/cm2 via interface passivation [S:{s2_2.id}].
 """
     (dir2 / "report.md").write_text(report_md_content2, encoding="utf-8")
     (dir2 / "report.json").write_text(
@@ -889,7 +889,7 @@ Halide-substituted argyrodite solid electrolytes (specifically Li6PS5Cl0.5Br0.5)
     report_md_content3 = f"""# Research Report: Autonomous Multi-Agent Fault Tolerance
 
 ## Direct Answer
-Enterprise autonomous agent systems require multi-agent debate and cryptographic claim-to-chunk span verification [S:{s3_1.id[:8]}]. Empirical benchmarks confirm a 64% reduction in hallucinations [C:{clm3_1.id[:8]}] and 98.7% catch rate for synthetic hallucinated citations.
+Enterprise autonomous agent systems require multi-agent debate and cryptographic claim-to-chunk span verification [S:{s3_1.id}]. Empirical benchmarks confirm a 64% reduction in hallucinations [C:{clm3_1.id}] and 98.7% catch rate for synthetic hallucinated citations.
 
 ## Summary & Architecture
 1. **Quorum Verification**: Parallel verification loops with independent model gates.
@@ -1108,10 +1108,10 @@ Enterprise autonomous agent systems require multi-agent debate and cryptographic
     report_md_content4 = f"""# Research Report: Quantum Interconnect Protocols (Review Required)
 
 ## Direct Answer
-High-fidelity quantum state transfer currently mandates cryogenic temperatures (<15 mK) [S:{s4_1.id[:8]}], achieving 99.1% state fidelity [C:{clm4_1.id[:8]}]. Unverified assertions of room-temperature coherence [S:{s4_2.id[:8]}] [C:{clm4_2.id[:8]}] have been rejected and flagged as disputed due to thermal phonon decoherence constraints.
+High-fidelity quantum state transfer currently mandates cryogenic temperatures (<15 mK) [S:{s4_1.id}], achieving 99.1% state fidelity [C:{clm4_1.id}]. Unverified assertions of room-temperature coherence [S:{s4_2.id}] [C:{clm4_2.id}] have been rejected and flagged as disputed due to thermal phonon decoherence constraints.
 
 ## Disputed Claims & Governance Gate
-- **Claim [C:{clm4_2.id[:8]}]**: Flagged DISPUTED. Contradicted by empirical thermal bounds. Requires administrator review in Review Queue.
+- **Claim [C:{clm4_2.id}]**: Flagged DISPUTED. Contradicted by empirical thermal bounds. Requires administrator review in Review Queue.
 """
     (dir4 / "report.md").write_text(report_md_content4, encoding="utf-8")
     (dir4 / "report.json").write_text(

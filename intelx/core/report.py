@@ -41,6 +41,20 @@ def _clean_prose(text: str) -> str:
     return t
 
 
+def _parse_datetime(value: Any) -> datetime | None:
+    """Parse source timestamps consistently, treating naive values as UTC."""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def resolve_citation_id(target_token: str, valid_ids: set[str]) -> str | None:
     """Resolve a citation token (full ID or prefix) against a set of valid IDs."""
     if target_token in valid_ids:
@@ -50,6 +64,17 @@ def resolve_citation_id(target_token: str, valid_ids: set[str]) -> str | None:
     if len(matches) == 1:
         return matches[0]
     return None
+
+
+def format_citation_id(target_id: str, valid_ids: set[str]) -> str:
+    """Return an at-least-eight-character prefix that uniquely identifies an ID."""
+    token_length = min(8, len(target_id))
+    while token_length < len(target_id) and any(
+        candidate != target_id and candidate.startswith(target_id[:token_length])
+        for candidate in valid_ids
+    ):
+        token_length += 1
+    return target_id[:token_length]
 
 
 def validate_citations(
@@ -198,7 +223,10 @@ def render_report_markdown(
                 str(_get_val(claim, "text", "")),
                 re.IGNORECASE,
             ):
-                measurement = (f"{value} {unit.replace(' ', '')}", f"[S:{source_id[:8]}]")
+                measurement = (
+                    f"{value} {unit.replace(' ', '')}",
+                    f"[S:{format_citation_id(source_id, set(sources_map))}]",
+                )
                 year_measurements = dated_measurements.setdefault(published_at.year, [])
                 if measurement not in year_measurements:
                     year_measurements.append(measurement)
@@ -242,6 +270,9 @@ def render_report_markdown(
             + clean_answer
         )
     findings_lines = []
+    asks_current_status = any(
+        term in objective.lower() for term in ("current", "currently", "latest", "today", "now")
+    )
     if grounded_findings:
         for f in grounded_findings:
             stmt = _clean_prose(f.get("statement") or f.get("conclusion") or "")
@@ -249,34 +280,42 @@ def render_report_markdown(
             claim_ids = f.get("claim_ids") or f.get("claim_ids_json") or []
             citation_tokens = []
             historical_dates = []
+            publication_date_missing = False
             for cid in claim_ids:
-                citation_tokens.append(f"[C:{cid[:8]}]")
+                citation_tokens.append(
+                    f"[C:{format_citation_id(str(cid), set(claims_map))}]"
+                )
                 claim = claims_map.get(cid)
                 if claim:
                     sid = _get_val(claim, "source_id")
                     if sid:
-                        citation_tokens.append(f"[S:{str(sid)[:8]}]")
+                        source_id = str(sid)
+                        citation_tokens.append(
+                            f"[S:{format_citation_id(source_id, set(sources_map))}]"
+                        )
                         source = sources_map.get(str(sid))
-                        published_at = _get_val(source, "published_at") if source else None
-                        if isinstance(published_at, str):
-                            try:
-                                published_at = datetime.fromisoformat(
-                                    published_at.replace("Z", "+00:00")
-                                )
-                            except ValueError:
-                                published_at = None
-                        if (
-                            isinstance(published_at, datetime)
-                            and any(
-                                term in objective.lower()
-                                for term in ("current", "currently", "latest", "today", "2026")
-                            )
-                            and published_at.year < datetime.now(UTC).year
-                        ):
-                            historical_dates.append(published_at.date().isoformat())
-            if historical_dates:
-                earliest = min(historical_dates)
-                stmt = f"As reported in evidence published {earliest} (historical; not proof of current status): {stmt}"
+                        published_at = _parse_datetime(
+                            _get_val(source, "published_at") if source else None
+                        )
+                        if asks_current_status and source:
+                            if published_at and published_at.date() < datetime.now(UTC).date():
+                                historical_dates.append(published_at.date().isoformat())
+                            elif published_at is None:
+                                publication_date_missing = True
+            if historical_dates or publication_date_missing:
+                freshness_notes = []
+                if historical_dates:
+                    earliest = min(historical_dates)
+                    freshness_notes.append(
+                        f"evidence published {earliest} (historical; not proof of current status)"
+                    )
+                if publication_date_missing:
+                    freshness_notes.append(
+                        "a cited source has no publication date, so its freshness and current status "
+                        "cannot be verified"
+                    )
+                freshness_note = "; ".join(freshness_notes)
+                stmt = f"As reported in {freshness_note}: {stmt}"
             cite_str = " ".join(dict.fromkeys(citation_tokens))
             is_inf = f.get("is_inference", False) or not citation_tokens
             prefix = "[Inference] " if is_inf else ""
@@ -297,7 +336,10 @@ def render_report_markdown(
             claim = claims_map.get(cid)
             sid = _get_val(claim, "source_id", "Unknown") if claim else "Unknown"
             status = _get_val(claim, "status", "ACTIVE") if claim else "ACTIVE"
-            table_rows.append(f"| {short_stmt} | [C:{cid[:8]}] | [S:{str(sid)[:8]}] | {status} |")
+            table_rows.append(
+                f"| {short_stmt} | [C:{format_citation_id(str(cid), set(claims_map))}] "
+                f"| [S:{format_citation_id(str(sid), set(sources_map))}] | {status} |"
+            )
 
     if len(table_rows) == 2:
         table_rows.append("| None | N/A | N/A | N/A |")
@@ -315,7 +357,11 @@ def render_report_markdown(
             c_id = str(_get_val(c, "id", ""))
             c_text = _get_val(c, "text", "")
             s_id = str(_get_val(c, "source_id", ""))
-            entry = f'- **Disputed Claim**: "{c_text}" [C:{c_id[:8]}] [S:{s_id[:8]}]'
+            entry = (
+                f'- **Disputed Claim**: "{c_text}" '
+                f"[C:{format_citation_id(c_id, set(claims_map))}] "
+                f"[S:{format_citation_id(s_id, set(sources_map))}]"
+            )
             if entry not in contra_lines:
                 contra_lines.append(entry)
     if not contra_lines:
@@ -356,7 +402,11 @@ def render_report_markdown(
             title = _clean_prose(_get_val(s, "title") or "Untitled Source")
             domain = _get_val(s, "domain") or "local"
             tier = _get_val(s, "trust_tier") or "STANDARD"
-            retrieved_at = _get_val(s, "retrieved_at") or now_str
+            retrieved_at = _get_val(s, "retrieved_at") or "not recorded"
+            published_at = _parse_datetime(_get_val(s, "published_at"))
+            publication = (
+                published_at.isoformat() if published_at else "not recorded; freshness unknown"
+            )
             risk = _get_val(s, "injection_risk", False)
             license_note = _get_val(s, "license_note", "") or ""
             snip_badge = (
@@ -365,8 +415,10 @@ def render_report_markdown(
                 else ""
             )
             source_lines.append(
-                f"- **[S:{s_id[:8]}]** {title}{snip_badge} — `{domain}` (Tier: {tier}, "
-                f"Retrieved: {retrieved_at}, Injection Risk: {risk})"
+                f"- **[S:{format_citation_id(s_id, set(sources_map))}]** "
+                f"{title}{snip_badge} — `{domain}` (Tier: {tier}, "
+                f"Published: {publication}, Retrieved: {retrieved_at}; retrieval time does not "
+                f"establish currentness, Injection Risk: {risk})"
             )
     else:
         source_lines.append("- No external sources ingested.")
@@ -512,6 +564,13 @@ def export_text_citations(findings: list[Any], sources: list[Any]) -> str:
         if sid:
             sources_by_id[str(sid)] = s
 
+    all_claim_ids = {
+        str(claim_id)
+        for finding in findings
+        for claim_id in (
+            _get_val(finding, "claim_ids") or _get_val(finding, "claim_ids_json", [])
+        )
+    }
     lines: list[str] = ["### Key Findings with Citations\n"]
     used_sources: set[str] = set()
 
@@ -519,11 +578,11 @@ def export_text_citations(findings: list[Any], sources: list[Any]) -> str:
         statement = _get_val(f, "statement") or _get_val(f, "conclusion", "")
         status = _get_val(f, "status", "verified")
         conf = _get_val(f, "confidence") or _get_val(f, "confidence_score", 0.8)
-        claim_ids = _get_val(f, "claim_ids") or _get_val(f, "claim_ids_json", [])
+        finding_claim_ids = _get_val(f, "claim_ids") or _get_val(f, "claim_ids_json", [])
 
         cites = []
-        for cid in claim_ids:
-            cites.append(f"[C:{str(cid)[:8]}]")
+        for cid in finding_claim_ids:
+            cites.append(f"[C:{format_citation_id(str(cid), all_claim_ids)}]")
 
         citations_list = _get_val(f, "citations", [])
         for cit in citations_list:
@@ -545,7 +604,8 @@ def export_text_citations(findings: list[Any], sources: list[Any]) -> str:
             for sid, s in sources_by_id.items():
                 title = _get_val(s, "title", "Source Document")
                 loc = _get_val(s, "location", "") or _get_val(s, "url", "")
-                lines.append(f"- **[S:{sid[:8]}]** [{title}]({loc})")
+                source_token = format_citation_id(sid, set(sources_by_id))
+                lines.append(f"- **[S:{source_token}]** [{title}]({loc})")
 
     return "\n".join(lines)
 

@@ -74,6 +74,7 @@ async def test_friday_research_delegation_post_and_queue_priority(friday_test_cl
             "priority": "normal",
             "domain_hint": "market",
         },
+        "query_scope": {"query": "Investigate current market dynamics", "time_horizon": "30d"},
         "depth": "quick_scan",
         "budget": {"max_sources": 5, "max_time_minutes": 5},
     }
@@ -122,6 +123,9 @@ async def test_friday_research_delegation_post_and_queue_priority(friday_test_cl
         assert claimed_run is not None
         assert claimed_run.id == urgent_run_id
         assert claimed_run.status == RunStatus.PLANNING
+        normal_run = await RunRepo.get_run(session, normal_run_id)
+        assert normal_run is not None
+        assert normal_run.scope_json["query_scope"]["time_horizon"] == "30d"
 
 
 @pytest.mark.asyncio

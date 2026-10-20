@@ -1,5 +1,7 @@
 """Tests for INTELX Trust Layer: Independence, Confidence, Verifier, Analyst, Critic, and Entity."""
 
+from datetime import UTC, datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy import select
 
@@ -7,8 +9,14 @@ from intelx.agents.analyst import AnalystAgent
 from intelx.agents.critic import CriticAgent
 from intelx.agents.retriever import RetrievedDoc, RetrieverAgent, RetrieverOutput
 from intelx.agents.scout import ScoutAgent, ScoutOutput, SourceCandidate
-from intelx.agents.verifier import VerificationVerdict, VerifierAgent
+from intelx.agents.verifier import (
+    VerificationVerdict,
+    VerifierAgent,
+    _is_source_stale,
+    _parse_time_horizon,
+)
 from intelx.core.confidence import compute_confidence_score
+from intelx.core.credibility import SourceCredibilityScorer
 from intelx.core.enums import (
     ClaimOrigin,
     ClaimStatus,
@@ -21,7 +29,7 @@ from intelx.core.enums import (
 )
 from intelx.core.independence import compute_3gram_jaccard, is_independent_evidence
 from intelx.db.models import EntityMerge, Event, Evidence
-from intelx.db.repos import ClaimRepo, RunRepo
+from intelx.db.repos import ClaimRepo, RunRepo, SourceRepo
 from intelx.db.session import get_sessionmaker
 from intelx.memory.entities import EntityResolver
 from intelx.memory.normalize import ingest_and_normalize
@@ -126,6 +134,137 @@ def test_confidence_formula_properties():
         TrustTier.QUARANTINE, is_stale=True, claim_type=ClaimType.FORECAST, llm_adjustment=-0.10
     )
     assert score_min == 0.05
+
+
+def test_verifier_treats_exact_horizon_cutoff_as_fresh_across_timezones():
+    """A publication exactly at the explicit cutoff stays fresh in any equivalent timezone."""
+    now = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
+    horizon = _parse_time_horizon({"query_scope": {"time_horizon": "30d"}})
+    assert horizon == timedelta(days=30)
+
+    cutoff_utc = now - horizon
+    cutoff_offset = cutoff_utc.astimezone(timezone(timedelta(hours=5, minutes=30)))
+
+    assert _is_source_stale(cutoff_utc, horizon, now) is False
+    assert _is_source_stale(cutoff_offset, horizon, now) is False
+    assert _is_source_stale(cutoff_utc, horizon, now) == _is_source_stale(
+        cutoff_offset, horizon, now
+    )
+
+    one_microsecond = timedelta(microseconds=1)
+    before_cutoff_utc = cutoff_utc - one_microsecond
+    after_cutoff_utc = cutoff_utc + one_microsecond
+    before_cutoff_offset = before_cutoff_utc.astimezone(
+        timezone(timedelta(hours=5, minutes=30))
+    )
+    after_cutoff_offset = after_cutoff_utc.astimezone(
+        timezone(timedelta(hours=5, minutes=30))
+    )
+
+    assert _is_source_stale(before_cutoff_utc, horizon, now) is True
+    assert _is_source_stale(before_cutoff_offset, horizon, now) is True
+    assert _is_source_stale(after_cutoff_utc, horizon, now) is False
+    assert _is_source_stale(after_cutoff_offset, horizon, now) is False
+
+
+@pytest.mark.asyncio
+async def test_verifier_applies_only_explicit_time_horizon_to_confidence(db_session_factory):
+    """Apply the persisted FRIDAY horizon only to dated evidence outside that range."""
+    async with db_session_factory() as session:
+        now = datetime.now(UTC)
+        cases = (
+            ("30d", now - timedelta(days=60), True),
+            ("30d", (now - timedelta(days=60)).replace(tzinfo=None), True),
+            ("30d", now - timedelta(days=5), False),
+            (None, now - timedelta(days=60), False),
+            ("30d", None, False),
+            ("30weeks", now - timedelta(days=60), False),
+        )
+
+        class CandidateScout:
+            async def execute(self, **kwargs):
+                return ScoutOutput(
+                    candidates=[
+                        SourceCandidate(
+                            location="https://verification.example/evidence",
+                            title="Verification candidate",
+                            reason="Deterministic confidence test",
+                        )
+                    ]
+                )
+
+        class EmptyRetriever:
+            async def execute(self, **kwargs):
+                return RetrieverOutput()
+
+        verifier = VerifierAgent(scout_agent=CandidateScout(), retriever_agent=EmptyRetriever())
+        for index, (horizon, published_at, expected_stale) in enumerate(cases):
+            scope_json = {"query_scope": {"time_horizon": horizon}} if horizon else {}
+            run = await RunRepo.create_run(
+                session,
+                objective="Check the age of evidence",
+                scope_json=scope_json,
+            )
+            source = await SourceRepo.create_source(
+                session=session,
+                kind=SourceKind.WEB,
+                location=f"https://source{index}.example/research",
+                domain="example",
+                title="Research source",
+                published_at=published_at,
+                trust_tier=TrustTier.STANDARD,
+            )
+            document = await SourceRepo.create_document(
+                session=session,
+                source_id=source.id,
+                text_content="A source-backed claim is recorded.",
+            )
+            chunk = await SourceRepo.create_chunk(
+                session=session,
+                document_id=document.id,
+                idx=0,
+                start_char=0,
+                end_char=len(document.text),
+                text_content=document.text,
+            )
+            claim = await ClaimRepo.create_claim(
+                session=session,
+                run_id=run.id,
+                source_id=source.id,
+                document_id=document.id,
+                chunk_id=chunk.id,
+                text_content=document.text,
+                quote=document.text,
+                span_start=0,
+                span_end=len(document.text),
+                claim_type=ClaimType.FACT,
+                origin=ClaimOrigin.EXTRACTED,
+                status=ClaimStatus.ACTIVE,
+            )
+            await session.commit()
+            persisted_run = await RunRepo.get_run(session, run.id)
+            assert persisted_run is not None
+
+            await verifier.execute(
+                claims=[claim],
+                scope=persisted_run.scope_json,
+                session=session,
+                run_id=run.id,
+            )
+
+            credibility_score, _ = SourceCredibilityScorer.score_source(
+                source.location, None
+            )
+            expected_score, _, _ = compute_confidence_score(
+                strongest_tier=TrustTier.STANDARD,
+                is_stale=expected_stale,
+                claim_type=ClaimType.FACT,
+                credibility_score=credibility_score,
+            )
+            assert claim.confidence == expected_score, (
+                f"horizon={horizon!r}, published_at={published_at!r}, "
+                f"scope={persisted_run.scope_json!r}"
+            )
 
 
 @pytest.mark.asyncio

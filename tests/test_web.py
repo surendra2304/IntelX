@@ -1,6 +1,7 @@
 """Tests for INTELX Server-Rendered Web Workspace, Templates, Citations, and Security."""
 
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 import pytest_asyncio
@@ -8,9 +9,9 @@ from httpx import ASGITransport, AsyncClient
 
 from intelx.app.factory import create_app
 from intelx.core.auth import hash_api_key
-from intelx.core.enums import ApiKeyRole
-from intelx.db.models import ApiKey
-from intelx.db.repos import ClaimRepo
+from intelx.core.enums import ApiKeyRole, ClaimType, SourceKind, TrustTier
+from intelx.db.models import ApiKey, Claim, Source
+from intelx.db.repos import ClaimRepo, RunRepo
 from intelx.db.session import get_sessionmaker
 from intelx.orchestration.worker import OrchestrationWorker
 from intelx.web.renderer import render_markdown_safe
@@ -171,6 +172,10 @@ async def test_full_web_lifecycle_and_citation_drawer(web_client):
     # 4. View Report Page
     res_report = await web_client.get(f"/research/{job_id}/report")
     assert res_report.status_code == 200
+    assert f"[C:{claim_id}]" in res_report.text
+    assert f"[S:{source_id}]" in res_report.text
+    assert "Not recorded; freshness unknown" in res_report.text
+    assert "Retrieval time does not establish currentness." in res_report.text
 
     # Assert 9 core report sections are present in rendered HTML
     assert "Direct Answer" in res_report.text
@@ -200,4 +205,166 @@ async def test_full_web_lifecycle_and_citation_drawer(web_client):
     assert res_source_cite.status_code == 200
     source_data = res_source_cite.json()
     assert source_data["id"] == source_id
+    assert source_data["published_at"] is None
+    assert source_data["retrieved_at"]
+    web_client.cookies.clear()
+
+
+@pytest.mark.asyncio
+async def test_citation_drawer_rejects_ambiguous_prefixes(web_client):
+    login = await web_client.post("/login", data={"api_key": web_client.admin_key})
+    web_client.cookies.set("intelx_session", login.cookies["intelx_session"])
+    source_ids = ("source-01aaaaaaaaaaaaaaaaaaaaaaaa", "source-01bbbbbbbbbbbbbbbbbbbbbbbb")
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        session.add_all(
+            [
+                Source(
+                    id=source_id,
+                    kind=SourceKind.FILE,
+                    location=f"/{source_id}",
+                    title=source_id,
+                    fingerprint=str(index) * 64,
+                    trust_tier=TrustTier.STANDARD,
+                )
+                for index, source_id in enumerate(source_ids, 1)
+            ]
+        )
+        await session.commit()
+
+    ambiguous = await web_client.get("/api/citation/S/source-01")
+    assert ambiguous.status_code == 409
+    uniquely_resolved = await web_client.get("/api/citation/S/source-01a")
+    assert uniquely_resolved.status_code == 200
+    assert uniquely_resolved.json()["id"] == source_ids[0]
+    web_client.cookies.clear()
+
+
+@pytest.mark.asyncio
+async def test_citation_drawer_rejects_ambiguous_claim_prefixes(web_client):
+    login = await web_client.post("/login", data={"api_key": web_client.admin_key})
+    web_client.cookies.set("intelx_session", login.cookies["intelx_session"])
+    claim_ids = (
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "aaaaaaaa-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    )
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        from intelx.memory.normalize import ingest_and_normalize
+
+        run = await RunRepo.create_run(
+            session=session,
+            objective="Verify stable claim citation resolution",
+            created_by="web-test",
+        )
+        text_content = "Evidence for claim citation resolution."
+        source, doc, chunks, _ = await ingest_and_normalize(
+            session=session,
+            raw_bytes=text_content.encode("utf-8"),
+            location="/web-test/claim-citation-resolution.txt",
+            kind="FILE",
+            created_by_run_id=run.id,
+        )
+        session.add_all(
+            [
+                Claim(
+                    id=claim_id,
+                    run_id=run.id,
+                    source_id=source.id,
+                    document_id=doc.id,
+                    chunk_id=chunks[0].id,
+                    text=f"Claim {index} backed by the same verified quote.",
+                    claim_type=ClaimType.FACT,
+                    quote="Evidence",
+                    span_start=0,
+                    span_end=len("Evidence"),
+                    created_by_agent="web-test",
+                )
+                for index, claim_id in enumerate(claim_ids, 1)
+            ]
+        )
+        await session.commit()
+
+    ambiguous = await web_client.get("/api/citation/C/aaaaaaaa")
+    assert ambiguous.status_code == 409
+    uniquely_resolved = await web_client.get("/api/citation/C/aaaaaaaa-aaaa")
+    assert uniquely_resolved.status_code == 200
+    assert uniquely_resolved.json()["id"] == claim_ids[0]
+    web_client.cookies.clear()
+
+
+@pytest.mark.asyncio
+async def test_citation_drawer_treats_like_wildcards_literally(web_client):
+    login = await web_client.post("/login", data={"api_key": web_client.admin_key})
+    web_client.cookies.set("intelx_session", login.cookies["intelx_session"])
+    source_ids = ("src%_literalA", "srcXYliteralB", "noneABliteralC")
+    claim_ids = ("clm%_literalA", "clmXYliteralB", "absentABliteralC")
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        from intelx.memory.normalize import ingest_and_normalize
+
+        run = await RunRepo.create_run(
+            session=session,
+            objective="Verify literal citation token matching",
+            created_by="web-test",
+        )
+        evidence_text = "Evidence for literal citation token matching."
+        source, doc, chunks, _ = await ingest_and_normalize(
+            session=session,
+            raw_bytes=evidence_text.encode("utf-8"),
+            location="/web-test/literal-citation-matching.txt",
+            kind="FILE",
+            created_by_run_id=run.id,
+        )
+        seeded_sources = [
+            Source(
+                id=source_id,
+                kind=SourceKind.FILE,
+                location=f"/{source_id}",
+                title=source_id,
+                fingerprint=str(index) * 64,
+                trust_tier=TrustTier.STANDARD,
+            )
+            for index, source_id in enumerate(source_ids, 1)
+        ]
+        seeded_claims = [
+            Claim(
+                id=claim_id,
+                run_id=run.id,
+                source_id=source.id,
+                document_id=doc.id,
+                chunk_id=chunks[0].id,
+                text=f"Claim {index} backed by verified evidence.",
+                claim_type=ClaimType.FACT,
+                quote="Evidence",
+                span_start=0,
+                span_end=len("Evidence"),
+                created_by_agent="web-test",
+            )
+            for index, claim_id in enumerate(claim_ids, 1)
+        ]
+        session.add_all([*seeded_sources, *seeded_claims])
+        await session.commit()
+
+    source_token = "src%_"
+    source_match = await web_client.get(
+        f"/api/citation/S/{quote(source_token, safe='')}"
+    )
+    assert source_match.status_code == 200
+    assert source_match.json()["id"] == source_ids[0]
+    source_missing = await web_client.get(
+        f"/api/citation/S/{quote('none%_', safe='')}"
+    )
+    assert source_missing.status_code == 404
+
+    claim_token = "clm%_"
+    claim_match = await web_client.get(
+        f"/api/citation/C/{quote(claim_token, safe='')}"
+    )
+    assert claim_match.status_code == 200
+    assert claim_match.json()["id"] == claim_ids[0]
+    claim_missing = await web_client.get(
+        f"/api/citation/C/{quote('absent%_', safe='')}"
+    )
+    assert claim_missing.status_code == 404
     web_client.cookies.clear()

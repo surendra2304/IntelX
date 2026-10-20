@@ -2,6 +2,8 @@
 
 import logging
 import math
+import re
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -34,6 +36,43 @@ def contradiction_eligible_claims(claims: list[Claim]) -> list[Claim]:
     """Limit deterministic conflict analysis to falsifiable factual claim types."""
     eligible_types = (ClaimType.FACT, ClaimType.MEASUREMENT, ClaimType.EVENT)
     return [claim for claim in claims if claim.claim_type in eligible_types]
+
+
+def _parse_time_horizon(scope: dict[str, Any] | None) -> timedelta | None:
+    """Parse explicitly requested day/year horizons; unsupported values are not cutoffs."""
+    query_scope = scope.get("query_scope") if isinstance(scope, dict) else None
+    value = query_scope.get("time_horizon") if isinstance(query_scope, dict) else None
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"([1-9]\d*)([dy])", value.strip(), re.IGNORECASE)
+    if not match:
+        return None
+    amount = int(match.group(1))
+    unit = match.group(2).lower()
+    try:
+        return timedelta(days=amount if unit == "d" else amount * 365)
+    except OverflowError:
+        return None
+
+
+def _is_source_stale(
+    published_at: datetime | None,
+    horizon: timedelta | None,
+    now: datetime,
+) -> bool:
+    """Compare publication time to an explicit horizon, treating naive values as UTC."""
+    if published_at is None or horizon is None:
+        return False
+    published_at_utc = (
+        published_at.replace(tzinfo=UTC)
+        if published_at.tzinfo is None
+        else published_at.astimezone(UTC)
+    )
+    try:
+        cutoff = now - horizon
+    except OverflowError:
+        return False
+    return published_at_utc < cutoff
 
 
 class VerificationVerdict(BaseModel):
@@ -268,6 +307,9 @@ class VerifierAgent(BaseAgent):
         if not session or not run_id:
             return claims
 
+        time_horizon = _parse_time_horizon(scope)
+        verification_time = datetime.now(UTC)
+
         # Filter important claims based on depth (capped to avoid combinatorial search explosion)
         if depth.lower() == "deep":
             target_claims = claims[:8]
@@ -499,6 +541,11 @@ class VerifierAgent(BaseAgent):
                 score, label, _ = compute_confidence_score(
                     strongest_tier=strongest_tier,
                     independent_corroborations=independent_supports,
+                    is_stale=_is_source_stale(
+                        orig_source.published_at,
+                        time_horizon,
+                        verification_time,
+                    ),
                     claim_type=claim.claim_type,
                     llm_adjustment=0.0,
                     rationale="Post-verification composite evaluation",

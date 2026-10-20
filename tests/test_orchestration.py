@@ -14,6 +14,7 @@ from intelx.agents.extractor import (
     RelativeSpan,
 )
 from intelx.agents.scout import ScoutAgent, ScoutOutput, SourceCandidate
+from intelx.agents.verifier import VerifierAgent
 from intelx.core.enums import (
     ClaimStatus,
     ClaimType,
@@ -62,7 +63,10 @@ async def test_orchestration_green_path(db_session_factory):
         run = await RunRepo.create_run(
             session,
             objective="Assess quantum error correction progress",
-            scope_json={"domain_hints": [str(fixture_path)]},
+            scope_json={
+                "domain_hints": [str(fixture_path)],
+                "query_scope": {"time_horizon": "30d"},
+            },
         )
         assert run.status == RunStatus.QUEUED
         await session.commit()
@@ -121,8 +125,23 @@ async def test_orchestration_green_path(db_session_factory):
 
                 self.gateway = AccurateGateway()
 
+        class HorizonVerifierSpy(VerifierAgent):
+            def __init__(self):
+                super().__init__()
+                self.received_scope = None
+                self.run_status_at_verification = None
+
+            async def execute(self, **kwargs):
+                self.received_scope = kwargs["scope"]
+                verifying_run = await RunRepo.get_run(kwargs["session"], kwargs["run_id"])
+                self.run_status_at_verification = verifying_run.status
+                return await super().execute(**kwargs)
+
+        verifier_spy = HorizonVerifierSpy()
         engine = OrchestrationEngine(
-            scout_agent=FixtureScoutAgent(), extractor_agent=AccurateExtractor()
+            scout_agent=FixtureScoutAgent(),
+            extractor_agent=AccurateExtractor(),
+            verifier_agent=verifier_spy,
         )
         worker = OrchestrationWorker(engine=engine)
 
@@ -135,6 +154,8 @@ async def test_orchestration_green_path(db_session_factory):
             assert completed_run.status == RunStatus.COMPLETED
             assert completed_run.outcome == RunOutcome.ANSWERED
             assert completed_run.completed_at is not None
+            assert verifier_spy.received_scope["query_scope"]["time_horizon"] == "30d"
+            assert verifier_spy.run_status_at_verification == RunStatus.VERIFYING
 
             events = await RunRepo.get_events_for_run(verify_session, run.id)
             assert len(events) >= 5
