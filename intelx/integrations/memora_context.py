@@ -98,6 +98,135 @@ class MemoraMemoryClient:
             },
         )
 
+    async def publish_research_handoff(
+        self,
+        run_id: str,
+        objective: str,
+        summary: str,
+        claims: list[Any] | None = None,
+        findings: list[Any] | None = None,
+        sources: list[Any] | None = None,
+        namespace_prefix: str = "intelx://research",
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Publish verified research briefs and extracted claims directly to Memora.
+
+        Targets POST /v1/memories under the intelx://research/ namespace:
+          - intelx://research/briefs: comprehensive research executive brief
+          - intelx://research/claims: verbatim claims with exact span offsets
+        """
+        settings = get_settings()
+        tags_list = tags or ["intelx", "research", "handoff"]
+        brief_ns = f"{namespace_prefix.rstrip('/')}/briefs"
+        claims_ns = f"{namespace_prefix.rstrip('/')}/claims"
+
+        # 1. Publish research brief
+        brief_result = await self.store_research_memory(
+            run_id=run_id,
+            objective=objective,
+            summary=summary,
+            evidence_count=len(sources or []),
+            claims_count=len(claims or []),
+            namespace=brief_ns,
+            tags=tags_list,
+        )
+
+        # 2. Extract and format active claims with verbatim quotes and character spans
+        claims_list = claims or []
+        formatted_claims = []
+        for c in claims_list:
+            status = str(
+                getattr(c, "status", "ACTIVE")
+                if hasattr(c, "status")
+                else (c.get("status", "ACTIVE") if isinstance(c, dict) else "ACTIVE")
+            ).upper()
+            if status != "ACTIVE":
+                continue
+            quote = (
+                getattr(c, "quote", "")
+                if hasattr(c, "quote")
+                else (c.get("quote", "") if isinstance(c, dict) else "")
+            )
+            redacted_quote, _ = redact_document_text_preserving_length(quote)
+            formatted_claims.append(
+                {
+                    "claim_id": str(
+                        getattr(c, "id", "")
+                        if hasattr(c, "id")
+                        else (c.get("id", "") if isinstance(c, dict) else "")
+                    ),
+                    "text": (
+                        getattr(c, "text", "")
+                        if hasattr(c, "text")
+                        else (c.get("text", "") if isinstance(c, dict) else "")
+                    ),
+                    "quote": redacted_quote,
+                    "span_start": int(
+                        getattr(c, "span_start", 0)
+                        if hasattr(c, "span_start")
+                        else (c.get("span_start", 0) if isinstance(c, dict) else 0)
+                    ),
+                    "span_end": int(
+                        getattr(c, "span_end", 0)
+                        if hasattr(c, "span_end")
+                        else (c.get("span_end", 0) if isinstance(c, dict) else 0)
+                    ),
+                    "confidence": float(
+                        getattr(c, "confidence", 1.0)
+                        if hasattr(c, "confidence")
+                        else (c.get("confidence", 1.0) if isinstance(c, dict) else 1.0)
+                    ),
+                    "source_id": str(
+                        getattr(c, "source_id", "")
+                        if hasattr(c, "source_id")
+                        else (c.get("source_id", "") if isinstance(c, dict) else "")
+                    ),
+                    "document_id": str(
+                        getattr(c, "document_id", "")
+                        if hasattr(c, "document_id")
+                        else (c.get("document_id", "") if isinstance(c, dict) else "")
+                    ),
+                }
+            )
+
+        claims_result = {}
+        if formatted_claims:
+            claims_content = {
+                "run_id": run_id,
+                "objective": objective,
+                "claims_count": len(formatted_claims),
+                "claims": formatted_claims,
+                "tags": tags_list + ["claims", "extracted_evidence"],
+            }
+            if settings.MOCK_MODE:
+                claims_result = {
+                    "status": "stored_mock",
+                    "namespace": claims_ns,
+                    "run_id": run_id,
+                    "claims_count": len(formatted_claims),
+                }
+            else:
+                claims_result = await self._store_cloud_memory(
+                    namespace=claims_ns,
+                    content=claims_content,
+                    provenance={
+                        "run_id": run_id,
+                        "objective": objective,
+                        "kind": "extracted_claims",
+                    },
+                    importance=0.90,
+                )
+
+        return {
+            "status": "handoff_completed",
+            "run_id": run_id,
+            "brief": brief_result,
+            "claims": claims_result,
+            "brief_namespace": brief_ns,
+            "claims_namespace": claims_ns,
+            "claims_published": len(formatted_claims),
+        }
+
     async def store_verified_findings_to_memora(
         self,
         run_id: str,
@@ -340,3 +469,28 @@ async def store_verified_findings_to_memora(
         tags=tags,
     )
     return res.get("accepted_count", 0) if isinstance(res, dict) else 0
+
+
+async def publish_research_handoff(
+    run_id: str,
+    objective: str,
+    summary: str,
+    claims: list[Any] | None = None,
+    findings: list[Any] | None = None,
+    sources: list[Any] | None = None,
+    namespace_prefix: str = "intelx://research",
+    tags: list[str] | None = None,
+    client: MemoraMemoryClient | None = None,
+) -> dict[str, Any]:
+    """Publish verified research briefs and extracted claims to Memora under intelx://research/."""
+    memora = client or MemoraMemoryClient()
+    return await memora.publish_research_handoff(
+        run_id=run_id,
+        objective=objective,
+        summary=summary,
+        claims=claims,
+        findings=findings,
+        sources=sources,
+        namespace_prefix=namespace_prefix,
+        tags=tags,
+    )

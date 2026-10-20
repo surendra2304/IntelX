@@ -62,7 +62,14 @@ def get_async_engine(db_url: str | None = None) -> AsyncEngine:
         event.listen(_engine.sync_engine, "connect", configure_sqlite_pragmas)
     else:
         # PostgreSQL / other async engines
-        _engine = create_async_engine(url, pool_pre_ping=True, **engine_kwargs)
+        _engine = create_async_engine(
+            url,
+            pool_pre_ping=True,
+            pool_size=10,
+            max_overflow=20,
+            pool_recycle=300,
+            **engine_kwargs,
+        )
 
     logger.info(f"Database engine initialized for: {url.split('@')[-1]}")
     return _engine

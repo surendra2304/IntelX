@@ -56,7 +56,9 @@ async def test_state_machine_invalid_transition_raises(db_session_factory):
 async def test_orchestration_green_path(db_session_factory):
     """Verify full end-to-end green path execution via OrchestrationWorker."""
     async with db_session_factory() as session:
-        fixture_path = (Path(__file__).resolve().parent / "fixtures" / "docs" / "quantum_report.md").resolve()
+        fixture_path = (
+            Path(__file__).resolve().parent / "fixtures" / "docs" / "quantum_report.md"
+        ).resolve()
         run = await RunRepo.create_run(
             session,
             objective="Assess quantum error correction progress",
@@ -346,7 +348,9 @@ async def test_orchestration_review_gate_and_resumption(db_session_factory):
             scope_json={"depth": "deep"},
         )
 
-        fixture_path = (Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt").resolve()
+        fixture_path = (
+            Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt"
+        ).resolve()
         text_content = fixture_path.read_text(encoding="utf-8")
         source, doc, chunks, _ = await ingest_and_normalize(
             session=session,
@@ -411,7 +415,9 @@ async def test_orchestration_all_disputed_claims_yields_insufficient_evidence(db
     async with db_session_factory() as session:
         run = await RunRepo.create_run(session, objective="All disputed claims test")
 
-        fixture_path = (Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt").resolve()
+        fixture_path = (
+            Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt"
+        ).resolve()
         text_content = fixture_path.read_text(encoding="utf-8")
         source, doc, chunks, _ = await ingest_and_normalize(
             session=session,

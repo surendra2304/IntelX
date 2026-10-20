@@ -122,8 +122,26 @@ def normalize_text_content(raw_bytes: bytes, content_type: str, filename: str = 
 
     elif mime == "text/html":
         soup = bs4.BeautifulSoup(raw_bytes.decode("utf-8", errors="replace"), "html.parser")
-        for tag in soup(["script", "style", "nav", "footer", "header", "noscript"]):
+        for tag in soup(
+            [
+                "script",
+                "style",
+                "nav",
+                "footer",
+                "header",
+                "noscript",
+                "aside",
+                "form",
+                "svg",
+                "iframe",
+            ]
+        ):
             tag.decompose()
+
+        article = soup.find("article") or soup.find("main") or soup.find(attrs={"role": "main"})
+        if article and len(article.get_text(strip=True)) > 150:
+            return article.get_text(separator="\n", strip=True)
+
         return soup.get_text(separator="\n", strip=True)
 
     elif mime == "application/pdf":

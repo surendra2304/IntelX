@@ -45,7 +45,14 @@ class Settings(BaseSettings):
     )
     DB_URL: str = Field(
         default="sqlite+aiosqlite:///./data/intelx.db",
-        validation_alias=AliasChoices("INTELX_DB_URL", "DATABASE_URL", "DB_URL"),
+        validation_alias=AliasChoices(
+            "INTELX_DB_URL",
+            "DATABASE_URL",
+            "DB_URL",
+            "POSTGRES_URL",
+            "POSTGRESQL_URL",
+            "INTELX_POSTGRES_URL",
+        ),
         description="Async SQLAlchemy database URL (SQLite or PostgreSQL)",
     )
     TURSO_DATABASE_URL: str | None = Field(
@@ -269,6 +276,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("INTELX_TAVILY_API_KEY", "TAVILY_API_KEY", "SEARCH_API_KEY"),
         description="Tavily Search API key (optional)",
     )
+    SEARXNG_URL: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_SEARXNG_URL", "SEARXNG_URL", "SEARXNG_BASE_URL"),
+        description="SearXNG metasearch instance base URL (optional)",
+    )
 
     # Research Execution Budgets
     MAX_RUN_USD: float = Field(
@@ -464,6 +476,8 @@ class Settings(BaseSettings):
             return "postgresql+asyncpg://" + normalized[len("postgres://") :]
         if normalized.startswith("postgresql://"):
             return "postgresql+asyncpg://" + normalized[len("postgresql://") :]
+        if normalized.startswith("postgresql+psycopg2://"):
+            return "postgresql+asyncpg://" + normalized[len("postgresql+psycopg2://") :]
         return normalized
 
     @field_validator("DOMAIN_ALLOWLIST", "DOMAIN_DENYLIST", "API_KEYS", mode="before")

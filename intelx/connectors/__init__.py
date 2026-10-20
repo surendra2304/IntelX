@@ -6,6 +6,7 @@ from intelx.connectors.sanitize import IngestionSanitizer, ScanResult
 from intelx.connectors.search import (
     DuckDuckGoSearchConnector,
     SearchResult,
+    SearXNGSearchConnector,
     TavilySearchConnector,
     WebSearchConnector,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "FetchResult",
     "WebSearchConnector",
     "TavilySearchConnector",
+    "SearXNGSearchConnector",
     "DuckDuckGoSearchConnector",
     "SearchResult",
     "FileConnector",
