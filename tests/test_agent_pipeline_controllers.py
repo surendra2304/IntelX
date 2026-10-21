@@ -144,6 +144,39 @@ def test_claim_deduplication_still_merges_equivalent_numeric_formatting():
     assert ledger.get("formatted-a").evidence_ids == ("ev-a", "ev-b")
 
 
+def test_report_gate_requires_valid_claim_citations_and_scores_coverage():
+    gate = FinalReportGate()
+    prose = (
+        "# Executive Summary\n\n"
+        "This report contains detailed prose and an evidence source reference [S:source-1].\n"
+    )
+    no_claim_cites = gate.evaluate(prose, sources={"source-1"}, claims={"claim-1", "claim-2"})
+    assert not no_claim_cites.approved
+    assert any("no valid claim citations" in reason for reason in no_claim_cites.reasons)
+    assert no_claim_cites.grounding_score == 0.0
+
+    partial = gate.evaluate(
+        prose + "\nThe key claim is supported [C:claim-1].\n",
+        sources={"source-1"},
+        claims={"claim-1", "claim-2"},
+    )
+    assert partial.approved
+    assert partial.grounding_score == 0.5
+
+
+def test_citation_validator_accepts_legacy_short_tokens():
+    from intelx.agents.citations import CitationValidator
+
+    result = CitationValidator().validate(
+        "Claim [C1] is backed by sources [S1] and [S2].",
+        known_sources={"S1", "S2"},
+        known_claims={"C1"},
+    )
+    assert result.valid
+    assert result.found_sources == ("S1", "S2")
+    assert result.found_claims == ("C1",)
+
+
 def test_evidence_first_stopping_controller():
     """Verify EvidenceFirstAgent transitions from PLANNING -> SEARCHING -> EXTRACTING -> SYNTHESIZING."""
     agent = EvidenceFirstAgent()
