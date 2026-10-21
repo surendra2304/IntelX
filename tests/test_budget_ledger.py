@@ -149,15 +149,11 @@ async def test_budget_reservations_reject_invalid_values_and_overrelease():
     await controller.reserve_budget(ledger, 1.0)
 
     with pytest.raises(ValueError, match="outstanding reservation"):
-        await controller.commit_reservation(
-            ledger, reserved_usd=1.1, actual_usd=0.5
-        )
+        await controller.commit_reservation(ledger, reserved_usd=1.1, actual_usd=0.5)
     with pytest.raises(ValueError, match="outstanding reservation"):
         await controller.rollback_reservation(ledger, reserved_usd=2.0)
     with pytest.raises(ValueError, match="actual_usd"):
-        await controller.commit_reservation(
-            ledger, reserved_usd=0.0, actual_usd=float("nan")
-        )
+        await controller.commit_reservation(ledger, reserved_usd=0.0, actual_usd=float("nan"))
 
     assert ledger.reserved_usd == 1.0
     assert ledger.cost_usd == 0.0
