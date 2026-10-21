@@ -142,6 +142,49 @@ def test_report_discloses_syndicated_duplicates_and_historical_citations():
     assert "not a like-for-like comparison" in md
 
 
+def test_current_findings_disclose_stale_or_unassessable_source_freshness():
+    """Retrieval time must not make old or undated evidence appear current."""
+    from datetime import UTC, datetime, timedelta
+
+    old_source = {
+        "id": "source-old-123",
+        "published_at": datetime.now(UTC) - timedelta(days=1),
+        "retrieved_at": datetime.now(UTC),
+    }
+    common = {
+        "objective": "What is the current status?",
+        "executive_answer": "The system currently meets the target.",
+        "grounded_findings": [
+            {
+                "statement": "The system currently meets the target.",
+                "claim_ids": ["claim-old-123"],
+            }
+        ],
+        "unverified_findings": [],
+        "claims": [
+            {
+                "id": "claim-old-123",
+                "text": "The system meets the target.",
+                "source_id": "source-old-123",
+            }
+        ],
+    }
+    stale_report = render_report_markdown(**common, sources=[old_source])
+    assert (
+        "evidence published "
+        f"{old_source['published_at'].date().isoformat()} "
+        "(historical; not proof of current status)"
+    ) in stale_report
+    assert "retrieval time does not establish currentness" in stale_report
+
+    undated_report = render_report_markdown(
+        **common,
+        sources=[{"id": "source-old-123"}],
+    )
+    assert "has no publication date" in undated_report
+    assert "Published: not recorded; freshness unknown, Retrieved: not recorded" in undated_report
+
+
 def test_report_distinguishes_mock_from_live_model_execution():
     """A configured mock report must not be mistaken for live external research."""
     common = {

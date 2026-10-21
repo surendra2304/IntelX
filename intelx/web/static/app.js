@@ -45,7 +45,9 @@ async function openCitationDrawer(kind, token) {
           <div><strong>Title:</strong> ${data.title || 'Untitled'}</div>
           <div><strong>Domain:</strong> <code>${data.domain || 'local'}</code></div>
           <div><strong>Trust Tier:</strong> <span class="tier-badge tier-${(data.trust_tier || 'standard').toLowerCase()}">${data.trust_tier}</span></div>
+          <div><strong>Published:</strong> ${data.published_at || 'Not recorded; freshness unknown'}</div>
           <div><strong>Retrieved:</strong> ${data.retrieved_at || 'N/A'}</div>
+          <div style="font-size:12px; color:#64748b;">Retrieval time does not establish currentness.</div>
           <div><strong>Fingerprint:</strong> <code style="font-size:11px;">${data.fingerprint || 'N/A'}</code></div>
           ${data.injection_risk ? '<div style="background:#fef2f2; color:#dc2626; padding:8px; border-radius:4px; font-weight:600;">⚠️ Potential Prompt Injection Risk Flagged</div>' : ''}
           <div style="margin-top:16px;">
@@ -265,4 +267,3 @@ async function syncWithStratex(runId) {
   poll();
   window.setInterval(poll, 5000);
 })();
-

@@ -19,6 +19,7 @@ from intelx.core.enums import (
     TrustTier,
 )
 from intelx.core.policy import policy_engine
+from intelx.core.report import resolve_citation_id
 from intelx.core.settings import get_settings
 from intelx.db.models import (
     ApiKey,
@@ -419,9 +420,13 @@ async def get_citation_data(
     session: AsyncSession = Depends(get_db_session),
 ):
     if kind.upper() == "S":
-        stmt = select(Source).where(Source.id.startswith(token))
+        stmt = select(Source).where(Source.id.startswith(token, autoescape=True))
         res = await session.execute(stmt)
-        source = res.scalars().first()
+        candidates = list(res.scalars().all())
+        source_id = resolve_citation_id(token, {candidate.id for candidate in candidates})
+        if source_id is None and candidates:
+            raise HTTPException(status_code=409, detail="Ambiguous source citation")
+        source = next((candidate for candidate in candidates if candidate.id == source_id), None)
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
         return {
@@ -434,14 +439,19 @@ async def get_citation_data(
                 else source.trust_tier
             ),
             "retrieved_at": source.retrieved_at.isoformat() if source.retrieved_at else None,
+            "published_at": source.published_at.isoformat() if source.published_at else None,
             "fingerprint": source.fingerprint,
             "injection_risk": source.injection_risk,
             "location": source.location,
         }
     elif kind.upper() == "C":
-        stmt = select(Claim).where(Claim.id.startswith(token))
+        stmt = select(Claim).where(Claim.id.startswith(token, autoescape=True))
         res = await session.execute(stmt)
-        claim = res.scalars().first()
+        candidates = list(res.scalars().all())
+        claim_id = resolve_citation_id(token, {candidate.id for candidate in candidates})
+        if claim_id is None and candidates:
+            raise HTTPException(status_code=409, detail="Ambiguous claim citation")
+        claim = next((candidate for candidate in candidates if candidate.id == claim_id), None)
         if not claim:
             raise HTTPException(status_code=404, detail="Claim not found")
 

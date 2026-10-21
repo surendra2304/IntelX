@@ -5,7 +5,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from intelx.core.report import export_spoken_citations, export_text_citations
+from intelx.core.report import (
+    export_spoken_citations,
+    export_text_citations,
+    resolve_citation_id,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,13 +37,10 @@ class CitationValidator:
 
         for kind, target_id in matches:
             if kind == "S":
-                if target_id not in known_sources and not any(
-                    target_id in s for s in known_sources
-                ):
+                if resolve_citation_id(target_id, known_sources) is None:
                     missing_s.append(target_id)
-            elif kind == "C":
-                if target_id not in known_claims and not any(target_id in c for c in known_claims):
-                    missing_c.append(target_id)
+            elif resolve_citation_id(target_id, known_claims) is None:
+                missing_c.append(target_id)
 
         valid = len(missing_s) == 0 and len(missing_c) == 0
         return CitationCheck(
@@ -55,17 +56,8 @@ class CitationValidator:
 
         def _replace_token(m: re.Match) -> str:
             kind, target_id = m.group(1), m.group(2)
-            if (
-                kind == "S"
-                and target_id not in known_sources
-                and not any(target_id in s for s in known_sources)
-            ):
-                return ""
-            if (
-                kind == "C"
-                and target_id not in known_claims
-                and not any(target_id in c for c in known_claims)
-            ):
+            known_ids = known_sources if kind == "S" else known_claims
+            if resolve_citation_id(target_id, known_ids) is None:
                 return ""
             return m.group(0)
 
