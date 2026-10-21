@@ -35,11 +35,16 @@ class SentinelSecurityClient:
     ) -> bool:
         """Request high-assurance security clearance from Sentinel for sensitive connector invocations."""
         settings = get_settings()
-        if settings.MOCK_MODE or not self.api_key:
+        if settings.MOCK_MODE:
             logger.debug(
                 f"[Sentinel Mock Authorization] Granted for {connector_kind} on {target_location}"
             )
             return True
+        if not self.api_key:
+            logger.error(
+                "Sentinel authorization unavailable: API key missing; denying connector action"
+            )
+            return False
 
         payload = {
             "connector_kind": connector_kind,
@@ -89,8 +94,11 @@ class SentinelSecurityClient:
         )
 
         settings = get_settings()
-        if settings.MOCK_MODE or not self.api_key:
+        if settings.MOCK_MODE:
             return {"status": "reported_mock", "incident": incident}
+        if not self.api_key:
+            logger.error("Sentinel incident reporting unavailable: API key missing")
+            return {"status": "error", "error": "missing_api_key"}
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
