@@ -47,11 +47,14 @@ def _parse_time_horizon(scope: dict[str, Any] | None) -> timedelta | None:
     match = re.fullmatch(r"([1-9]\d*)([dy])", value.strip(), re.IGNORECASE)
     if not match:
         return None
-    amount = int(match.group(1))
-    unit = match.group(2).lower()
     try:
+        amount = int(match.group(1))
+        unit = match.group(2).lower()
         return timedelta(days=amount if unit == "d" else amount * 365)
-    except OverflowError:
+    except (OverflowError, ValueError):
+        # Python limits decimal-to-int conversions for very long strings. Treat these
+        # unsupported horizons like other unrepresentably large values instead of
+        # allowing untrusted scope data to abort the verification pipeline.
         return None
 
 
