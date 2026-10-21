@@ -154,12 +154,8 @@ def test_verifier_treats_exact_horizon_cutoff_as_fresh_across_timezones():
     one_microsecond = timedelta(microseconds=1)
     before_cutoff_utc = cutoff_utc - one_microsecond
     after_cutoff_utc = cutoff_utc + one_microsecond
-    before_cutoff_offset = before_cutoff_utc.astimezone(
-        timezone(timedelta(hours=5, minutes=30))
-    )
-    after_cutoff_offset = after_cutoff_utc.astimezone(
-        timezone(timedelta(hours=5, minutes=30))
-    )
+    before_cutoff_offset = before_cutoff_utc.astimezone(timezone(timedelta(hours=5, minutes=30)))
+    after_cutoff_offset = after_cutoff_utc.astimezone(timezone(timedelta(hours=5, minutes=30)))
 
     assert _is_source_stale(before_cutoff_utc, horizon, now) is True
     assert _is_source_stale(before_cutoff_offset, horizon, now) is True
@@ -252,9 +248,7 @@ async def test_verifier_applies_only_explicit_time_horizon_to_confidence(db_sess
                 run_id=run.id,
             )
 
-            credibility_score, _ = SourceCredibilityScorer.score_source(
-                source.location, None
-            )
+            credibility_score, _ = SourceCredibilityScorer.score_source(source.location, None)
             expected_score, _, _ = compute_confidence_score(
                 strongest_tier=TrustTier.STANDARD,
                 is_stale=expected_stale,
