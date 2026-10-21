@@ -122,3 +122,25 @@ async def test_request_id_propagation(client: AsyncClient):
     response = await client.get("/healthz", headers={"x-request-id": custom_id})
     assert response.status_code == 200
     assert response.headers.get("x-request-id") == custom_id
+
+
+@pytest.mark.asyncio
+async def test_metrics_endpoint(client: AsyncClient):
+    """Test /metrics returns prometheus formatted text."""
+    response = await client.get("/metrics")
+    assert response.status_code == 200
+    assert response.headers.get("content-type") is not None
+
+
+@pytest.mark.asyncio
+async def test_health_head_and_alias_endpoints(client: AsyncClient):
+    """Test HEAD and alias routes for healthz and readyz."""
+    res_head = await client.head("/healthz")
+    assert res_head.status_code == 200
+
+    res_alias = await client.get("/health")
+    assert res_alias.status_code == 200
+    assert res_alias.json()["status"] == "ok"
+
+    res_ready_head = await client.head("/readyz")
+    assert res_ready_head.status_code == 200

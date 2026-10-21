@@ -469,3 +469,141 @@ async def test_friday_auth_and_rate_limiting(friday_test_client):
     )
     assert res_rate_limited.status_code == 429
     assert "Retry-After" in res_rate_limited.headers
+
+
+@pytest.mark.asyncio
+async def test_friday_delegate_envelope_format_and_cancel(friday_test_client):
+    """Verify universal task envelope delegation and cancel actions."""
+    headers = {"X-API-Key": "friday-test-secret-key-123"}
+
+    # 1. Delegate using task envelope format
+    envelope = {
+        "task_id": "task_envelope_100",
+        "action": "research",
+        "source_agent": "sentinel",
+        "priority": "high",
+        "payload": {
+            "query": "Investigate anomalous container network egress traffic",
+            "depth": "quick_scan",
+            "max_documents": 5,
+        },
+    }
+    res_del = await friday_test_client.post(
+        "/api/v1/friday/delegate", json=envelope, headers=headers
+    )
+    assert res_del.status_code in (200, 201)
+    del_data = res_del.json()
+    assert del_data["task_id"] == "task_envelope_100"
+    assert del_data["target_agent"] == "intelx"
+    assert del_data["status"] in ("ACCEPTED", "QUEUED")
+    run_id = del_data["run_id"]
+    assert run_id is not None
+
+    # 2. Cancel the delegated run via envelope action
+    cancel_envelope = {
+        "task_id": "task_cancel_101",
+        "action": "cancel",
+        "run_id": run_id,
+    }
+    res_cancel = await friday_test_client.post(
+        "/api/v1/friday/delegate", json=cancel_envelope, headers=headers
+    )
+    assert res_cancel.status_code == 200
+    cancel_data = res_cancel.json()
+    assert cancel_data["run_id"] == run_id
+    assert cancel_data["status"] == "CANCELLED"
+    assert cancel_data["partial_evidence_available"] is True
+
+    # 3. Verify status endpoint reflects CANCELLED
+    res_status = await friday_test_client.get(f"/api/v1/friday/research/{run_id}", headers=headers)
+    assert res_status.status_code == 200
+    assert res_status.json()["status"] == "CANCELLED"
+    assert res_status.json()["is_partial"] is True
+
+
+@pytest.mark.asyncio
+async def test_friday_research_direct_cancel_and_idempotency(friday_test_client):
+    """Verify direct cancel endpoint and idempotency deduplication."""
+    headers = {"X-API-Key": "friday-test-secret-key-123"}
+
+    # 1. Create run with explicit idempotency key
+    idem_key = "idem-unique-key-xyz-777"
+    payload = {
+        "friday_request_id": "req-idem-001",
+        "question": "Deep dive into solid-state battery electrolytes",
+        "context": {"requesting_system": "friday", "priority": "normal"},
+        "depth": "quick_scan",
+        "budget": {"max_sources": 5, "max_time_minutes": 5},
+    }
+    res1 = await friday_test_client.post(
+        "/api/v1/friday/research",
+        json=payload,
+        headers={**headers, "Idempotency-Key": idem_key},
+    )
+    assert res1.status_code == 201
+    run_id1 = res1.json()["intelx_run_id"]
+
+    # 2. Resubmit with identical Idempotency-Key -> 200 OK with same run ID
+    res2 = await friday_test_client.post(
+        "/api/v1/friday/research",
+        json=payload,
+        headers={**headers, "Idempotency-Key": idem_key},
+    )
+    assert res2.status_code == 200
+    assert res2.json()["intelx_run_id"] == run_id1
+
+    # 3. Direct cancel endpoint
+    res_cancel_direct = await friday_test_client.post(
+        f"/api/v1/friday/research/{run_id1}/cancel",
+        headers=headers,
+    )
+    assert res_cancel_direct.status_code == 200
+    assert res_cancel_direct.json()["status"] == "CANCELLED"
+
+
+@pytest.mark.asyncio
+async def test_friday_validation_and_not_found_handling(friday_test_client):
+    """Verify 422 on invalid contracts and 404 on missing entities."""
+    headers = {"X-API-Key": "friday-test-secret-key-123"}
+
+    # 1. Short question (< 5 chars) -> 422
+    res_short = await friday_test_client.post(
+        "/api/v1/friday/delegate",
+        json={"action": "research", "payload": {"question": "abc"}},
+        headers=headers,
+    )
+    assert res_short.status_code == 422
+
+    # 2. Missing run_id on cancel -> 400
+    res_no_run = await friday_test_client.post(
+        "/api/v1/friday/delegate",
+        json={"action": "cancel", "payload": {}},
+        headers=headers,
+    )
+    assert res_no_run.status_code == 400
+
+    # 3. 404 on unknown run_id across endpoints
+    unknown_id = "nonexistent_run_99999"
+    assert (
+        await friday_test_client.get(f"/api/v1/friday/research/{unknown_id}", headers=headers)
+    ).status_code == 404
+    assert (
+        await friday_test_client.get(
+            f"/api/v1/friday/research/{unknown_id}/findings", headers=headers
+        )
+    ).status_code == 404
+    assert (
+        await friday_test_client.get(
+            f"/api/v1/friday/research/{unknown_id}/report", headers=headers
+        )
+    ).status_code == 404
+    assert (
+        await friday_test_client.get(
+            f"/api/v1/friday/research/{unknown_id}/contradictions", headers=headers
+        )
+    ).status_code == 404
+    assert (
+        await friday_test_client.post(
+            f"/api/v1/friday/research/{unknown_id}/cancel", headers=headers
+        )
+    ).status_code == 404

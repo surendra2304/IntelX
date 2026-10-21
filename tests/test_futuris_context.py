@@ -403,3 +403,62 @@ async def test_combined_intelligence_report_generation():
         assert data["topic"] == "Sodium-Ion Cathode Market Parity"
         assert "combined_markdown" in data
         assert "synthesis_why_and_what_next" in data
+
+
+@pytest.mark.asyncio
+async def test_futuris_query_endpoints_and_sector_filtering():
+    """Verify GET /api/v1/futuris/query and /api/v1/research/query return sector reports."""
+    settings = get_settings()
+    settings.MOCK_MODE = True
+    settings.FUTURIS_API_KEY = "futuris-query-test-key-999"
+
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        await seed_api_keys_from_settings(session, settings)
+
+        # Create completed run for renewable energy
+        run = await RunRepo.create_run(
+            session=session,
+            objective="Renewable energy solid-state and sodium battery breakthroughs",
+            scope_json={"domain": "market"},
+        )
+        run.status = RunStatus.COMPLETED
+        run.outcome = RunOutcome.ANSWERED
+        run.completed_at = datetime.now(UTC)
+
+        finding = Finding(
+            run_id=run.id,
+            conclusion="Renewable battery active material capacity surge accelerates commercialization despite volatility.",
+            confidence=0.91,
+            created_at=datetime.now(UTC),
+        )
+        session.add(finding)
+        await session.commit()
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    headers = {"X-API-Key": "futuris-query-test-key-999"}
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Query via /api/v1/futuris/query
+        res_futuris = await client.get(
+            "/api/v1/futuris/query?sector=energy&limit=5",
+            headers=headers,
+        )
+        assert res_futuris.status_code == 200
+        reports = res_futuris.json()
+        assert len(reports) >= 1
+        rep = reports[0]
+        assert rep["asset_or_sector"] == "energy"
+        assert rep["volatility_impact_factor"] == 1.35  # from 'volatility' keyword
+        assert rep["sentiment_score"] > 0.0  # from 'surge' / 'accelerates'
+        assert len(rep["key_findings"]) >= 1
+
+        # 2. Query via /api/v1/research/query ecosystem route with date range
+        res_eco = await client.get(
+            "/api/v1/research/query?sector=energy&start=2026-01-01T00:00:00Z&limit=5",
+            headers=headers,
+        )
+        assert res_eco.status_code == 200
+        eco_reports = res_eco.json()
+        assert len(eco_reports) >= 1
