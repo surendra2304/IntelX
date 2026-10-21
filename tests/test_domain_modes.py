@@ -320,3 +320,14 @@ def test_domain_specific_report_rendering():
     )
     assert "## Technical Evaluation & Option Trade-Offs" in md_tech
     assert "## Implementation Recommendations & Migration Path" in md_tech
+
+
+def test_domain_enums_import_and_integrity():
+    """Verify intelx.domain.enums re-exports core domain enums cleanly."""
+    from intelx.domain import enums as domain_enums
+
+    assert domain_enums.RunStatus.COMPLETED == "COMPLETED"
+    assert domain_enums.ClaimStatus.ACTIVE == "ACTIVE"
+    assert domain_enums.ClaimType.FACT == "FACT"
+    assert domain_enums.EvidenceSupportType.SUPPORTS == "SUPPORTS"
+    assert len(domain_enums.__all__) >= 10

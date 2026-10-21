@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,6 +31,68 @@ class Principal:
         return role in self.roles or "admin" in self.roles
 
 
+_CURRENT_PRINCIPAL: ContextVar[Principal | None] = ContextVar("current_principal", default=None)
+
+
+def get_current_principal() -> Principal | None:
+    """Retrieve current ambient security principal."""
+    return _CURRENT_PRINCIPAL.get()
+
+
+def set_current_principal(principal: Principal | None) -> None:
+    """Set current ambient security principal."""
+    _CURRENT_PRINCIPAL.set(principal)
+
+
+class TenantContext:
+    """Context manager for binding an active security principal to execution context."""
+
+    def __init__(self, principal: Principal) -> None:
+        self.principal = principal
+        self._token: Any = None
+
+    def __enter__(self) -> Principal:
+        self._token = _CURRENT_PRINCIPAL.set(self.principal)
+        return self.principal
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        if self._token is not None:
+            _CURRENT_PRINCIPAL.reset(self._token)
+
+
+def system_principal() -> Principal:
+    """Create a privileged system-internal principal with full scopes."""
+    return Principal(
+        tenant_id="system",
+        actor_id="system-internal",
+        scopes=frozenset(["*"]),
+        roles=("admin", "system"),
+        environment="production",
+    )
+
+
+def admin_principal(tenant_id: str = "admin", actor_id: str = "admin-user") -> Principal:
+    """Create an administrative principal for tenant management."""
+    return Principal(
+        tenant_id=tenant_id,
+        actor_id=actor_id,
+        scopes=frozenset(["*"]),
+        roles=("admin",),
+        environment="production",
+    )
+
+
+def member_principal(tenant_id: str, actor_id: str, scopes: list[str] | None = None) -> Principal:
+    """Create a scoped tenant member principal."""
+    return Principal(
+        tenant_id=tenant_id,
+        actor_id=actor_id,
+        scopes=frozenset(scopes or ["research:read", "research:write"]),
+        roles=("member",),
+        environment="production",
+    )
+
+
 class TenantBoundary:
     """Enforces strict tenant isolation and scope checks."""
 
@@ -49,6 +112,19 @@ class TenantBoundary:
 
     def filter_query(self, query: Any, principal: Principal, tenant_column: Any) -> Any:
         """Apply tenant predicate filter to SQLAlchemy query unless wildcard principal."""
-        if "*" in principal.scopes and principal.tenant_id == "admin":
+        if "*" in principal.scopes and principal.tenant_id in ("admin", "system"):
             return query
         return query.where(tenant_column == principal.tenant_id)
+
+
+__all__ = [
+    "TenantViolation",
+    "Principal",
+    "TenantContext",
+    "TenantBoundary",
+    "get_current_principal",
+    "set_current_principal",
+    "system_principal",
+    "admin_principal",
+    "member_principal",
+]

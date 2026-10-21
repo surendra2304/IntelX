@@ -14,7 +14,9 @@ class DurableResearchStore:
     """Thread-safe SQLite WAL-backed storage for versioned research states and transactional outbox."""
 
     def __init__(self, db_path: str = "./data/intelx_durable.db") -> None:
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        if db_path != ":memory:":
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA busy_timeout=5000")
@@ -92,6 +94,15 @@ class DurableResearchStore:
                 "state_hash": row[2],
             }
 
+    def delete_state(self, tenant: str, research_id: str) -> bool:
+        """Delete persisted state for a research run."""
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                "DELETE FROM research_state WHERE tenant_id=? AND research_id=?",
+                (tenant, research_id),
+            )
+            return cur.rowcount > 0
+
     def append_outbox(
         self,
         tenant: str,
@@ -139,3 +150,17 @@ class DurableResearchStore:
                 "UPDATE outbox SET delivered_at=? WHERE id=?",
                 (time.time(), event_id),
             )
+
+    def close(self) -> None:
+        """Close database connection."""
+        with self.lock:
+            self.conn.close()
+
+    def __enter__(self) -> DurableResearchStore:
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
+
+__all__ = ["DurableResearchStore"]

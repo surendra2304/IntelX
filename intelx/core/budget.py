@@ -40,7 +40,20 @@ class BudgetLedger:
             "runtime_seconds": round(self.runtime_seconds, 2),
             "reserved_usd": round(self.reserved_usd, 6),
             "status": self.status,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
         }
+
+    def reset(self) -> None:
+        """Reset budget counters to initial state."""
+        self.queries = 0
+        self.fetches = 0
+        self.sources = 0
+        self.cost_usd = 0.0
+        self.runtime_seconds = 0.0
+        self.reserved_usd = 0.0
+        self.status = "ACTIVE"
+        self.updated_at = datetime.now(UTC)
 
 
 class BudgetController:
@@ -99,7 +112,8 @@ class BudgetController:
                     f"budget reservation failed: (${ledger.cost_usd + ledger.reserved_usd + usd_estimate:.4f}) "
                     f"exceeds max (${self.max_cost:.4f})"
                 )
-            ledger.reserved_usd += usd_estimate
+            ledger.reserved_usd += max(0.0, usd_estimate)
+            ledger.updated_at = datetime.now(UTC)
 
     async def commit_reservation(
         self, ledger: BudgetLedger, reserved_usd: float, actual_usd: float
@@ -108,7 +122,49 @@ class BudgetController:
         async with self._lock:
             ledger.reserved_usd = max(0.0, ledger.reserved_usd - reserved_usd)
             ledger.cost_usd += max(0.0, actual_usd)
+            ledger.updated_at = datetime.now(UTC)
             self._check(ledger)
+
+    async def rollback_reservation(self, ledger: BudgetLedger, reserved_usd: float) -> None:
+        """Safely release reserved budget when an operation is cancelled or aborted."""
+        async with self._lock:
+            ledger.reserved_usd = max(0.0, ledger.reserved_usd - reserved_usd)
+            ledger.updated_at = datetime.now(UTC)
+
+    def remaining_budget(self, ledger: BudgetLedger) -> dict[str, float]:
+        """Calculate remaining resource quotas and available budget."""
+        return {
+            "remaining_queries": max(0, self.max_queries - ledger.queries),
+            "remaining_fetches": max(0, self.max_fetches - ledger.fetches),
+            "remaining_sources": max(0, self.max_sources - ledger.sources),
+            "remaining_cost_usd": round(
+                max(0.0, self.max_cost - (ledger.cost_usd + ledger.reserved_usd)), 6
+            ),
+            "remaining_runtime_seconds": round(
+                max(0.0, self.max_runtime_seconds - ledger.runtime_seconds), 2
+            ),
+        }
+
+    def is_near_exhaustion(
+        self, ledger: BudgetLedger, threshold: float = 0.85
+    ) -> tuple[bool, list[str]]:
+        """Check if any budget dimension has reached or exceeded the danger threshold."""
+        warnings: list[str] = []
+        if ledger.queries >= self.max_queries * threshold:
+            warnings.append(f"queries at {ledger.queries}/{self.max_queries}")
+        if ledger.fetches >= self.max_fetches * threshold:
+            warnings.append(f"fetches at {ledger.fetches}/{self.max_fetches}")
+        if ledger.sources >= self.max_sources * threshold:
+            warnings.append(f"sources at {ledger.sources}/{self.max_sources}")
+        if (ledger.cost_usd + ledger.reserved_usd) >= self.max_cost * threshold:
+            warnings.append(
+                f"cost at ${(ledger.cost_usd + ledger.reserved_usd):.2f}/${self.max_cost:.2f}"
+            )
+        if ledger.runtime_seconds >= self.max_runtime_seconds * threshold:
+            warnings.append(
+                f"runtime at {ledger.runtime_seconds:.1f}s/{self.max_runtime_seconds:.1f}s"
+            )
+        return len(warnings) > 0, warnings
 
     def _check(self, ledger: BudgetLedger) -> None:
         """Check all ceilings and fail closed if exceeded."""
@@ -132,3 +188,10 @@ class BudgetController:
             raise BudgetExceeded(
                 f"research time limit exhausted: {ledger.runtime_seconds:.1f}s > {self.max_runtime_seconds:.1f}s"
             )
+
+
+__all__ = [
+    "BudgetExceeded",
+    "BudgetLedger",
+    "BudgetController",
+]
