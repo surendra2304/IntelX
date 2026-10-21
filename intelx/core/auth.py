@@ -5,7 +5,7 @@ import hmac
 import logging
 import secrets
 import time
-from collections import defaultdict
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -108,29 +108,58 @@ def validate_production_secret(secret: str) -> bool:
 
 
 class RateLimiter:
-    """In-memory sliding window rate limiter per API key hash."""
+    """Bounded in-memory sliding-window limiter keyed by credential hash.
 
-    def __init__(self, default_limit: int = 120, window_seconds: int = 60) -> None:
+    The map has a hard capacity so unauthenticated callers presenting unlimited
+    distinct invalid keys cannot grow process memory without bound. When full,
+    the least-recently-seen key is evicted; deployments needing shared, durable
+    limits across replicas should use a centralized rate-limit backend.
+    """
+
+    def __init__(
+        self,
+        default_limit: int = 120,
+        window_seconds: int = 60,
+        max_tracked_keys: int = 10_000,
+    ) -> None:
+        if default_limit < 1:
+            raise ValueError("default_limit must be at least 1")
+        if window_seconds < 1:
+            raise ValueError("window_seconds must be at least 1")
+        if max_tracked_keys < 1:
+            raise ValueError("max_tracked_keys must be at least 1")
         self.default_limit = default_limit
         self.window_seconds = window_seconds
-        self._history: dict[str, list[float]] = defaultdict(list)
+        self.max_tracked_keys = max_tracked_keys
+        self._history: OrderedDict[str, list[float]] = OrderedDict()
 
     def check_rate_limit(self, key_hash: str, limit: int | None = None) -> tuple[bool, int]:
         """Return (is_allowed, retry_after_seconds)."""
+        max_reqs = self.default_limit if limit is None else limit
+        if max_reqs < 1:
+            raise ValueError("limit must be at least 1")
+
         now = time.time()
-        max_reqs = limit or self.default_limit
         cutoff = now - self.window_seconds
 
-        # Prune old timestamps
-        timestamps = [ts for ts in self._history[key_hash] if ts > cutoff]
-        self._history[key_hash] = timestamps
+        # Prune expired timestamps for this key without creating a defaultdict entry.
+        timestamps = [ts for ts in self._history.get(key_hash, ()) if ts > cutoff]
+        if timestamps:
+            self._history[key_hash] = timestamps
+            self._history.move_to_end(key_hash)
+        else:
+            self._history.pop(key_hash, None)
 
         if len(timestamps) >= max_reqs:
             oldest = timestamps[0]
             retry_after = max(1, int(self.window_seconds - (now - oldest)))
             return False, retry_after
 
-        self._history[key_hash].append(now)
+        if key_hash not in self._history and len(self._history) >= self.max_tracked_keys:
+            self._history.popitem(last=False)
+
+        self._history.setdefault(key_hash, []).append(now)
+        self._history.move_to_end(key_hash)
         return True, 0
 
 
