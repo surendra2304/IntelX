@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from intelx.app.factory import create_app
@@ -26,6 +27,26 @@ from intelx.integrations.futuris_context import (
     ResearchTriggeredForecasting,
     generate_combined_intelligence_report,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("start", "not-a-date"),
+        ("end", "2026-99-99T00:00:00Z"),
+        ("start", ""),
+    ],
+)
+async def test_futuris_report_query_rejects_invalid_date_filters(field, value):
+    """Invalid filters must fail closed instead of silently broadening report queries."""
+    from intelx.api.v1.futuris import fetch_research_reports_for_sector
+
+    with pytest.raises(HTTPException) as exc_info:
+        await fetch_research_reports_for_sector(session=None, **{field: value})
+
+    assert exc_info.value.status_code == 422
+    assert field in exc_info.value.detail
 
 
 @pytest.mark.asyncio
