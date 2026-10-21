@@ -24,7 +24,6 @@ class CitationCheck:
     found_claims: tuple[str, ...] = ()
 
 
-
 def _citation_parts(match: re.Match[str]) -> tuple[str, str]:
     """Return citation kind and identifier for modern and legacy tokens."""
     if match.group(1) is not None:
