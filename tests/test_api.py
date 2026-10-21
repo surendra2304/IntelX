@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 from intelx.api.v1.endpoints import CreateJobRequest
+from intelx.api.router import SearchPayload, ScrapePayload, SummarizePayload
 from intelx.app.factory import create_app
 from intelx.core.auth import hash_api_key, rate_limiter
 from intelx.core.enums import ApiKeyRole, ArtifactFormat, ArtifactType, ClaimStatus, RunStatus
@@ -419,6 +420,123 @@ async def test_claim_retraction_audit(app_client):
         updated_claim = await ClaimRepo.get_claim(session, claim_id)
         assert updated_claim.status == ClaimStatus.RETRACTED
         assert "calibration failure" in updated_claim.retraction_reason
+
+
+def test_core_search_and_scrape_payloads_validate_bounds():
+    with pytest.raises(ValidationError):
+        SearchPayload(query="valid search", limit=0)
+    with pytest.raises(ValidationError):
+        SearchPayload(query="x" * 1_001)
+    with pytest.raises(ValidationError):
+        ScrapePayload(url="https://example.com", max_bytes=0)
+    with pytest.raises(ValidationError):
+        ScrapePayload(url="https://example.com", max_bytes=10_000_001)
+    with pytest.raises(ValidationError):
+        SummarizePayload(text="text", max_length=0)
+
+
+@pytest.mark.asyncio
+async def test_post_search_honors_body_limit_and_reports_live_failure(monkeypatch):
+    import intelx.api.router as router_module
+
+    class FakeResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    class FakeSession:
+        async def execute(self, _statement):
+            return FakeResult()
+
+    observed = {}
+
+    class BrokenWebSearch:
+        async def fetch(self, search_query, max_results):
+            observed["query"] = search_query
+            observed["max_results"] = max_results
+            raise OSError("upstream is offline")
+
+    monkeypatch.setattr(router_module, "WebSearchConnector", BrokenWebSearch)
+    result = await router_module.api_search(
+        query=None,
+        limit=10,
+        body=SearchPayload(query="  battery safety  ", limit=3),
+        session=FakeSession(),
+    )
+
+    assert observed == {"query": "battery safety", "max_results": 3}
+    assert result["query"] == "battery safety"
+    assert result["total_results"] == 0
+    assert result["web_search_status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_scrape_route_passes_byte_limit_and_normalizes_fetched_body(monkeypatch):
+    from types import SimpleNamespace
+
+    import intelx.api.router as router_module
+
+    html = (
+        b"<html><head><title>Research Page</title></head><body>"
+        b"<nav>Navigation noise</nav><main><h1>Battery benchmark</h1>"
+        b"<p>Measured energy density is 250 Wh/kg.</p></main></body></html>"
+    )
+    observed = {}
+
+    class FakeFetchConnector:
+        async def fetch(self, url, **kwargs):
+            observed["url"] = url
+            observed["max_bytes"] = kwargs["max_bytes"]
+            return SimpleNamespace(
+                url=url,
+                final_url="https://example.com/final",
+                content=html,
+                content_type="text/html",
+                status_code=200,
+                robots_ok=True,
+                headers={"content-type": "text/html"},
+            )
+
+    monkeypatch.setattr(router_module, "HttpFetchConnector", FakeFetchConnector)
+    result = await router_module.api_scrape(
+        ScrapePayload(url="https://example.com", max_bytes=4_096)
+    )
+
+    assert observed == {"url": "https://example.com", "max_bytes": 4_096}
+    assert result["status"] == "ok"
+    assert result["title"] == "Research Page"
+    assert result["content_length"] == len(html)
+    assert result["final_url"] == "https://example.com/final"
+    assert "Battery benchmark" in result["text"]
+    assert "Navigation noise" not in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_scrape_route_reports_robots_denial_without_empty_success(monkeypatch):
+    from types import SimpleNamespace
+
+    import intelx.api.router as router_module
+
+    class DisallowedFetchConnector:
+        async def fetch(self, url, **kwargs):
+            return SimpleNamespace(
+                url=url,
+                final_url=url,
+                content=b"",
+                content_type="text/html",
+                status_code=403,
+                robots_ok=False,
+                error="Disallowed by robots.txt",
+            )
+
+    monkeypatch.setattr(router_module, "HttpFetchConnector", DisallowedFetchConnector)
+    result = await router_module.api_scrape(ScrapePayload(url="https://example.com"))
+
+    assert result["status"] == "error"
+    assert result["status_code"] == 403
+    assert "robots.txt" in result["error"]
 
 
 @pytest.mark.asyncio
