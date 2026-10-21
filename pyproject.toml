@@ -41,6 +41,9 @@ dev = [
     "ruff>=0.5.0",
     "respx>=0.21.0",
 ]
+redis = [
+    "redis>=5.0.0,<7.0",
+]
 
 [project.scripts]
 intelx = "intelx.cli.main:main"
