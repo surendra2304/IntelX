@@ -160,8 +160,21 @@ def test_report_gate_requires_valid_claim_citations_and_scores_coverage():
         sources={"source-1"},
         claims={"claim-1", "claim-2"},
     )
-    assert partial.approved
+    assert not partial.approved
+    assert any("claim citation coverage 50.0%" in reason for reason in partial.reasons)
     assert partial.grounding_score == 0.5
+
+
+def test_report_gate_rejects_low_claim_coverage_even_with_one_valid_citation():
+    gate = FinalReportGate()
+    claims = {f"claim-{index}" for index in range(100)}
+    report = "# Executive Summary\n\nOne claim is cited [C:claim-0] and a source is linked [S:source-1].\n"
+
+    result = gate.evaluate(report, sources={"source-1"}, claims=claims)
+
+    assert not result.approved
+    assert result.grounding_score == 0.01
+    assert any("below the required 90.0%" in reason for reason in result.reasons)
 
 
 def test_citation_validator_accepts_legacy_short_tokens():
