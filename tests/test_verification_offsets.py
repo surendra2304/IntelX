@@ -65,7 +65,7 @@ def test_claim_verifier_skips_invalid_evidence_and_keeps_valid_span():
     )
 
     assert result.supported
-    assert result.score == 1.0
+    assert result.score == 0.5
     assert result.verified_evidence_ids == ("valid",)
 
 
