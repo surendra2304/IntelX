@@ -6,6 +6,7 @@ import logging
 import time
 import urllib.parse
 import urllib.robotparser
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -101,6 +102,8 @@ class FetchResult:
 class HttpFetchConnector(BaseConnector):
     """Hardened HTTP fetch connector enforcing SSRF validation, robots.txt, and byte caps."""
 
+    _MAX_DOMAIN_CACHE_ENTRIES = 2_048
+
     def __init__(
         self,
         settings: Settings | None = None,
@@ -119,8 +122,10 @@ class HttpFetchConnector(BaseConnector):
         self.settings = cfg
         self._transport = transport
         self._semaphore = asyncio.Semaphore(self.settings.MAX_CONCURRENT_FETCHES)
-        self._domain_last_request: dict[str, float] = {}
-        self._robots_cache: dict[str, tuple[urllib.robotparser.RobotFileParser, float]] = {}
+        self._domain_last_request: OrderedDict[str, float] = OrderedDict()
+        self._robots_cache: OrderedDict[str, tuple[urllib.robotparser.RobotFileParser, float]] = (
+            OrderedDict()
+        )
 
     @classmethod
     def validate_ssrf(cls, hostname: str, port: int = 80) -> list[str]:
@@ -215,12 +220,14 @@ class HttpFetchConnector(BaseConnector):
 
         parsed = urllib.parse.urlparse(url)
         domain = parsed.netloc.lower()
-        now = time.time()
+        now = time.monotonic()
 
         if domain in self._robots_cache:
             parser, cache_time = self._robots_cache[domain]
             if now - cache_time < 3600:
+                self._robots_cache.move_to_end(domain)
                 return parser.can_fetch(self.settings.USER_AGENT, url)
+            self._robots_cache.pop(domain, None)
 
         robots_url = f"{parsed.scheme}://{domain}/robots.txt"
         rp = urllib.robotparser.RobotFileParser()
@@ -251,8 +258,20 @@ class HttpFetchConnector(BaseConnector):
             )
             rp.disallow_all = True
 
-        self._robots_cache[domain] = (rp, now)
+        self._remember_robots_policy(domain, rp, now)
         return rp.can_fetch(self.settings.USER_AGENT, url)
+
+    def _remember_robots_policy(
+        self,
+        domain: str,
+        parser: urllib.robotparser.RobotFileParser,
+        cached_at: float,
+    ) -> None:
+        """Remember a domain's robots policy without retaining unbounded host state."""
+        self._robots_cache[domain] = (parser, cached_at)
+        self._robots_cache.move_to_end(domain)
+        while len(self._robots_cache) > self._MAX_DOMAIN_CACHE_ENTRIES:
+            self._robots_cache.popitem(last=False)
 
     async def _apply_politeness(self, domain: str) -> None:
         """Enforce domain-specific politeness delay."""
@@ -260,12 +279,15 @@ class HttpFetchConnector(BaseConnector):
         if delay <= 0:
             return
 
-        now = time.time()
+        now = time.monotonic()
         last = self._domain_last_request.get(domain, 0.0)
         elapsed = now - last
         if elapsed < delay:
             await asyncio.sleep(delay - elapsed)
-        self._domain_last_request[domain] = time.time()
+        self._domain_last_request[domain] = time.monotonic()
+        self._domain_last_request.move_to_end(domain)
+        while len(self._domain_last_request) > self._MAX_DOMAIN_CACHE_ENTRIES:
+            self._domain_last_request.popitem(last=False)
 
     async def fetch(self, target: str, **kwargs: Any) -> FetchResult:
         """Fetch remote URL with SSRF checks, robots verification, and streaming size caps."""
