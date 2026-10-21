@@ -1,8 +1,9 @@
 """Main API router combining all endpoint groups."""
 
+import logging
 from datetime import UTC
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from intelx.api.v1 import v1_router
 from intelx.api.v1.health import router as health_root_router
@@ -11,6 +12,7 @@ from intelx.core.auth import get_friday_api_key
 from intelx.db.models import ApiKey
 
 root_api_router = APIRouter()
+logger = logging.getLogger("intelx.api.router")
 
 
 def _task_receipt(
@@ -313,7 +315,7 @@ async def execute_task(body: dict, api_key: ApiKey = Depends(get_friday_api_key)
 # ==============================================================================
 # Core Specialist Endpoints: /search, /scrape, /summarize
 # ==============================================================================
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.connectors.search import WebSearchConnector
@@ -323,19 +325,19 @@ from intelx.db.session import get_db_session
 
 
 class SearchPayload(BaseModel):
-    query: str
-    limit: int = 10
+    query: str = Field(..., min_length=1, max_length=1_000)
+    limit: int = Field(default=10, ge=1, le=100)
 
 
 class ScrapePayload(BaseModel):
-    url: str
-    max_bytes: int = 2000000
+    url: str = Field(..., min_length=8, max_length=2_048)
+    max_bytes: int = Field(default=2_000_000, ge=1, le=10_000_000)
 
 
 class SummarizePayload(BaseModel):
-    text: str | None = None
-    query: str | None = None
-    max_length: int = 500
+    text: str | None = Field(default=None, max_length=250_000)
+    query: str | None = Field(default=None, min_length=1, max_length=1_000)
+    max_length: int = Field(default=500, ge=1, le=10_000)
 
 
 @root_api_router.post(
@@ -345,22 +347,32 @@ class SummarizePayload(BaseModel):
     "/search", summary="Search indexed knowledge and live web (GET)", tags=["Core Operations"]
 )
 async def api_search(
-    query: str | None = None,
-    limit: int = 10,
+    query: str | None = Query(default=None, min_length=1, max_length=1_000),
+    limit: int = Query(default=10, ge=1, le=100),
     body: SearchPayload | None = None,
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Fast indexed knowledge base and live web search."""
+    """Search indexed and live-web sources with bounded results and visible partial failures."""
     from sqlalchemy import select
 
-    search_query = body.query if body else (query or "")
-    if not search_query.strip():
-        return {"status": "ok", "query": "", "total_results": 0, "results": []}
+    search_query = (body.query if body else (query or "")).strip()
+    result_limit = body.limit if body is not None else limit
+    if not search_query:
+        return {
+            "status": "ok",
+            "query": "",
+            "total_results": 0,
+            "results": [],
+            "web_search_status": "skipped",
+        }
 
     stmt = (
         select(Source)
-        .where(Source.title.contains(search_query) | Source.location.contains(search_query))
-        .limit(limit)
+        .where(
+            Source.title.contains(search_query, autoescape=True)
+            | Source.location.contains(search_query, autoescape=True)
+        )
+        .limit(result_limit)
     )
     res = await session.execute(stmt)
     sources = res.scalars().all()
@@ -375,29 +387,39 @@ async def api_search(
         for s in sources
     ]
 
-    if len(results) < limit:
+    web_search_status = "not_needed" if len(results) >= result_limit else "ok"
+    if len(results) < result_limit:
         try:
             connector = WebSearchConnector()
-            web_hits = await connector.fetch(search_query, max_results=limit - len(results))
-            for h in web_hits:
+            web_hits = await connector.fetch(search_query, max_results=result_limit - len(results))
+            for hit in web_hits:
+                if len(results) >= result_limit:
+                    break
                 results.append(
                     {
                         "id": f"web_{len(results)}",
-                        "title": h.title,
-                        "url": h.url,
+                        "title": hit.title,
+                        "url": hit.url,
                         "publisher": "web",
                         "trust_tier": "unverified",
-                        "snippet": h.snippet,
+                        "snippet": hit.snippet,
                     }
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            web_search_status = "unavailable"
+            logger.warning(
+                "Live web search failed for query %r (%s)",
+                search_query[:120],
+                type(exc).__name__,
+                exc_info=True,
+            )
 
     return {
         "status": "ok",
         "query": search_query,
         "total_results": len(results),
-        "results": results[:limit],
+        "results": results[:result_limit],
+        "web_search_status": web_search_status,
     }
 
 
@@ -410,16 +432,44 @@ async def api_scrape(
     """Rate-limited web scraping with robots.txt, size-capping, and SSRF socket defenses."""
     connector = HttpFetchConnector()
     try:
-        fetch_res = await connector.fetch(body.url)
+        fetch_res = await connector.fetch(body.url, max_bytes=body.max_bytes)
+        if getattr(fetch_res, "robots_ok", True) is False:
+            logger.info("Scrape denied by robots.txt for %s", body.url)
+            return {
+                "status": "error",
+                "url": body.url,
+                "error": getattr(fetch_res, "error", None) or "Disallowed by robots.txt",
+                "status_code": getattr(fetch_res, "status_code", 403),
+            }
+
+        raw_content = getattr(fetch_res, "content", b"")
+        if not isinstance(raw_content, bytes):
+            raise TypeError("HTTP fetch connector returned non-byte content")
+        content_type = getattr(fetch_res, "content_type", "text/plain")
+        from intelx.memory.normalize import normalize_text_content
+
+        text_content = normalize_text_content(raw_content, content_type)
+        title = ""
+        if content_type.split(";", maxsplit=1)[0].strip().lower() == "text/html":
+            from bs4 import BeautifulSoup
+
+            soup = BeautifulSoup(raw_content.decode("utf-8", errors="replace"), "html.parser")
+            title_tag = soup.find("title")
+            if title_tag is not None:
+                title = title_tag.get_text(" ", strip=True)
+
         return {
             "status": "ok",
             "url": body.url,
-            "title": getattr(fetch_res, "title", "") or "",
-            "content_length": len(getattr(fetch_res, "content_text", "") or ""),
-            "text": getattr(fetch_res, "content_text", "") or "",
+            "final_url": getattr(fetch_res, "final_url", body.url),
+            "title": title,
+            "content_length": len(raw_content),
+            "content_type": content_type,
+            "text": text_content,
             "status_code": getattr(fetch_res, "status_code", 200),
         }
     except Exception as exc:
+        logger.warning("Scrape failed for %s (%s)", body.url, type(exc).__name__, exc_info=True)
         return {
             "status": "error",
             "url": body.url,
