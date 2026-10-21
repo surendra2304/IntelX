@@ -5,8 +5,8 @@ import ipaddress
 import logging
 import time
 import urllib.parse
-from collections import OrderedDict
 import urllib.robotparser
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
