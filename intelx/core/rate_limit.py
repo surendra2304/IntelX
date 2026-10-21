@@ -12,7 +12,6 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-
 logger = logging.getLogger("intelx.rate_limit")
 
 
