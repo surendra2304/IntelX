@@ -34,7 +34,11 @@ class RetryPolicy:
 
     def __post_init__(self) -> None:
         """Reject invalid retry budgets and timings before task execution."""
-        if isinstance(self.attempts, bool) or not isinstance(self.attempts, int) or self.attempts < 0:
+        if (
+            isinstance(self.attempts, bool)
+            or not isinstance(self.attempts, int)
+            or self.attempts < 0
+        ):
             raise ValueError("attempts must be a non-negative integer")
         for name, value in (
             ("base_delay", self.base_delay),
