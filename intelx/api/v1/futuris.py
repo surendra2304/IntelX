@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -145,23 +145,29 @@ async def fetch_research_reports_for_sector(
     if sector:
         stmt = stmt.where(ResearchRun.objective.ilike(f"%{sector.strip()}%"))
 
-    if start:
+    if start is not None:
         try:
-            start_dt = datetime.fromisoformat(start)
-            if start_dt.tzinfo is None:
-                start_dt = start_dt.replace(tzinfo=UTC)
-            stmt = stmt.where(ResearchRun.created_at >= start_dt)
-        except Exception:
-            pass
+            start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid 'start' timestamp; expected an ISO 8601 date or datetime.",
+            ) from exc
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=UTC)
+        stmt = stmt.where(ResearchRun.created_at >= start_dt.astimezone(UTC))
 
-    if end:
+    if end is not None:
         try:
-            end_dt = datetime.fromisoformat(end)
-            if end_dt.tzinfo is None:
-                end_dt = end_dt.replace(tzinfo=UTC)
-            stmt = stmt.where(ResearchRun.created_at <= end_dt)
-        except Exception:
-            pass
+            end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid 'end' timestamp; expected an ISO 8601 date or datetime.",
+            ) from exc
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=UTC)
+        stmt = stmt.where(ResearchRun.created_at <= end_dt.astimezone(UTC))
 
     stmt = stmt.limit(limit)
     runs = list((await session.execute(stmt)).scalars().all())
