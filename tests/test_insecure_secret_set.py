@@ -137,6 +137,13 @@ def test_production_anthropic_provider_does_not_accept_openai_key() -> None:
     validate_production_security(configured)
 
 
+def test_wildcard_cors_origin_is_rejected_in_production() -> None:
+    """Credentialed browser APIs must use an explicit production origin allowlist."""
+    settings = _production_settings(CORS_ORIGINS=["*"])
+    with pytest.raises(RuntimeError, match="Wildcard CORS origins are forbidden in production"):
+        validate_production_security(settings)
+
+
 def test_strong_unique_secret_passes_production_validation() -> None:
     """The validator must not reject a genuinely strong secret (no false positives)."""
     strong = "intelx_" + "aB3" * 14  # 49 chars, varied
