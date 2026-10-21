@@ -218,7 +218,9 @@ async def test_cortex_connector_live_http_delivery():
     async with httpx.AsyncClient(transport=transport) as http_client:
         with patch("intelx.integrations.cortex_context.get_settings") as mock_settings:
             mock_settings.return_value.MOCK_MODE = False
-            mock_settings.return_value.CORTEX_WEBHOOK_URL = "http://cortex:8000/api/v1/webhooks/intelx-lead-intel"
+            mock_settings.return_value.CORTEX_WEBHOOK_URL = (
+                "http://cortex:8000/api/v1/webhooks/intelx-lead-intel"
+            )
             mock_settings.return_value.CORTEX_API_KEY = "test-cortex-key"
 
             res = await CortexConnector.notify_cortex_lead_intel(

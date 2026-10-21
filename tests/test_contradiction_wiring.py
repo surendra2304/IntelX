@@ -1,6 +1,5 @@
 """Tests for Contradiction Resolution Engine and confidence penalties."""
 
-
 from intelx.agents.contradictions import (
     apply_contradiction_resolutions,
     calculate_contradiction_confidence,
@@ -17,16 +16,24 @@ from intelx.db.models import Claim
 
 def test_calculate_contradiction_confidence_single_conflict():
     """Verify confidence is capped at ceiling (0.35) for a single contradiction."""
-    conf = calculate_contradiction_confidence(base_confidence=0.90, has_contradiction=True, conflict_count=1)
+    conf = calculate_contradiction_confidence(
+        base_confidence=0.90, has_contradiction=True, conflict_count=1
+    )
     assert conf == DISPUTED_CONFIDENCE_CEILING
     assert conf == 0.35
 
 
 def test_calculate_contradiction_confidence_compounding_decay():
     """Verify multiple contradictions decay confidence further."""
-    conf_1 = calculate_contradiction_confidence(base_confidence=0.90, has_contradiction=True, conflict_count=1)
-    conf_2 = calculate_contradiction_confidence(base_confidence=0.90, has_contradiction=True, conflict_count=2)
-    conf_3 = calculate_contradiction_confidence(base_confidence=0.90, has_contradiction=True, conflict_count=3)
+    conf_1 = calculate_contradiction_confidence(
+        base_confidence=0.90, has_contradiction=True, conflict_count=1
+    )
+    conf_2 = calculate_contradiction_confidence(
+        base_confidence=0.90, has_contradiction=True, conflict_count=2
+    )
+    conf_3 = calculate_contradiction_confidence(
+        base_confidence=0.90, has_contradiction=True, conflict_count=3
+    )
 
     assert conf_1 == 0.35
     assert conf_2 < conf_1
@@ -37,7 +44,9 @@ def test_calculate_contradiction_confidence_compounding_decay():
 
 def test_calculate_contradiction_confidence_no_contradiction():
     """Verify confidence is untouched if no contradiction."""
-    conf = calculate_contradiction_confidence(base_confidence=0.88, has_contradiction=False, conflict_count=0)
+    conf = calculate_contradiction_confidence(
+        base_confidence=0.88, has_contradiction=False, conflict_count=0
+    )
     assert conf == 0.88
 
 

@@ -20,7 +20,17 @@ logger = logging.getLogger("intelx.api.friday_universe")
 
 router = APIRouter(prefix="/friday-universe", tags=["FRIDAY Universe Intelligence"])
 
-VALID_AGENTS = {"stratex", "futuris", "sentinel", "friday", "cortex", "forge", "inference", "vyralx", "all"}
+VALID_AGENTS = {
+    "stratex",
+    "futuris",
+    "sentinel",
+    "friday",
+    "cortex",
+    "forge",
+    "inference",
+    "vyralx",
+    "all",
+}
 
 
 async def get_db_session() -> AsyncSession:

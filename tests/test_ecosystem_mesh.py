@@ -11,10 +11,22 @@ from intelx.orchestration.engine import _dispatch_external_research
 async def test_dispatch_external_research_includes_all_peers():
     """Verify _dispatch_external_research invokes Memora, Futuris, StrateX, and Cortex."""
     with (
-        patch("intelx.integrations.memora_context.MemoraMemoryClient.publish_research_handoff", new_callable=AsyncMock) as mock_memora,
-        patch("intelx.integrations.futuris_context.FuturisContextProvider.notify_futuris_research_relevant", new_callable=AsyncMock) as mock_futuris,
-        patch("intelx.integrations.stratex_context.StratexConnector.notify_stratex_trade_signal", new_callable=AsyncMock) as mock_stratex,
-        patch("intelx.integrations.cortex_context.CortexConnector.notify_cortex_lead_intel", new_callable=AsyncMock) as mock_cortex,
+        patch(
+            "intelx.integrations.memora_context.MemoraMemoryClient.publish_research_handoff",
+            new_callable=AsyncMock,
+        ) as mock_memora,
+        patch(
+            "intelx.integrations.futuris_context.FuturisContextProvider.notify_futuris_research_relevant",
+            new_callable=AsyncMock,
+        ) as mock_futuris,
+        patch(
+            "intelx.integrations.stratex_context.StratexConnector.notify_stratex_trade_signal",
+            new_callable=AsyncMock,
+        ) as mock_stratex,
+        patch(
+            "intelx.integrations.cortex_context.CortexConnector.notify_cortex_lead_intel",
+            new_callable=AsyncMock,
+        ) as mock_cortex,
     ):
         mock_memora.return_value = {"status": "stored", "memory_id": "mem-1"}
         mock_futuris.return_value = {"status": "delivered", "event": "research_finding_relevant"}
@@ -29,7 +41,9 @@ async def test_dispatch_external_research_includes_all_peers():
             evidence_count=5,
             claims_count=10,
             tags=["intelx", "research", "general"],
-            extra_context={"findings": [{"conclusion": "Enterprise automation reduces operational overhead."}]},
+            extra_context={
+                "findings": [{"conclusion": "Enterprise automation reduces operational overhead."}]
+            },
             confidence=0.88,
         )
 
@@ -53,10 +67,22 @@ async def test_dispatch_external_research_includes_all_peers():
 async def test_dispatch_external_research_fault_isolation():
     """Verify one failing peer does not prevent deliveries to remaining peers."""
     with (
-        patch("intelx.integrations.memora_context.MemoraMemoryClient.publish_research_handoff", new_callable=AsyncMock) as mock_memora,
-        patch("intelx.integrations.futuris_context.FuturisContextProvider.notify_futuris_research_relevant", new_callable=AsyncMock) as mock_futuris,
-        patch("intelx.integrations.stratex_context.StratexConnector.notify_stratex_trade_signal", new_callable=AsyncMock) as mock_stratex,
-        patch("intelx.integrations.cortex_context.CortexConnector.notify_cortex_lead_intel", new_callable=AsyncMock) as mock_cortex,
+        patch(
+            "intelx.integrations.memora_context.MemoraMemoryClient.publish_research_handoff",
+            new_callable=AsyncMock,
+        ) as mock_memora,
+        patch(
+            "intelx.integrations.futuris_context.FuturisContextProvider.notify_futuris_research_relevant",
+            new_callable=AsyncMock,
+        ) as mock_futuris,
+        patch(
+            "intelx.integrations.stratex_context.StratexConnector.notify_stratex_trade_signal",
+            new_callable=AsyncMock,
+        ) as mock_stratex,
+        patch(
+            "intelx.integrations.cortex_context.CortexConnector.notify_cortex_lead_intel",
+            new_callable=AsyncMock,
+        ) as mock_cortex,
     ):
         mock_memora.return_value = {"status": "stored"}
         mock_futuris.side_effect = RuntimeError("Futuris connection timeout")

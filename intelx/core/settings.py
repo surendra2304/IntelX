@@ -255,7 +255,9 @@ class Settings(BaseSettings):
     # Sentinel Cybersecurity & Threat Defense Integration
     SENTINEL_BASE_URL: str = Field(
         default="http://sentinel:8000",
-        validation_alias=AliasChoices("INTELX_SENTINEL_BASE_URL", "SENTINEL_BASE_URL", "SENTINEL_URL"),
+        validation_alias=AliasChoices(
+            "INTELX_SENTINEL_BASE_URL", "SENTINEL_BASE_URL", "SENTINEL_URL"
+        ),
         description="Base URL for Sentinel cybersecurity engine",
     )
     SENTINEL_API_KEY: str | None = Field(
