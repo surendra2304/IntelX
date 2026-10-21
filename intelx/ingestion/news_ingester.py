@@ -352,7 +352,9 @@ CHUNK_OVERLAP = 80
 # ---------------------------------------------------------------------------
 
 
-def _strip_html(text: str) -> str:
+def _strip_html(text: str | None) -> str:
+    if not text:
+        return ""
     # First unwrap CDATA sections so content inside is preserved
     text = re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"<[^>]+>", " ", text)
@@ -520,7 +522,7 @@ async def _ingest_article(session: Any, article: dict[str, Any], full_text: str)
         retrieved_at=datetime.now(UTC),
         content_type="text/html",
         fingerprint=fp,
-        trust_tier=TrustTier.LIKELY_RELIABLE,
+        trust_tier=TrustTier.STANDARD,
         robots_ok=True,
         injection_risk=False,
     )
