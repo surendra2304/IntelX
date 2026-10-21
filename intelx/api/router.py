@@ -391,9 +391,7 @@ async def api_search(
     if len(results) < result_limit:
         try:
             connector = WebSearchConnector()
-            web_hits = await connector.fetch(
-                search_query, max_results=result_limit - len(results)
-            )
+            web_hits = await connector.fetch(search_query, max_results=result_limit - len(results))
             for hit in web_hits:
                 if len(results) >= result_limit:
                     break
@@ -471,9 +469,7 @@ async def api_scrape(
             "status_code": getattr(fetch_res, "status_code", 200),
         }
     except Exception as exc:
-        logger.warning(
-            "Scrape failed for %s (%s)", body.url, type(exc).__name__, exc_info=True
-        )
+        logger.warning("Scrape failed for %s (%s)", body.url, type(exc).__name__, exc_info=True)
         return {
             "status": "error",
             "url": body.url,
