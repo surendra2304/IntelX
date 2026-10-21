@@ -49,6 +49,10 @@ class FinalReportGate:
                 reasons.append(f"dangling source citations: {cite_check.missing_sources}")
             if cite_check.missing_claims:
                 reasons.append(f"dangling claim citations: {cite_check.missing_claims}")
+        if sources and not cite_check.found_sources:
+            reasons.append("report contains no valid source citations")
+        if claims and not cite_check.found_claims:
+            reasons.append("report contains no valid claim citations")
 
         if required_sections:
             report_lower = report_markdown.lower()
@@ -57,11 +61,12 @@ class FinalReportGate:
                 if not re.search(rf"#+\s*{re.escape(sec_clean)}", report_lower):
                     reasons.append(f"missing required section heading: '{sec}'")
 
-        # Grounding score estimation based on presence of citations
-        citations_found = len(
-            re.findall(r"\[(S\d+|C\d+|src-[a-z0-9_-]+|claim-[a-z0-9_-]+)\]", report_markdown)
+        # Grounding score measures how much of the known claim set is referenced.
+        grounding_score = (
+            round(len(cite_check.found_claims) / len(claims), 4)
+            if claims
+            else (1.0 if cite_check.found_sources else 0.0)
         )
-        grounding_score = 1.0 if citations_found > 0 or not claims else 0.5
 
         return ReportGate(
             approved=len(reasons) == 0,
