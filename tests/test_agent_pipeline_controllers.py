@@ -78,9 +78,7 @@ def test_report_gate_requires_valid_claim_citations_and_scores_coverage():
         "# Executive Summary\n\n"
         "This report contains detailed prose and an evidence source reference [S:source-1].\n"
     )
-    no_claim_cites = gate.evaluate(
-        prose, sources={"source-1"}, claims={"claim-1", "claim-2"}
-    )
+    no_claim_cites = gate.evaluate(prose, sources={"source-1"}, claims={"claim-1", "claim-2"})
     assert not no_claim_cites.approved
     assert any("no valid claim citations" in reason for reason in no_claim_cites.reasons)
     assert no_claim_cites.grounding_score == 0.0
