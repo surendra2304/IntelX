@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
+import logging
 from dataclasses import dataclass
 from typing import Any
 
