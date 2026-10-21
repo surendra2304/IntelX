@@ -36,6 +36,16 @@ class EventStreamManager:
                 del cls._subscribers[run_id]
 
     @classmethod
+    def get_subscriber_count(cls, run_id: str) -> int:
+        """Get the current count of active subscribers for a run."""
+        return len(cls._subscribers.get(run_id, []))
+
+    @classmethod
+    def clear_all_subscribers(cls) -> None:
+        """Clear all active subscriptions across all runs."""
+        cls._subscribers.clear()
+
+    @classmethod
     async def broadcast(cls, run_id: str, event: Event | dict[str, Any]) -> None:
         """Broadcast an event to all active subscribers of a research run."""
         if run_id in cls._subscribers:
@@ -43,7 +53,9 @@ class EventStreamManager:
                 try:
                     queue.put_nowait(event)
                 except asyncio.QueueFull:
-                    pass
+                    logger.warning(
+                        f"Event subscriber queue full for run {run_id}, dropping live frame"
+                    )
 
     @classmethod
     async def iterate_events(
@@ -160,5 +172,67 @@ async def emit_research_completed(
         payload_json={
             "outcome": str(outcome),
             "cost_summary": cost_summary or {},
+        },
+    )
+
+
+async def emit_source_ingested(
+    session: AsyncSession,
+    run_id: str,
+    source_id: str,
+    url: str,
+    title: str,
+) -> Event:
+    """Emit an event when a new research source is ingested."""
+    return await emit_event(
+        session=session,
+        run_id=run_id,
+        event_type="source.ingested",
+        payload_json={
+            "source_id": source_id,
+            "url": url,
+            "title": title,
+        },
+    )
+
+
+async def emit_claim_extracted(
+    session: AsyncSession,
+    run_id: str,
+    claim_id: str,
+    quote: str,
+    span_start: int,
+    span_end: int,
+) -> Event:
+    """Emit an event when a verifiable claim is extracted from source text."""
+    return await emit_event(
+        session=session,
+        run_id=run_id,
+        event_type="claim.extracted",
+        payload_json={
+            "claim_id": claim_id,
+            "quote": quote,
+            "span_start": span_start,
+            "span_end": span_end,
+        },
+    )
+
+
+async def emit_contradiction_flagged(
+    session: AsyncSession,
+    run_id: str,
+    topic: str,
+    claim_a_id: str,
+    claim_b_id: str,
+) -> Event:
+    """Emit an event when a factual contradiction is detected between claims."""
+    return await emit_event(
+        session=session,
+        run_id=run_id,
+        event_type="contradiction.flagged",
+        payload_json={
+            "topic": topic,
+            "claim_a_id": claim_a_id,
+            "claim_b_id": claim_b_id,
         },
     )
