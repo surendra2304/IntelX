@@ -94,7 +94,9 @@ def test_durable_store_rejects_invalid_state_json_and_hash(tmp_path):
             store.save_state("tenant", "research", "{not json}", "0" * 64, 0)
         with pytest.raises(ValueError, match="does not match"):
             store.save_state("tenant", "research", '{"phase":"INIT"}', "0" * 64, 0)
-        valid_empty_hash = hashlib.sha256(json.dumps({}, sort_keys=True).encode("utf-8")).hexdigest()
+        valid_empty_hash = hashlib.sha256(
+            json.dumps({}, sort_keys=True).encode("utf-8")
+        ).hexdigest()
         with pytest.raises(ValueError, match="non-negative integer"):
             store.save_state("tenant", "research", "{}", valid_empty_hash, True)
 
@@ -103,7 +105,9 @@ def test_durable_store_rejects_invalid_state_json_and_hash(tmp_path):
 
 def test_durable_store_detects_state_tampering_and_bounds_outbox_fetch(tmp_path):
     db_file = str(tmp_path / "tampered.db")
-    digest = hashlib.sha256(json.dumps({"phase": "SAFE"}, sort_keys=True).encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(
+        json.dumps({"phase": "SAFE"}, sort_keys=True).encode("utf-8")
+    ).hexdigest()
     with DurableResearchStore(db_file) as store:
         store.save_state("tenant", "research", '{"phase": "SAFE"}', digest, 0)
         store.conn.execute(
@@ -125,7 +129,9 @@ def test_durable_research_store_optimistic_concurrency(tmp_path):
             tenant="tenant-1",
             research_id="run-99",
             state_json=json.dumps({"phase": "INIT"}),
-            state_hash=hashlib.sha256(json.dumps({"phase": "INIT"}, sort_keys=True).encode("utf-8")).hexdigest(),
+            state_hash=hashlib.sha256(
+                json.dumps({"phase": "INIT"}, sort_keys=True).encode("utf-8")
+            ).hexdigest(),
             expected_version=0,
         )
         assert v1 == 1
@@ -142,7 +148,9 @@ def test_durable_research_store_optimistic_concurrency(tmp_path):
                 tenant="tenant-1",
                 research_id="run-99",
                 state_json=json.dumps({"phase": "RACE"}),
-                state_hash=hashlib.sha256(json.dumps({"phase": "RACE"}, sort_keys=True).encode("utf-8")).hexdigest(),
+                state_hash=hashlib.sha256(
+                    json.dumps({"phase": "RACE"}, sort_keys=True).encode("utf-8")
+                ).hexdigest(),
                 expected_version=0,
             )
 
@@ -151,7 +159,9 @@ def test_durable_research_store_optimistic_concurrency(tmp_path):
             tenant="tenant-1",
             research_id="run-99",
             state_json=json.dumps({"phase": "DISCOVERING"}),
-            state_hash=hashlib.sha256(json.dumps({"phase": "DISCOVERING"}, sort_keys=True).encode("utf-8")).hexdigest(),
+            state_hash=hashlib.sha256(
+                json.dumps({"phase": "DISCOVERING"}, sort_keys=True).encode("utf-8")
+            ).hexdigest(),
             expected_version=1,
         )
         assert v2 == 2
