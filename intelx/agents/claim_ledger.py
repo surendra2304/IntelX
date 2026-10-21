@@ -39,9 +39,44 @@ class ClaimRecord:
         }
 
 
+_NUMBER_PATTERN = re.compile(
+    r"(?<!\\w)\\d+(?:,\\d{3})*(?:\\.\\d+)?(?:\\s*(?:%|percent))?(?!\\w)",
+    re.IGNORECASE,
+)
+_NEGATION_PATTERN = re.compile(
+    r"\\b(?:no|not|never|without|neither|nor|cannot|can't|doesn't|don't|didn't|"
+    r"isn't|wasn't|weren't|won't|wouldn't|shouldn't|failed|false|denied)\\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize_number(match: re.Match[str]) -> str:
+    """Canonicalize measured values so 1,000 and 1000 compare identically."""
+    raw = match.group().casefold().replace(",", "").strip()
+    is_percent = raw.endswith("%") or raw.endswith("percent")
+    numeric = re.match(r"\\d+(?:\\.\\d+)?", raw)
+    if numeric is None:
+        return raw
+    number = numeric.group()
+    if "." in number:
+        number = number.rstrip("0").rstrip(".")
+    return f"numvalue{number}{'percent' if is_percent else ''}"
+
+
 def _tokenize(text: str) -> set[str]:
-    """Extract lowercase alphanumeric tokens."""
-    return set(re.findall(r"\b[a-z0-9]{3,}\b", text.lower()))
+    """Extract normalized tokens while preserving negation and quantitative values."""
+    normalized = _NUMBER_PATTERN.sub(_normalize_number, text.casefold())
+    tokens = re.findall(r"[a-z0-9]+(?:'[a-z0-9]+)?", normalized)
+    negations = {token.replace("’", "'") for token in _NEGATION_PATTERN.findall(text.casefold())}
+    return {token for token in tokens if len(token) >= 3 or token in {"no", "nor"}} | negations
+
+
+def _material_facts(text: str) -> tuple[frozenset[str], frozenset[str]]:
+    """Return numeric values and polarity markers that fuzzy deduplication must preserve."""
+    normalized = text.casefold().replace("’", "'")
+    values = frozenset(_normalize_number(match) for match in _NUMBER_PATTERN.finditer(normalized))
+    negations = frozenset(_NEGATION_PATTERN.findall(normalized))
+    return values, negations
 
 
 def _jaccard_similarity(set_a: set[str], set_b: set[str]) -> float:
@@ -95,38 +130,60 @@ class ClaimLedger:
         return [c for c in self.claims.values() if c.plan_item_id == plan_item_id]
 
     def deduplicate(self, similarity_threshold: float = 0.85) -> int:
-        """Merge semantically duplicate propositions, combining their evidence references."""
+        """Merge only compatible, quantitatively equivalent supported propositions."""
+        if (
+            isinstance(similarity_threshold, bool)
+            or not isinstance(similarity_threshold, (int, float))
+            or not 0.0 < similarity_threshold <= 1.0
+        ):
+            raise ValueError("similarity_threshold must be greater than 0 and at most 1")
+
         records = list(self.claims.values())
-        to_remove = set()
+        to_remove: set[str] = set()
         merged_count = 0
 
-        for i in range(len(records)):
-            rec_a = records[i]
+        for i, rec_a in enumerate(records):
             if rec_a.claim_id in to_remove:
                 continue
+            # Disputed/retracted claims are retained as separate audit evidence.
+            status_a = rec_a.status.upper()
+            if status_a not in {"SUPPORTED", "ACTIVE"}:
+                continue
             tokens_a = _tokenize(rec_a.statement)
+            material_a = _material_facts(rec_a.statement)
 
-            for j in range(i + 1, len(records)):
-                rec_b = records[j]
+            for rec_b in records[i + 1 :]:
                 if rec_b.claim_id in to_remove:
                     continue
+                if rec_b.status.upper() != status_a:
+                    continue
+                if status_a not in {"SUPPORTED", "ACTIVE"}:
+                    continue
+                if rec_a.plan_item_id and rec_b.plan_item_id and (
+                    rec_a.plan_item_id != rec_b.plan_item_id
+                ):
+                    continue
+                if material_a != _material_facts(rec_b.statement):
+                    continue
+
                 tokens_b = _tokenize(rec_b.statement)
-
                 sim = _jaccard_similarity(tokens_a, tokens_b)
-                if sim >= similarity_threshold:
-                    # Merge evidence and sources into rec_a
-                    combined_evidence = tuple(
-                        dict.fromkeys(rec_a.evidence_ids + rec_b.evidence_ids)
-                    )
-                    combined_sources = tuple(dict.fromkeys(rec_a.source_ids + rec_b.source_ids))
-                    rec_a.evidence_ids = combined_evidence
-                    rec_a.source_ids = combined_sources
-                    rec_a.confidence = max(rec_a.confidence, rec_b.confidence)
-                    to_remove.add(rec_b.claim_id)
-                    merged_count += 1
+                if sim < similarity_threshold:
+                    continue
 
-        for cid in to_remove:
-            self.claims.pop(cid, None)
+                # Merge only compatible claims; retain unique provenance in original order.
+                rec_a.evidence_ids = tuple(
+                    dict.fromkeys(rec_a.evidence_ids + rec_b.evidence_ids)
+                )
+                rec_a.source_ids = tuple(
+                    dict.fromkeys(rec_a.source_ids + rec_b.source_ids)
+                )
+                rec_a.confidence = max(rec_a.confidence, rec_b.confidence)
+                to_remove.add(rec_b.claim_id)
+                merged_count += 1
+
+        for claim_id in to_remove:
+            self.claims.pop(claim_id, None)
 
         return merged_count
 
