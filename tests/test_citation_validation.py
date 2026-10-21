@@ -15,7 +15,9 @@ def test_report_exports_use_unique_tokens_when_ids_share_eight_char_prefix():
     markdown = render_report_markdown(
         objective="Assess an evidence-backed finding",
         executive_answer="The evidence supports this finding.",
-        grounded_findings=[{"statement": "Evidence supports the result.", "claim_ids": [next(iter(claim_ids))]}],
+        grounded_findings=[
+            {"statement": "Evidence supports the result.", "claim_ids": [next(iter(claim_ids))]}
+        ],
         unverified_findings=[],
         claims=claims,
         sources=sources,
