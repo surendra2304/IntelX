@@ -50,9 +50,7 @@ class ClaimVerifier:
         if isinstance(raw_evidence_ids, (str, int)) and not isinstance(raw_evidence_ids, bool):
             raw_evidence_ids = (raw_evidence_ids,)
         if not isinstance(raw_evidence_ids, (list, tuple, set, frozenset)):
-            return VerificationResult(
-                False, "claim evidence references are invalid", 0.0
-            )
+            return VerificationResult(False, "claim evidence references are invalid", 0.0)
 
         evidence_ids = tuple(
             dict.fromkeys(
@@ -67,9 +65,7 @@ class ClaimVerifier:
             return VerificationResult(False, "claim has no evidence references", 0.0)
 
         if not isinstance(evidences, Mapping) or not isinstance(documents, Mapping):
-            return VerificationResult(
-                False, "evidence or document repository is invalid", 0.0
-            )
+            return VerificationResult(False, "evidence or document repository is invalid", 0.0)
 
         verified_ids: list[str] = []
         for evidence_id in evidence_ids:
@@ -126,8 +122,7 @@ class ClaimVerifier:
         return VerificationResult(
             supported=True,
             reason=(
-                f"{len(set(verified_ids))}/{len(evidence_ids)} "
-                "evidence span(s) verbatim verified"
+                f"{len(set(verified_ids))}/{len(evidence_ids)} evidence span(s) verbatim verified
             ),
             score=score,
             verified_evidence_ids=tuple(dict.fromkeys(verified_ids)),
