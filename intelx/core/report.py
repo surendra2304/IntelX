@@ -282,9 +282,7 @@ def render_report_markdown(
             historical_dates = []
             publication_date_missing = False
             for cid in claim_ids:
-                citation_tokens.append(
-                    f"[C:{format_citation_id(str(cid), set(claims_map))}]"
-                )
+                citation_tokens.append(f"[C:{format_citation_id(str(cid), set(claims_map))}]")
                 claim = claims_map.get(cid)
                 if claim:
                     sid = _get_val(claim, "source_id")
@@ -567,9 +565,7 @@ def export_text_citations(findings: list[Any], sources: list[Any]) -> str:
     all_claim_ids = {
         str(claim_id)
         for finding in findings
-        for claim_id in (
-            _get_val(finding, "claim_ids") or _get_val(finding, "claim_ids_json", [])
-        )
+        for claim_id in (_get_val(finding, "claim_ids") or _get_val(finding, "claim_ids_json", []))
     }
     lines: list[str] = ["### Key Findings with Citations\n"]
     used_sources: set[str] = set()
