@@ -10,7 +10,7 @@ from intelx.connectors.providers import (
     ProviderHealth,
     ProviderRouter,
 )
-from intelx.core.scheduler import ExecutionScheduler, RetryPolicy, bounded_call
+from intelx.core.scheduler import ExecutionScheduler, RetryPolicy, bounded_call, retryable
 
 
 @pytest.mark.asyncio
@@ -51,6 +51,62 @@ async def test_bounded_call_non_retryable_fails_fast():
     with pytest.raises(ValueError, match="Invalid schema"):
         await bounded_call(invalid_work, policy=policy)
 
+    assert attempts == 1
+
+
+def test_scheduler_rejects_invalid_retry_and_concurrency_settings():
+    with pytest.raises(ValueError, match="attempts"):
+        RetryPolicy(attempts=-1)
+    with pytest.raises(ValueError, match="base_delay"):
+        RetryPolicy(base_delay=float("nan"))
+    with pytest.raises(ValueError, match="timeout_seconds"):
+        RetryPolicy(timeout_seconds=0)
+    with pytest.raises(ValueError, match="retryable_errors"):
+        RetryPolicy(retryable_errors=("",))
+    with pytest.raises(ValueError, match="max_concurrency"):
+        ExecutionScheduler(max_concurrency=0)
+
+
+def test_retryable_recognizes_empty_timeout_exceptions():
+    assert retryable(TimeoutError())
+    assert retryable(ConnectionError())
+    assert not retryable(ValueError("bad input"))
+
+
+@pytest.mark.asyncio
+async def test_bounded_call_retries_timeout_exception_without_message():
+    attempts = 0
+
+    async def times_out_once():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise TimeoutError()
+        return "recovered"
+
+    result = await bounded_call(
+        times_out_once,
+        policy=RetryPolicy(attempts=1, base_delay=0, max_delay=0, jitter=False),
+    )
+    assert result == "recovered"
+    assert attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_bounded_call_rejects_sync_callables_and_does_not_retry_cancellation():
+    sync_policy = RetryPolicy(attempts=1, base_delay=0, max_delay=0, jitter=False)
+    with pytest.raises(TypeError, match="must return an awaitable"):
+        await bounded_call(lambda: "not-async", policy=sync_policy)
+
+    attempts = 0
+
+    async def cancelled():
+        nonlocal attempts
+        attempts += 1
+        raise asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await bounded_call(cancelled, policy=RetryPolicy(attempts=3, base_delay=0))
     assert attempts == 1
 
 
