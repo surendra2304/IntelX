@@ -19,11 +19,6 @@ class ReportGate:
 
 
 class FinalReportGate:
-    """Strict report postconditions with a minimum claim-citation coverage gate."""
-
-    MINIMUM_CLAIM_COVERAGE = 0.9
-    """Enforces strict postconditions on intelligence briefs before final export."""
-
     def __init__(self, citation_validator: CitationValidator | None = None) -> None:
         self.citation_validator = citation_validator or CitationValidator()
 
