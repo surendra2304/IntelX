@@ -39,5 +39,10 @@ jobs:
         # test_live.py contains live provider calls and is intentionally excluded from CI
         run: python -m pytest -q tests/ --ignore=tests/test_live.py
 
+      - name: Run deterministic golden evaluations
+        env:
+          INTELX_EVAL_DB_URL: sqlite+aiosqlite:////tmp/intelx-eval-ci.db
+        run: python -m evals.run
+
       - name: Verify Docker build
         run: docker build -t intelx .
