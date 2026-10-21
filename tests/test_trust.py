@@ -136,6 +136,12 @@ def test_confidence_formula_properties():
     assert score_min == 0.05
 
 
+def test_parse_time_horizon_rejects_excessively_long_numeric_value():
+    """Untrusted horizon strings must not trip Python's integer-string conversion limit."""
+    huge_horizon = "9" * 5000 + "d"
+    assert _parse_time_horizon({"query_scope": {"time_horizon": huge_horizon}}) is None
+
+
 def test_verifier_treats_exact_horizon_cutoff_as_fresh_across_timezones():
     """A publication exactly at the explicit cutoff stays fresh in any equivalent timezone."""
     now = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
