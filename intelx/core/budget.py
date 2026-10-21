@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -56,6 +57,26 @@ class BudgetLedger:
         self.updated_at = datetime.now(UTC)
 
 
+def _non_negative_int(value: int, name: str) -> int:
+    """Reject boolean, negative, or non-integer usage values."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return value
+
+
+def _non_negative_number(value: float, name: str) -> float:
+    """Reject negative and non-finite monetary or duration values."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite non-negative number")
+    try:
+        is_finite = math.isfinite(value)
+    except OverflowError:
+        is_finite = False
+    if not is_finite or value < 0:
+        raise ValueError(f"{name} must be a finite non-negative number")
+    return float(value)
+
+
 class BudgetController:
     """Enforces atomic resource limits and budget ceilings during research execution."""
 
@@ -67,67 +88,80 @@ class BudgetController:
         max_cost: float = 10.0,
         max_runtime_seconds: float = 900.0,
     ) -> None:
-        self.max_queries = max_queries
-        self.max_fetches = max_fetches
-        self.max_sources = max_sources
-        self.max_cost = max_cost
-        self.max_runtime_seconds = max_runtime_seconds
+        self.max_queries = _non_negative_int(max_queries, "max_queries")
+        self.max_fetches = _non_negative_int(max_fetches, "max_fetches")
+        self.max_sources = _non_negative_int(max_sources, "max_sources")
+        self.max_cost = _non_negative_number(max_cost, "max_cost")
+        self.max_runtime_seconds = _non_negative_number(max_runtime_seconds, "max_runtime_seconds")
         self._lock = asyncio.Lock()
 
     def charge_query(self, ledger: BudgetLedger, count: int = 1) -> None:
         """Charge query invocations against ledger."""
+        count = _non_negative_int(count, "count")
         ledger.queries += count
         ledger.updated_at = datetime.now(UTC)
         self._check(ledger)
 
     def charge_fetch(self, ledger: BudgetLedger, count: int = 1) -> None:
         """Charge HTTP fetch operations against ledger."""
+        count = _non_negative_int(count, "count")
         ledger.fetches += count
         ledger.updated_at = datetime.now(UTC)
         self._check(ledger)
 
     def charge_source(self, ledger: BudgetLedger, count: int = 1) -> None:
         """Charge ingested source documents against ledger."""
+        count = _non_negative_int(count, "count")
         ledger.sources += count
         ledger.updated_at = datetime.now(UTC)
         self._check(ledger)
 
     def charge_cost(self, ledger: BudgetLedger, usd: float) -> None:
         """Charge USD model or search provider cost against ledger."""
-        ledger.cost_usd += max(0.0, usd)
+        usd = _non_negative_number(usd, "usd")
+        ledger.cost_usd += usd
         ledger.updated_at = datetime.now(UTC)
         self._check(ledger)
 
     def charge_runtime(self, ledger: BudgetLedger, seconds: float) -> None:
         """Accumulate execution elapsed runtime."""
-        ledger.runtime_seconds += max(0.0, seconds)
+        seconds = _non_negative_number(seconds, "seconds")
+        ledger.runtime_seconds += seconds
         ledger.updated_at = datetime.now(UTC)
         self._check(ledger)
 
     async def reserve_budget(self, ledger: BudgetLedger, usd_estimate: float) -> None:
         """Atomically reserve financial budget before launching expensive parallel tasks."""
+        usd_estimate = _non_negative_number(usd_estimate, "usd_estimate")
         async with self._lock:
-            if (ledger.cost_usd + ledger.reserved_usd + usd_estimate) > self.max_cost:
+            total = ledger.cost_usd + ledger.reserved_usd + usd_estimate
+            if total > self.max_cost:
                 raise BudgetExceeded(
-                    f"budget reservation failed: (${ledger.cost_usd + ledger.reserved_usd + usd_estimate:.4f}) "
-                    f"exceeds max (${self.max_cost:.4f})"
+                    f"budget reservation failed: (${total:.4f}) exceeds max (${self.max_cost:.4f})"
                 )
-            ledger.reserved_usd += max(0.0, usd_estimate)
+            ledger.reserved_usd += usd_estimate
             ledger.updated_at = datetime.now(UTC)
 
     async def commit_reservation(
         self, ledger: BudgetLedger, reserved_usd: float, actual_usd: float
     ) -> None:
         """Commit actual expenditure and release unused reserved balance."""
+        reserved_usd = _non_negative_number(reserved_usd, "reserved_usd")
+        actual_usd = _non_negative_number(actual_usd, "actual_usd")
         async with self._lock:
+            if reserved_usd > ledger.reserved_usd:
+                raise ValueError("reserved_usd exceeds the outstanding reservation balance")
             ledger.reserved_usd = max(0.0, ledger.reserved_usd - reserved_usd)
-            ledger.cost_usd += max(0.0, actual_usd)
+            ledger.cost_usd += actual_usd
             ledger.updated_at = datetime.now(UTC)
             self._check(ledger)
 
     async def rollback_reservation(self, ledger: BudgetLedger, reserved_usd: float) -> None:
         """Safely release reserved budget when an operation is cancelled or aborted."""
+        reserved_usd = _non_negative_number(reserved_usd, "reserved_usd")
         async with self._lock:
+            if reserved_usd > ledger.reserved_usd:
+                raise ValueError("reserved_usd exceeds the outstanding reservation balance")
             ledger.reserved_usd = max(0.0, ledger.reserved_usd - reserved_usd)
             ledger.updated_at = datetime.now(UTC)
 
@@ -149,6 +183,13 @@ class BudgetController:
         self, ledger: BudgetLedger, threshold: float = 0.85
     ) -> tuple[bool, list[str]]:
         """Check if any budget dimension has reached or exceeded the danger threshold."""
+        if (
+            isinstance(threshold, bool)
+            or not isinstance(threshold, (int, float))
+            or not math.isfinite(threshold)
+            or not 0.0 <= threshold <= 1.0
+        ):
+            raise ValueError("threshold must be finite and between 0.0 and 1.0")
         warnings: list[str] = []
         if ledger.queries >= self.max_queries * threshold:
             warnings.append(f"queries at {ledger.queries}/{self.max_queries}")

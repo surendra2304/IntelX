@@ -103,6 +103,68 @@ async def test_budget_reservation_and_commit():
     assert ledger.reserved_usd == 0.0
 
 
+def test_budget_controller_rejects_negative_and_nonfinite_charges():
+    controller = BudgetController()
+    ledger = BudgetLedger()
+
+    with pytest.raises(ValueError, match="count"):
+        controller.charge_query(ledger, count=-1)
+    with pytest.raises(ValueError, match="count"):
+        controller.charge_fetch(ledger, count=True)
+    with pytest.raises(ValueError, match="usd"):
+        controller.charge_cost(ledger, -0.01)
+    with pytest.raises(ValueError, match="usd"):
+        controller.charge_cost(ledger, float("nan"))
+    with pytest.raises(ValueError, match="seconds"):
+        controller.charge_runtime(ledger, float("inf"))
+
+    assert ledger.queries == 0
+    assert ledger.fetches == 0
+    assert ledger.cost_usd == 0.0
+    assert ledger.runtime_seconds == 0.0
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"max_queries": -1},
+        {"max_fetches": True},
+        {"max_sources": 1.5},
+        {"max_cost": float("inf")},
+        {"max_runtime_seconds": float("nan")},
+    ],
+)
+def test_budget_controller_rejects_invalid_configuration(kwargs):
+    with pytest.raises(ValueError):
+        BudgetController(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_budget_reservations_reject_invalid_values_and_overrelease():
+    controller = BudgetController(max_cost=5.0)
+    ledger = BudgetLedger()
+
+    with pytest.raises(ValueError, match="usd_estimate"):
+        await controller.reserve_budget(ledger, -1.0)
+    await controller.reserve_budget(ledger, 1.0)
+
+    with pytest.raises(ValueError, match="outstanding reservation"):
+        await controller.commit_reservation(ledger, reserved_usd=1.1, actual_usd=0.5)
+    with pytest.raises(ValueError, match="outstanding reservation"):
+        await controller.rollback_reservation(ledger, reserved_usd=2.0)
+    with pytest.raises(ValueError, match="actual_usd"):
+        await controller.commit_reservation(ledger, reserved_usd=0.0, actual_usd=float("nan"))
+
+    assert ledger.reserved_usd == 1.0
+    assert ledger.cost_usd == 0.0
+
+
+def test_near_exhaustion_rejects_invalid_threshold():
+    controller = BudgetController()
+    with pytest.raises(ValueError, match="threshold"):
+        controller.is_near_exhaustion(BudgetLedger(), threshold=1.1)
+
+
 def test_remaining_budget_and_near_exhaustion():
     """Verify calculation of remaining quotas and warning detection."""
     controller = BudgetController(
