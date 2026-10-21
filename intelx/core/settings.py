@@ -407,6 +407,11 @@ class Settings(BaseSettings):
         """Enforce strict production security rules: no weak secrets, no demo keys, no mock mode."""
         if not self.is_production():
             return
+        if any(origin.strip() == "*" for origin in self.CORS_ORIGINS):
+            raise RuntimeError(
+                "CRITICAL SECURITY VIOLATION: Wildcard CORS origins are forbidden in production. "
+                "Configure explicit INTELX_CORS_ORIGINS values."
+            )
         if self.MOCK_MODE:
             raise RuntimeError(
                 "CRITICAL SECURITY VIOLATION: MOCK_MODE cannot be enabled in production. "
