@@ -46,6 +46,18 @@ def test_principal_and_tenant_boundary_enforcement():
     boundary.require_scope(admin, "any:scope")
 
 
+def test_member_cannot_escalate_with_wildcard_scope():
+    """A wildcard on a member identity must not bypass tenant or scope checks."""
+    boundary = TenantBoundary()
+    member = member_principal("tenant-a", "user-wildcard", scopes=["*"])
+
+    assert member.has_scope("research:read") is False
+    with pytest.raises(TenantViolation, match="cross-tenant access denied"):
+        boundary.require(member, "tenant-b")
+    with pytest.raises(TenantViolation, match="scope denied"):
+        boundary.require_scope(member, "research:delete")
+
+
 def test_tenant_context_ambient_scoping():
     """Verify TenantContext sets and cleans up ambient principal via contextvars."""
     assert get_current_principal() is None
@@ -56,6 +68,31 @@ def test_tenant_context_ambient_scoping():
         assert get_current_principal() == p
 
     assert get_current_principal() is None
+
+
+@pytest.mark.asyncio
+async def test_sentinel_live_mode_fails_closed_without_api_key(monkeypatch):
+    """Missing Sentinel credentials must deny actions and not report fake delivery."""
+    from intelx.integrations import sentinel_policy
+
+    settings = Settings(_env_file=None, MOCK_MODE=False)
+    monkeypatch.setattr(sentinel_policy, "get_settings", lambda: settings)
+    client = SentinelSecurityClient(base_url="http://sentinel:8000", api_key=None)
+
+    allowed = await client.authorize_connector_action(
+        connector_kind="web_fetch",
+        target_location="https://example.org",
+        tenant_id="tenant-a",
+        actor_id="intelx-crawler",
+    )
+    assert allowed is False
+
+    result = await client.report_security_incident(
+        incident_type="SSRF_ATTEMPT",
+        details={"target": "http://127.0.0.1"},
+        tenant_id="tenant-a",
+    )
+    assert result == {"status": "error", "error": "missing_api_key"}
 
 
 @pytest.mark.asyncio
