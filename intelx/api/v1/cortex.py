@@ -41,18 +41,32 @@ router = APIRouter(prefix="/cortex", tags=["Cortex Website & Lead Intelligence I
 class CortexLeadEnrichmentRequest(BaseModel):
     """Payload sent by Cortex when requesting dossier enrichment for a website visitor/lead."""
 
-    domain: str = Field(..., description="Domain or company website URL, e.g. 'stripe.com' or 'alex@acme.com'")
-    lead_id: str | None = Field(None, description="Optional lead identifier from Cortex's CRM/lead database")
-    company_name: str | None = Field(None, description="Optional company name if already provided by visitor")
-    visitor_notes: str | None = Field(None, description="Any specific notes or page context captured by Cortex")
+    domain: str = Field(
+        ..., description="Domain or company website URL, e.g. 'stripe.com' or 'alex@acme.com'"
+    )
+    lead_id: str | None = Field(
+        None, description="Optional lead identifier from Cortex's CRM/lead database"
+    )
+    company_name: str | None = Field(
+        None, description="Optional company name if already provided by visitor"
+    )
+    visitor_notes: str | None = Field(
+        None, description="Any specific notes or page context captured by Cortex"
+    )
 
 
 class CortexVisitorQueryRequest(BaseModel):
     """Payload sent by Cortex when a website visitor asks a technical or product question."""
 
-    query: str = Field(..., description="The visitor's question submitted in the website chat widget")
-    visitor_id: str | None = Field(None, description="Optional anonymous or session visitor identifier")
-    page_url: str | None = Field(None, description="The landing page or document URL the visitor is viewing")
+    query: str = Field(
+        ..., description="The visitor's question submitted in the website chat widget"
+    )
+    visitor_id: str | None = Field(
+        None, description="Optional anonymous or session visitor identifier"
+    )
+    page_url: str | None = Field(
+        None, description="The landing page or document URL the visitor is viewing"
+    )
 
 
 class CortexVisitorQueryResponse(BaseModel):
@@ -123,7 +137,9 @@ async def enrich_lead(
 
         stmt_c = select(Claim).where(Claim.run_id.in_(run_ids)).limit(10)
         c_rows = (await session.execute(stmt_c)).scalars().all()
-        claims_data = [{"text": c.quote or c.subject or "", "confidence": c.confidence} for c in c_rows]
+        claims_data = [
+            {"text": c.quote or c.subject or "", "confidence": c.confidence} for c in c_rows
+        ]
 
     # Synthesize dossier from empirical findings or structured knowledge
     dossier = CortexConnector.synthesize_lead_dossier(
@@ -165,12 +181,7 @@ async def answer_visitor_query(
     terms = [t.strip() for t in query_str.split() if len(t.strip()) > 3]
     if terms:
         clauses = [Finding.conclusion.ilike(f"%{term}%") for term in terms]
-        stmt = (
-            select(Finding)
-            .where(or_(*clauses))
-            .order_by(Finding.confidence.desc())
-            .limit(3)
-        )
+        stmt = select(Finding).where(or_(*clauses)).order_by(Finding.confidence.desc()).limit(3)
     else:
         search_term = f"%{query_str[:50]}%"
         stmt = (
@@ -185,7 +196,12 @@ async def answer_visitor_query(
     if matching_findings:
         answer_text = " ".join([f.conclusion for f in matching_findings])
         for f in matching_findings:
-            sources.append({"title": f"IntelX Verified Finding ({f.id[:8]})", "url": "intelx://findings/" + f.id})
+            sources.append(
+                {
+                    "title": f"IntelX Verified Finding ({f.id[:8]})",
+                    "url": "intelx://findings/" + f.id,
+                }
+            )
     else:
         # Fallback to search connector if needed
         connector = WebSearchConnector(settings=settings)

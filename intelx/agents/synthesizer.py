@@ -392,9 +392,7 @@ class SynthesizerAgent(BaseAgent):
             get_model_for_role = getattr(gateway_settings, "get_model_for_role", None)
             if callable(get_model_for_role):
                 configured_model = get_model_for_role(self.role)
-        disputed_claims = [
-            c for c in claims if getattr(c, "status", None) == ClaimStatus.DISPUTED
-        ]
+        disputed_claims = [c for c in claims if getattr(c, "status", None) == ClaimStatus.DISPUTED]
         contradictions_list: list[dict[str, str]] = [
             {
                 "side_a": getattr(c, "quote", "") or getattr(c, "text", ""),
