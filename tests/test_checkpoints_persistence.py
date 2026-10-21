@@ -6,7 +6,7 @@ import json
 import pytest
 
 from intelx.core.checkpoint import Checkpoint, CheckpointManager
-from intelx.core.persistence import DurableResearchStore
+from intelx.core.persistence import DurableResearchStore, StateIntegrityError
 
 
 def test_checkpoint_manager_lifecycle():
@@ -56,6 +56,65 @@ def test_checkpoint_manager_lifecycle():
     assert len(manager.list_history("run-500")) == 0
 
 
+def test_checkpoint_manager_rejects_bad_hashes_and_non_monotonic_versions():
+    manager = CheckpointManager()
+    with pytest.raises(Exception, match="payload hash mismatch"):
+        manager.save(Checkpoint("run-1", "PLANNING", 1, "wrong", {"x": 1}))
+
+    payload = {"x": 1}
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+    manager.save(Checkpoint("run-1", "PLANNING", 1, digest, payload))
+    with pytest.raises(ValueError, match="must exceed existing version"):
+        manager.save(Checkpoint("run-1", "SEARCHING", 1, digest, payload))
+
+    loaded = manager.load("run-1")
+    assert loaded is not None
+    loaded.payload["x"] = 999
+    assert manager.load("run-1").payload == {"x": 1}
+
+
+def test_checkpoint_manager_bounds_history_and_rejects_invalid_creation():
+    manager = CheckpointManager(max_history_per_run=2)
+    for version in (1, 2, 3):
+        payload = {"version": version}
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+        manager.save(Checkpoint("run-2", f"PHASE-{version}", version, digest, payload))
+    assert [item.version for item in manager.list_history("run-2")] == [2, 3]
+    assert manager.load_version("run-2", 1) is None
+
+    with pytest.raises(ValueError, match="positive integer"):
+        CheckpointManager(max_history_per_run=0)
+    with pytest.raises(ValueError, match="positive integer"):
+        Checkpoint("run-2", "PHASE", True, "hash")
+
+
+def test_durable_store_rejects_invalid_state_json_and_hash(tmp_path):
+    with DurableResearchStore(str(tmp_path / "invalid.db")) as store:
+        with pytest.raises(ValueError, match="valid JSON"):
+            store.save_state("tenant", "research", "{not json}", "0" * 64, 0)
+        with pytest.raises(ValueError, match="does not match"):
+            store.save_state("tenant", "research", '{"phase":"INIT"}', "0" * 64, 0)
+        with pytest.raises(ValueError, match="non-negative integer"):
+            store.save_state("tenant", "research", "{}", hashlib.sha256(b"{}").hexdigest(), True)
+
+        assert store.load_state("tenant", "research") is None
+
+
+def test_durable_store_detects_state_tampering_and_bounds_outbox_fetch(tmp_path):
+    db_file = str(tmp_path / "tampered.db")
+    digest = hashlib.sha256(json.dumps({"phase": "SAFE"}, sort_keys=True).encode("utf-8")).hexdigest()
+    with DurableResearchStore(db_file) as store:
+        store.save_state("tenant", "research", '{"phase": "SAFE"}', digest, 0)
+        store.conn.execute(
+            "UPDATE research_state SET state_json=? WHERE tenant_id=? AND research_id=?",
+            ('{"phase": "TAMPERED"}', "tenant", "research"),
+        )
+        with pytest.raises(StateIntegrityError, match="hash mismatch"):
+            store.load_state("tenant", "research")
+        with pytest.raises(ValueError, match="between 1 and 1000"):
+            store.fetch_undelivered_outbox(limit=-1)
+
+
 def test_durable_research_store_optimistic_concurrency(tmp_path):
     """Verify SQLite WAL state persistence, optimistic concurrency conflicts, and outbox."""
     db_file = str(tmp_path / "test_durable.db")
@@ -65,7 +124,7 @@ def test_durable_research_store_optimistic_concurrency(tmp_path):
             tenant="tenant-1",
             research_id="run-99",
             state_json=json.dumps({"phase": "INIT"}),
-            state_hash="hash-1",
+            state_hash=hashlib.sha256(json.dumps({"phase": "INIT"}, sort_keys=True).encode("utf-8")).hexdigest(),
             expected_version=0,
         )
         assert v1 == 1
@@ -82,7 +141,7 @@ def test_durable_research_store_optimistic_concurrency(tmp_path):
                 tenant="tenant-1",
                 research_id="run-99",
                 state_json=json.dumps({"phase": "RACE"}),
-                state_hash="hash-race",
+                state_hash=hashlib.sha256(json.dumps({"phase": "RACE"}, sort_keys=True).encode("utf-8")).hexdigest(),
                 expected_version=0,
             )
 
@@ -91,7 +150,7 @@ def test_durable_research_store_optimistic_concurrency(tmp_path):
             tenant="tenant-1",
             research_id="run-99",
             state_json=json.dumps({"phase": "DISCOVERING"}),
-            state_hash="hash-2",
+            state_hash=hashlib.sha256(json.dumps({"phase": "DISCOVERING"}, sort_keys=True).encode("utf-8")).hexdigest(),
             expected_version=1,
         )
         assert v2 == 2
