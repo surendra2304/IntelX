@@ -271,7 +271,7 @@ def render_report_markdown(
         )
     findings_lines = []
     asks_current_status = bool(
-        re.search(r"\\b(?:current(?:ly)?|latest|today|now)\\b", objective, re.IGNORECASE)
+        re.search(r"\b(?:current(?:ly)?|latest|today|now)\b", objective, re.IGNORECASE)
     )
     if grounded_findings:
         for f in grounded_findings:
