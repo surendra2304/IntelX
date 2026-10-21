@@ -19,6 +19,9 @@ class ReportGate:
 
 
 class FinalReportGate:
+    """Strict report postconditions with a minimum claim-citation coverage gate."""
+
+    MINIMUM_CLAIM_COVERAGE = 0.9
     """Enforces strict postconditions on intelligence briefs before final export."""
 
     def __init__(self, citation_validator: CitationValidator | None = None) -> None:
@@ -67,6 +70,11 @@ class FinalReportGate:
             if claims
             else (1.0 if cite_check.found_sources else 0.0)
         )
+        if claims and grounding_score < self.MINIMUM_CLAIM_COVERAGE:
+            reasons.append(
+                f"claim citation coverage {grounding_score:.1%} is below the required "
+                f"{self.MINIMUM_CLAIM_COVERAGE:.1%}"
+            )
 
         return ReportGate(
             approved=len(reasons) == 0,
