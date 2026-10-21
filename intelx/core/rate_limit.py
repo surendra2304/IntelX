@@ -72,8 +72,16 @@ class SlidingWindow:
     ) -> LimitDecision:
         """Consume one unit or return a retry delay; invalid overrides fail explicitly."""
         key = _key(key)
-        limit = self.default_limit if max_requests is None else _positive_int(max_requests, "max_requests")
-        window = self.window_seconds if window_seconds is None else _positive_int(window_seconds, "window_seconds")
+        limit = (
+            self.default_limit
+            if max_requests is None
+            else _positive_int(max_requests, "max_requests")
+        )
+        window = (
+            self.window_seconds
+            if window_seconds is None
+            else _positive_int(window_seconds, "window_seconds")
+        )
         now = time.monotonic()
         cutoff = now - window
 
@@ -111,7 +119,11 @@ class SlidingWindow:
     def get_usage(self, key: str, window_seconds: int | None = None) -> int:
         """Count requests for a key in the selected rolling window."""
         key = _key(key)
-        window = self.window_seconds if window_seconds is None else _positive_int(window_seconds, "window_seconds")
+        window = (
+            self.window_seconds
+            if window_seconds is None
+            else _positive_int(window_seconds, "window_seconds")
+        )
         cutoff = time.monotonic() - window
         with self._lock:
             history = [ts for ts in self._history.get(key, ()) if ts > cutoff]
@@ -172,7 +184,9 @@ class TokenBucketLimiter:
         now = time.monotonic()
         with self._lock:
             current, last_refill = self._buckets.get(key, (self.capacity, now))
-            refilled = min(self.capacity, current + max(0.0, now - last_refill) * self.rate_per_second)
+            refilled = min(
+                self.capacity, current + max(0.0, now - last_refill) * self.rate_per_second
+            )
             if refilled >= tokens:
                 remaining = refilled - tokens
                 if key not in self._buckets and len(self._buckets) >= self.max_tracked_keys:
@@ -255,7 +269,9 @@ class RedisRateLimiter:
     ) -> None:
         self.default_limit = _positive_int(default_limit, "default_limit")
         self.window_seconds = _positive_int(window_seconds, "window_seconds")
-        self.redis_url = redis_url.strip() if isinstance(redis_url, str) and redis_url.strip() else None
+        self.redis_url = (
+            redis_url.strip() if isinstance(redis_url, str) and redis_url.strip() else None
+        )
         self.fallback = SlidingWindow(
             default_limit=self.default_limit,
             window_seconds=self.window_seconds,
@@ -282,8 +298,16 @@ class RedisRateLimiter:
     ) -> LimitDecision:
         """Evaluate atomically in Redis when configured, otherwise use bounded local state."""
         key = _key(key)
-        limit = self.default_limit if max_requests is None else _positive_int(max_requests, "max_requests")
-        window = self.window_seconds if window_seconds is None else _positive_int(window_seconds, "window_seconds")
+        limit = (
+            self.default_limit
+            if max_requests is None
+            else _positive_int(max_requests, "max_requests")
+        )
+        window = (
+            self.window_seconds
+            if window_seconds is None
+            else _positive_int(window_seconds, "window_seconds")
+        )
         if self._redis is None:
             return self.fallback.allow(key, max_requests=limit, window_seconds=window)
 
@@ -320,7 +344,11 @@ class RedisRateLimiter:
         if self._redis is None:
             return self.fallback.get_usage(key, window_seconds)
         key = _key(key)
-        window = self.window_seconds if window_seconds is None else _positive_int(window_seconds, "window_seconds")
+        window = (
+            self.window_seconds
+            if window_seconds is None
+            else _positive_int(window_seconds, "window_seconds")
+        )
         try:
             now_ms = int(time.time() * 1000)
             redis_key = self._redis_key(key)
