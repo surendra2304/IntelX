@@ -238,7 +238,7 @@ async def post_agent_intelligence(
         items.append(
             {
                 "title": source.title or "Intelligence Report",
-                "url": source.url or "",
+                "url": getattr(source, "location", "") or "",
                 "summary": doc.text[:200].strip() if doc.text else "",
                 "publisher": source.publisher or "IntelX Ingestion Engine",
             }
