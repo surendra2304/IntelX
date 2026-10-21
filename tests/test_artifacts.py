@@ -150,7 +150,10 @@ def test_knowledge_objective_does_not_trigger_currentness_caveat():
         objective="Explain knowledge management systems",
         executive_answer="The system stores and organizes information.",
         grounded_findings=[
-            {"statement": "The system stores and organizes information.", "claim_ids": ["claim-know-123"]}
+            {
+                "statement": "The system stores and organizes information.",
+                "claim_ids": ["claim-know-123"],
+            }
         ],
         unverified_findings=[],
         claims=[
