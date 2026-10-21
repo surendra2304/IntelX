@@ -159,8 +159,10 @@ class ClaimLedger:
                     continue
                 if status_a not in {"SUPPORTED", "ACTIVE"}:
                     continue
-                if rec_a.plan_item_id and rec_b.plan_item_id and (
-                    rec_a.plan_item_id != rec_b.plan_item_id
+                if (
+                    rec_a.plan_item_id
+                    and rec_b.plan_item_id
+                    and (rec_a.plan_item_id != rec_b.plan_item_id)
                 ):
                     continue
                 if material_a != _material_facts(rec_b.statement):
@@ -172,12 +174,8 @@ class ClaimLedger:
                     continue
 
                 # Merge only compatible claims; retain unique provenance in original order.
-                rec_a.evidence_ids = tuple(
-                    dict.fromkeys(rec_a.evidence_ids + rec_b.evidence_ids)
-                )
-                rec_a.source_ids = tuple(
-                    dict.fromkeys(rec_a.source_ids + rec_b.source_ids)
-                )
+                rec_a.evidence_ids = tuple(dict.fromkeys(rec_a.evidence_ids + rec_b.evidence_ids))
+                rec_a.source_ids = tuple(dict.fromkeys(rec_a.source_ids + rec_b.source_ids))
                 rec_a.confidence = max(rec_a.confidence, rec_b.confidence)
                 to_remove.add(rec_b.claim_id)
                 merged_count += 1
