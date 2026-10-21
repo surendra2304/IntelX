@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from intelx.core.checkpoint import Checkpoint, CheckpointManager
+from intelx.core.checkpoint import Checkpoint, CheckpointIntegrityError, CheckpointManager
 from intelx.core.persistence import DurableResearchStore, StateIntegrityError
 
 
@@ -58,7 +58,7 @@ def test_checkpoint_manager_lifecycle():
 
 def test_checkpoint_manager_rejects_bad_hashes_and_non_monotonic_versions():
     manager = CheckpointManager()
-    with pytest.raises(Exception, match="payload hash mismatch"):
+    with pytest.raises(CheckpointIntegrityError, match="payload hash mismatch"):
         manager.save(Checkpoint("run-1", "PLANNING", 1, "wrong", {"x": 1}))
 
     payload = {"x": 1}
@@ -94,8 +94,9 @@ def test_durable_store_rejects_invalid_state_json_and_hash(tmp_path):
             store.save_state("tenant", "research", "{not json}", "0" * 64, 0)
         with pytest.raises(ValueError, match="does not match"):
             store.save_state("tenant", "research", '{"phase":"INIT"}', "0" * 64, 0)
+        valid_empty_hash = hashlib.sha256(json.dumps({}, sort_keys=True).encode("utf-8")).hexdigest()
         with pytest.raises(ValueError, match="non-negative integer"):
-            store.save_state("tenant", "research", "{}", hashlib.sha256(b"{}").hexdigest(), True)
+            store.save_state("tenant", "research", "{}", valid_empty_hash, True)
 
         assert store.load_state("tenant", "research") is None
 
