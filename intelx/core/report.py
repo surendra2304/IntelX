@@ -270,8 +270,8 @@ def render_report_markdown(
             + clean_answer
         )
     findings_lines = []
-    asks_current_status = any(
-        term in objective.lower() for term in ("current", "currently", "latest", "today", "now")
+    asks_current_status = bool(
+        re.search(r"\\b(?:current(?:ly)?|latest|today|now)\\b", objective, re.IGNORECASE)
     )
     if grounded_findings:
         for f in grounded_findings:
