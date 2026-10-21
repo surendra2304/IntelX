@@ -226,4 +226,4 @@ class DurableResearchStore:
         self.close()
 
 
-__all__ = ["DurableResearchStore"]
+__all__ = ["DurableResearchStore", "StateIntegrityError"]
