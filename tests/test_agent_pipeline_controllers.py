@@ -72,6 +72,78 @@ def test_claim_ledger_operations_and_deduplication():
     assert len(subq1_claims) == 1
 
 
+def test_claim_deduplication_preserves_conflicting_values_negation_and_status():
+    ledger = ClaimLedger()
+    claims = [
+        ClaimRecord(
+            claim_id="positive",
+            statement="Battery capacity increased by 92% over 1,000 cycles.",
+            plan_item_id="subq-1",
+            evidence_ids=("ev-positive",),
+            status="SUPPORTED",
+        ),
+        ClaimRecord(
+            claim_id="different-value",
+            statement="Battery capacity increased by 96% over 1000 cycles.",
+            plan_item_id="subq-1",
+            evidence_ids=("ev-value",),
+            status="SUPPORTED",
+        ),
+        ClaimRecord(
+            claim_id="negated",
+            statement="Battery capacity did not increase by 92% over 1000 cycles.",
+            plan_item_id="subq-1",
+            evidence_ids=("ev-negated",),
+            status="SUPPORTED",
+        ),
+        ClaimRecord(
+            claim_id="disputed",
+            statement="Battery capacity increased by 92% over 1000 cycles.",
+            plan_item_id="subq-1",
+            evidence_ids=("ev-disputed",),
+            status="DISPUTED",
+        ),
+        ClaimRecord(
+            claim_id="other-subquestion",
+            statement="Battery capacity rose by 92 percent across 1,000 cycles.",
+            plan_item_id="subq-2",
+            evidence_ids=("ev-other",),
+            status="SUPPORTED",
+        ),
+    ]
+    for claim in claims:
+        ledger.add(claim)
+
+    assert ledger.deduplicate(similarity_threshold=0.70) == 0
+    assert len(ledger.all()) == len(claims)
+    assert ledger.get("positive").evidence_ids == ("ev-positive",)
+    assert ledger.get("disputed").status == "DISPUTED"
+
+
+def test_claim_deduplication_still_merges_equivalent_numeric_formatting():
+    ledger = ClaimLedger()
+    ledger.add(
+        ClaimRecord(
+            claim_id="formatted-a",
+            statement="Battery retained 92% capacity over 1,000 cycles.",
+            plan_item_id="subq-1",
+            evidence_ids=("ev-a",),
+        )
+    )
+    ledger.add(
+        ClaimRecord(
+            claim_id="formatted-b",
+            statement="Battery retained 92 percent capacity over 1000 cycles.",
+            plan_item_id="subq-1",
+            evidence_ids=("ev-b",),
+        )
+    )
+
+    assert ledger.deduplicate(similarity_threshold=0.70) == 1
+    assert len(ledger.all()) == 1
+    assert ledger.get("formatted-a").evidence_ids == ("ev-a", "ev-b")
+
+
 def test_report_gate_requires_valid_claim_citations_and_scores_coverage():
     gate = FinalReportGate()
     prose = (
