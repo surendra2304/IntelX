@@ -239,9 +239,10 @@ FRIDAY_UNIVERSE_FEEDS: list[dict[str, str]] = [
         "agent": "friday",
         "category": "product_launches",
     },
-    # ── CORTEX: Web Intelligence & Trends ─────────────────────────────────
-    # Cortex does web operations and lead qualification.
-    # Needs digital marketing trends, SEO changes, business news.
+    # ── CORTEX: Website Visitor Intelligence & Lead Generation ─────────────
+    # Cortex is the Website Agent: manages incoming site visitors, captures and
+    # qualifies leads, answers visitor queries, and optimizes site conversions.
+    # Needs visitor intent signals, SaaS/B2B trends, SEO changes, business news.
     {
         "url": "https://searchengineland.com/feed",
         "publisher": "Search Engine Land",

@@ -179,7 +179,15 @@ async def seed_api_keys_from_settings(session: AsyncSession, settings: Settings)
 
     service_keys = {
         key
-        for key in (settings.FRIDAY_API_KEY, settings.FUTURIS_API_KEY, settings.STRATEX_API_KEY)
+        for key in (
+            settings.FRIDAY_API_KEY,
+            settings.FUTURIS_API_KEY,
+            settings.STRATEX_API_KEY,
+            settings.CORTEX_API_KEY,
+            settings.SENTINEL_API_KEY,
+            settings.FORGE_API_KEY,
+            settings.VYRALX_API_KEY,
+        )
         if key
     }
     for service_key in service_keys:
@@ -218,6 +226,10 @@ async def seed_api_keys_from_settings(session: AsyncSession, settings: Settings)
                 settings.FRIDAY_API_KEY: "friday-delegation",
                 settings.FUTURIS_API_KEY: "futuris-delegation",
                 settings.STRATEX_API_KEY: "stratex-delegation",
+                settings.CORTEX_API_KEY: "cortex-delegation",
+                settings.SENTINEL_API_KEY: "sentinel-delegation",
+                settings.FORGE_API_KEY: "forge-delegation",
+                settings.VYRALX_API_KEY: "vyralx-delegation",
             }
             name = service_names.get(raw_key) or (
                 "env-seeded-admin" if role == ApiKeyRole.ADMIN else f"env-seeded-{idx}"

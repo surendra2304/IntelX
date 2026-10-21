@@ -60,6 +60,7 @@ async def _dispatch_external_research(
     confidence: float = 0.80,
 ) -> dict:
     """Await and report each cross-agent delivery instead of detaching tasks."""
+    from intelx.integrations.cortex_context import CortexConnector
     from intelx.integrations.ecosystem_dispatch import dispatch_sequentially
     from intelx.integrations.futuris_context import FuturisContextProvider
     from intelx.integrations.memora_context import MemoraMemoryClient
@@ -97,6 +98,16 @@ async def _dispatch_external_research(
                     finding_text=finding_text,
                     run_id=run_id,
                     domain=domain,
+                    extra_context=extra_context,
+                ),
+            ),
+            (
+                "Cortex",
+                lambda: CortexConnector.notify_cortex_lead_intel(
+                    finding_text=finding_text,
+                    run_id=run_id,
+                    domain=domain,
+                    confidence=confidence,
                     extra_context=extra_context,
                 ),
             ),

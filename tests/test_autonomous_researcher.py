@@ -142,10 +142,18 @@ async def test_trigger_for_agent_targeted_dispatch():
     assert run_sentinel.scope_json["domain"] == "security"
     assert run_sentinel.objective == custom_obj
 
-    # 3. Arbitrary agent identity with fallback objective
-    run_custom = await daemon.trigger_for_agent("cortex", session_factory=sessionmaker)
-    assert run_custom.scope_json["agent"] == "cortex"
-    assert "CORTEX" in run_custom.objective
+    # 3. Cortex with first-class website visitor and lead generation objective
+    run_cortex = await daemon.trigger_for_agent("cortex", session_factory=sessionmaker)
+    assert run_cortex.scope_json["agent"] == "cortex"
+    assert (
+        "website visitor" in run_cortex.objective.lower()
+        or "lead generation" in run_cortex.objective.lower()
+    )
+
+    # 4. Arbitrary agent identity with fallback objective
+    run_custom = await daemon.trigger_for_agent("nexus", session_factory=sessionmaker)
+    assert run_custom.scope_json["agent"] == "nexus"
+    assert "NEXUS" in run_custom.objective
 
 
 @pytest.mark.asyncio

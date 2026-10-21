@@ -20,7 +20,7 @@ logger = logging.getLogger("intelx.api.friday_universe")
 
 router = APIRouter(prefix="/friday-universe", tags=["FRIDAY Universe Intelligence"])
 
-VALID_AGENTS = {"stratex", "futuris", "sentinel", "friday", "cortex", "forge", "inference", "all"}
+VALID_AGENTS = {"stratex", "futuris", "sentinel", "friday", "cortex", "forge", "inference", "vyralx", "all"}
 
 
 async def get_db_session() -> AsyncSession:
@@ -60,7 +60,7 @@ class IntelligenceFeed(BaseModel):
 async def get_agent_intelligence(
     agent: str = Query(
         default="all",
-        description="Target agent: stratex | futuris | sentinel | friday | cortex | forge | inference | all",
+        description="Target agent: stratex | futuris | sentinel | friday | cortex | forge | inference | vyralx | all",
     ),
     limit: int = Query(default=50, le=200, ge=1, description="Number of items to return"),
     session: AsyncSession = Depends(get_db_session),

@@ -29,7 +29,12 @@ class SearchResult:
 class TavilySearchConnector(BaseConnector):
     """Tavily search API integration."""
 
-    def __init__(self, api_key: str | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(
             name="tavily_search",
             capabilities=["web_search", "structured_snippets"],
@@ -38,6 +43,7 @@ class TavilySearchConnector(BaseConnector):
             **kwargs,
         )
         self.api_key = api_key
+        self._transport = transport
 
     async def fetch(self, target: str, **kwargs: Any) -> list[SearchResult]:
         """Execute search query against Tavily API."""
@@ -45,28 +51,41 @@ class TavilySearchConnector(BaseConnector):
             return []
 
         max_results = kwargs.get("max_results", 10)
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                "https://api.tavily.com/search",
-                json={
-                    "api_key": self.api_key,
-                    "query": target,
-                    "max_results": max_results,
-                    "search_depth": "basic",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            results = []
-            for item in data.get("results", []):
-                results.append(
-                    SearchResult(
-                        url=item.get("url", ""),
-                        title=item.get("title", ""),
-                        snippet=item.get("content", ""),
-                    )
+        try:
+            async with httpx.AsyncClient(transport=self._transport, timeout=10.0) as client:
+                resp = await client.post(
+                    "https://api.tavily.com/search",
+                    json={
+                        "api_key": self.api_key,
+                        "query": target,
+                        "max_results": max_results,
+                        "search_depth": "basic",
+                    },
                 )
-            return results
+                if resp.status_code != 200:
+                    raise ProviderError(
+                        "Tavily search returned non-success status",
+                        details={"provider": "tavily", "status_code": resp.status_code},
+                    )
+                data = resp.json()
+                results: list[SearchResult] = []
+                for item in data.get("results", []):
+                    results.append(
+                        SearchResult(
+                            url=item.get("url", ""),
+                            title=item.get("title", ""),
+                            snippet=item.get("content", ""),
+                        )
+                    )
+                return results
+        except ProviderError:
+            raise
+        except Exception as e:
+            logger.warning("Tavily search request failed (%s)", type(e).__name__)
+            raise ProviderError(
+                "Tavily search request failed",
+                details={"provider": "tavily", "error_class": type(e).__name__},
+            ) from e
 
 
 class DuckDuckGoSearchConnector(BaseConnector):
@@ -495,7 +514,9 @@ class WebSearchConnector(BaseConnector):
             **kwargs,
         )
         self.settings = settings or get_settings()
-        self._tavily = TavilySearchConnector(api_key=self.settings.TAVILY_API_KEY)
+        self._tavily = TavilySearchConnector(
+            api_key=self.settings.TAVILY_API_KEY, transport=transport
+        )
         self._searxng = SearXNGSearchConnector(
             base_url=self.settings.SEARXNG_URL, transport=transport
         )
