@@ -123,9 +123,9 @@ class HttpFetchConnector(BaseConnector):
         self._transport = transport
         self._semaphore = asyncio.Semaphore(self.settings.MAX_CONCURRENT_FETCHES)
         self._domain_last_request: OrderedDict[str, float] = OrderedDict()
-        self._robots_cache: OrderedDict[
-            str, tuple[urllib.robotparser.RobotFileParser, float]
-        ] = OrderedDict()
+        self._robots_cache: OrderedDict[str, tuple[urllib.robotparser.RobotFileParser, float]] = (
+            OrderedDict()
+        )
 
     @classmethod
     def validate_ssrf(cls, hostname: str, port: int = 80) -> list[str]:
