@@ -20,7 +20,7 @@ class MemoraMemoryClient:
     def __init__(self, base_url: str | None = None, api_key: str | None = None) -> None:
         settings = get_settings()
         self.base_url = base_url or settings.MEMORA_URL or "http://memora:8000"
-        self.api_key = api_key or settings.INTELX_API_KEY
+        self.api_key = api_key if api_key is not None else settings.INTELX_API_KEY
 
     async def _store_cloud_memory(
         self,
