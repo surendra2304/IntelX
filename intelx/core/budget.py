@@ -59,7 +59,6 @@ class BudgetLedger:
 
 
 
-
 def _non_negative_int(value: int, name: str) -> int:
     """Reject boolean, negative, or non-integer usage values."""
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -95,9 +94,7 @@ class BudgetController:
         self.max_fetches = _non_negative_int(max_fetches, "max_fetches")
         self.max_sources = _non_negative_int(max_sources, "max_sources")
         self.max_cost = _non_negative_number(max_cost, "max_cost")
-        self.max_runtime_seconds = _non_negative_number(
-            max_runtime_seconds, "max_runtime_seconds"
-        )
+        self.max_runtime_seconds = _non_negative_number(max_runtime_seconds, "max_runtime_seconds")
         self._lock = asyncio.Lock()
 
     def charge_query(self, ledger: BudgetLedger, count: int = 1) -> None:
@@ -142,8 +139,7 @@ class BudgetController:
             total = ledger.cost_usd + ledger.reserved_usd + usd_estimate
             if total > self.max_cost:
                 raise BudgetExceeded(
-                    f"budget reservation failed: (${total:.4f}) "
-                    f"exceeds max (${self.max_cost:.4f})"
+                    f"budget reservation failed: (${total:.4f}) exceeds max (${self.max_cost:.4f})"
                 )
             ledger.reserved_usd += usd_estimate
             ledger.updated_at = datetime.now(UTC)
