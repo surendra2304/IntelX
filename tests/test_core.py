@@ -49,6 +49,37 @@ def test_rate_limiter_sliding_window():
     assert retry_after > 0
 
 
+def test_rate_limiter_bounds_unique_key_history_and_evicts_lru(monkeypatch):
+    """Distinct invalid keys cannot grow rate-limit state past its configured cap."""
+    from intelx.core.auth import RateLimiter
+
+    now = 100.0
+    monkeypatch.setattr("intelx.core.auth.time.time", lambda: now)
+    limiter = RateLimiter(default_limit=3, window_seconds=10, max_tracked_keys=2)
+
+    assert limiter.check_rate_limit("key-a")[0]
+    assert limiter.check_rate_limit("key-b")[0]
+    assert limiter.check_rate_limit("key-a")[0]  # Make key-a the most recently used.
+    assert list(limiter._history) == ["key-b", "key-a"]
+
+    assert limiter.check_rate_limit("attacker-controlled-new-key")[0]
+    assert list(limiter._history) == ["key-a", "attacker-controlled-new-key"]
+    assert len(limiter._history) <= limiter.max_tracked_keys
+
+
+def test_rate_limiter_rejects_nonpositive_request_limits():
+    """Invalid caller overrides must not lead to empty-history indexing errors."""
+    import pytest
+
+    from intelx.core.auth import RateLimiter
+
+    limiter = RateLimiter(default_limit=3, window_seconds=10)
+    with pytest.raises(ValueError, match="limit must be at least 1"):
+        limiter.check_rate_limit("key", limit=0)
+    with pytest.raises(ValueError, match="limit must be at least 1"):
+        limiter.check_rate_limit("key", limit=-1)
+
+
 def test_problem_response_rfc7807():
     """Verify RFC 7807 problem details response format and content type."""
     from intelx.core.auth import problem_response
