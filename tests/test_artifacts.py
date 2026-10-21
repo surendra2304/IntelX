@@ -142,6 +142,36 @@ def test_report_discloses_syndicated_duplicates_and_historical_citations():
     assert "not a like-for-like comparison" in md
 
 
+def test_knowledge_objective_does_not_trigger_currentness_caveat():
+    """The substring 'now' inside 'knowledge' is not a current-status request."""
+    from datetime import UTC, datetime
+
+    report = render_report_markdown(
+        objective="Explain knowledge management systems",
+        executive_answer="The system stores and organizes information.",
+        grounded_findings=[
+            {"statement": "The system stores and organizes information.", "claim_ids": ["claim-know-123"]}
+        ],
+        unverified_findings=[],
+        claims=[
+            {
+                "id": "claim-know-123",
+                "text": "The system stores and organizes information.",
+                "source_id": "source-know-123",
+            }
+        ],
+        sources=[
+            {
+                "id": "source-know-123",
+                "title": "Knowledge Management Overview",
+                "published_at": datetime(2021, 1, 10, tzinfo=UTC),
+            }
+        ],
+    )
+
+    assert "historical; not proof of current status" not in report
+
+
 def test_current_findings_disclose_stale_or_unassessable_source_freshness():
     """Retrieval time must not make old or undated evidence appear current."""
     from datetime import UTC, datetime, timedelta
