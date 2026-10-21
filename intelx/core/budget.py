@@ -57,8 +57,6 @@ class BudgetLedger:
         self.updated_at = datetime.now(UTC)
 
 
-
-
 def _non_negative_int(value: int, name: str) -> int:
     """Reject boolean, negative, or non-integer usage values."""
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
