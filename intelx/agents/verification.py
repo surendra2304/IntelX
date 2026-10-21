@@ -121,9 +121,7 @@ class ClaimVerifier:
         score = round(len(set(verified_ids)) / len(evidence_ids), 4)
         return VerificationResult(
             supported=True,
-            reason=(
-                f"{len(set(verified_ids))}/{len(evidence_ids)} evidence span(s) verbatim verified
-            ),
+            reason=f"{len(set(verified_ids))}/{len(evidence_ids)} evidence span(s) verbatim verified",
             score=score,
             verified_evidence_ids=tuple(dict.fromkeys(verified_ids)),
         )
