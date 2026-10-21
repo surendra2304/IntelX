@@ -1,59 +1,6 @@
-# Task 2 next-run instructions — IntelX
+# Task 2 next run — IntelX
 
-Last updated: 2026-10-21T01:01:34Z
-
-Read .github/friday-continuation/task-2-checkpoint.md before coding. Resume branch automation/friday-universe-task-2; continue existing implementation rather than restarting repository review.
-
-## Previous run evidence
-
-- Result: failed
-- Active coding seconds: 5
-- Coding passes: 1
-- Source paths changed against main: 14
-
-### Changed source paths
-
-- github/friday-continuation/task-2-checkpoint.md
-- intelx/agents/citations.py
-- intelx/agents/verifier.py
-- intelx/core/report.py
-- intelx/db/demo_seeder.py
-- intelx/web/routes.py
-- intelx/web/static/app.js
-- intelx/web/templates/report.html
-- tests/test_artifacts.py
-- tests/test_citation_validation.py
-- tests/test_friday_api.py
-- tests/test_orchestration.py
-- tests/test_trust.py
-- tests/test_web.py
-
-### Runner failures or blockers
-
-- Pass 1 failed with exit 1. See log pass-1.log.
-
-## Detailed continuation notes from the previous coding pass
-
-# Task 2 next-run instructions — IntelX
-
-Updated by the runner at 2026-10-21T01:01:34Z; pass 1 did not revise the prompt.
-
-Read the checkpoint, inspect current diffs and logs, and continue implementation. Do not write a report instead of code.
-
-## Current changes
-- No working-tree changes detected; inspect failing tests, TODOs and incomplete product flows.
-
-## Previous run log (tail)
-
-
-
-You have exceeded your monthly quota (Request ID: D412:20D1FA:127F2E3:13D3BEF:6AD80EED)
-
-
-## First action
-Run the focused checks for current changes, repair failures, and implement the next highest-impact source/test improvement. Rewrite this prompt with exact paths and test commands.
-
-
-## First action next run
-
-Read the checkpoint and these previous notes, inspect the branch diff, run the focused tests for the last implementation, fix failures, and implement the next highest-impact feature or regression fix. Record exact commands/results and revise both handoff files before ending.
+- Verify branch `fix/task-2-regressions-2026-10-22` and commit `fe8e7b5374564c4443d26769b23d07baf73625d1`.
+- Source and regression tests are committed but untested; PR creation and local test access were unavailable in the prior run.
+- Open a focused PR to main, inspect CI, and run `pytest -q tests/test_source_quality.py`.
+- Fix any failures; record exact commit, test result, CI URL, and next concrete step in all three Task 2 handoff files.
