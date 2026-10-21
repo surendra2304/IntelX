@@ -57,11 +57,45 @@ MAX_CONCURRENT_AUTONOMOUS_RUNS = 2
 class AutonomousResearcher:
     """Daemon automatically spawning continuous research runs for FRIDAY Universe agents."""
 
-    def __init__(self, interval_seconds: float = RESEARCH_CHECK_INTERVAL_SECONDS) -> None:
+    def __init__(
+        self,
+        interval_seconds: float = RESEARCH_CHECK_INTERVAL_SECONDS,
+        initial_delay_seconds: float = 15.0,
+    ) -> None:
         self.interval_seconds = interval_seconds
+        self.initial_delay_seconds = initial_delay_seconds
         self._task: asyncio.Task | None = None
         self._running = False
         self._topic_index = 0
+        self._total_spawns = 0
+        self._last_run_id: str | None = None
+        self._last_spawn_time: datetime | None = None
+        self._last_error: str | None = None
+
+    @property
+    def is_running(self) -> bool:
+        """Check whether the autonomous research daemon is currently running."""
+        return self._running
+
+    @property
+    def total_spawns(self) -> int:
+        """Return cumulative count of autonomously spawned research runs."""
+        return self._total_spawns
+
+    @property
+    def last_run_id(self) -> str | None:
+        """Return the run ID of the most recently spawned autonomous run."""
+        return self._last_run_id
+
+    @property
+    def last_spawn_time(self) -> datetime | None:
+        """Return the UTC timestamp of the most recent autonomous run spawn."""
+        return self._last_spawn_time
+
+    @property
+    def last_error(self) -> str | None:
+        """Return the most recent error message encountered during a cycle."""
+        return self._last_error
 
     async def _should_spawn_run(self, session: Any) -> bool:
         """Check if we have capacity and need a new autonomous run."""
@@ -98,31 +132,85 @@ class AutonomousResearcher:
         """Evaluate intelligence state and trigger an autonomous research investigation."""
         factory = session_factory or get_sessionmaker()
         async with factory() as session:
-            should_spawn = await self._should_spawn_run(session)
-            if not should_spawn:
-                return None
+            try:
+                should_spawn = await self._should_spawn_run(session)
+                if not should_spawn:
+                    return None
 
-            # Pick next rotating FRIDAY Universe topic
-            topic = AUTONOMOUS_RESEARCH_TOPICS[self._topic_index % len(AUTONOMOUS_RESEARCH_TOPICS)]
-            self._topic_index += 1
+                # Pick next rotating FRIDAY Universe topic
+                topic = AUTONOMOUS_RESEARCH_TOPICS[
+                    self._topic_index % len(AUTONOMOUS_RESEARCH_TOPICS)
+                ]
+                self._topic_index += 1
 
+                scope = {
+                    "domain": topic["domain"],
+                    "depth": "quick",
+                    "autonomous": True,
+                    "agent": topic["agent"],
+                    "target_agent": topic["agent"].upper(),
+                }
+
+                run = await RunRepo.create_run(
+                    session=session,
+                    objective=topic["objective"],
+                    scope_json=scope,
+                )
+                await session.commit()
+
+                self._total_spawns += 1
+                self._last_run_id = run.id
+                self._last_spawn_time = datetime.now(UTC)
+                self._last_error = None
+
+                logger.info(
+                    f"[AutoResearcher] Spawned autonomous investigation for [{topic['agent'].upper()}]: "
+                    f"'{topic['objective'][:60]}...' (Run ID: {run.id})"
+                )
+                return run
+            except Exception as e:
+                self._last_error = str(e)
+                raise
+
+    async def trigger_for_agent(
+        self,
+        agent_name: str,
+        objective: str | None = None,
+        domain: str = "general",
+        session_factory: Any | None = None,
+    ) -> ResearchRun:
+        """Trigger an autonomous investigation targeted for a specific specialist agent."""
+        clean_agent = agent_name.lower().strip()
+        default_objectives = {
+            item["agent"]: item["objective"] for item in AUTONOMOUS_RESEARCH_TOPICS
+        }
+        target_objective = objective or default_objectives.get(
+            clean_agent, f"Targeted autonomous research investigation for {clean_agent.upper()}"
+        )
+
+        factory = session_factory or get_sessionmaker()
+        async with factory() as session:
             scope = {
-                "domain": topic["domain"],
+                "domain": domain,
                 "depth": "quick",
                 "autonomous": True,
-                "agent": topic["agent"],
-                "target_agent": topic["agent"].upper(),
+                "agent": clean_agent,
+                "target_agent": clean_agent.upper(),
             }
-
             run = await RunRepo.create_run(
                 session=session,
-                objective=topic["objective"],
+                objective=target_objective,
                 scope_json=scope,
             )
             await session.commit()
+
+            self._total_spawns += 1
+            self._last_run_id = run.id
+            self._last_spawn_time = datetime.now(UTC)
+
             logger.info(
-                f"[AutoResearcher] Spawned autonomous investigation for [{topic['agent'].upper()}]: "
-                f"'{topic['objective'][:60]}...' (Run ID: {run.id})"
+                f"[AutoResearcher] Dispatched targeted run {run.id} for agent [{clean_agent.upper()}]: "
+                f"'{target_objective[:60]}...'"
             )
             return run
 
@@ -132,12 +220,14 @@ class AutonomousResearcher:
             f"(checking every {self.interval_seconds}s)."
         )
         # Small initial delay on boot to let schemas and news ingester seed
-        await asyncio.sleep(15.0)
+        if self.initial_delay_seconds > 0:
+            await asyncio.sleep(self.initial_delay_seconds)
 
         while self._running:
             try:
                 await self.trigger_cycle()
             except Exception as ex:
+                self._last_error = str(ex)
                 logger.error(f"[AutoResearcher] Error in autonomous cycle: {ex}", exc_info=True)
 
             if self._running:
