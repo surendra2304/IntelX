@@ -40,12 +40,12 @@ class ClaimRecord:
 
 
 _NUMBER_PATTERN = re.compile(
-    r"(?<!\\w)\\d+(?:,\\d{3})*(?:\\.\\d+)?(?:\\s*(?:%|percent))?(?!\\w)",
+    r"(?<!\w)\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:%|percent))?(?!\w)",
     re.IGNORECASE,
 )
 _NEGATION_PATTERN = re.compile(
-    r"\\b(?:no|not|never|without|neither|nor|cannot|can't|doesn't|don't|didn't|"
-    r"isn't|wasn't|weren't|won't|wouldn't|shouldn't|failed|false|denied)\\b",
+    r"\b(?:no|not|never|without|neither|nor|cannot|can't|doesn't|don't|didn't|"
+    r"isn't|wasn't|weren't|won't|wouldn't|shouldn't|failed|false|denied)\b",
     re.IGNORECASE,
 )
 
@@ -54,7 +54,7 @@ def _normalize_number(match: re.Match[str]) -> str:
     """Canonicalize measured values so 1,000 and 1000 compare identically."""
     raw = match.group().casefold().replace(",", "").strip()
     is_percent = raw.endswith("%") or raw.endswith("percent")
-    numeric = re.match(r"\\d+(?:\\.\\d+)?", raw)
+    numeric = re.match(r"\d+(?:\.\d+)?", raw)
     if numeric is None:
         return raw
     number = numeric.group()
