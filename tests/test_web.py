@@ -347,24 +347,16 @@ async def test_citation_drawer_treats_like_wildcards_literally(web_client):
         await session.commit()
 
     source_token = "src%_"
-    source_match = await web_client.get(
-        f"/api/citation/S/{quote(source_token, safe='')}"
-    )
+    source_match = await web_client.get(f"/api/citation/S/{quote(source_token, safe='')}")
     assert source_match.status_code == 200
     assert source_match.json()["id"] == source_ids[0]
-    source_missing = await web_client.get(
-        f"/api/citation/S/{quote('none%_', safe='')}"
-    )
+    source_missing = await web_client.get(f"/api/citation/S/{quote('none%_', safe='')}")
     assert source_missing.status_code == 404
 
     claim_token = "clm%_"
-    claim_match = await web_client.get(
-        f"/api/citation/C/{quote(claim_token, safe='')}"
-    )
+    claim_match = await web_client.get(f"/api/citation/C/{quote(claim_token, safe='')}")
     assert claim_match.status_code == 200
     assert claim_match.json()["id"] == claim_ids[0]
-    claim_missing = await web_client.get(
-        f"/api/citation/C/{quote('absent%_', safe='')}"
-    )
+    claim_missing = await web_client.get(f"/api/citation/C/{quote('absent%_', safe='')}")
     assert claim_missing.status_code == 404
     web_client.cookies.clear()
