@@ -1,6 +1,8 @@
 """Tests for INTELX Connectors, SSRF Protection, Robots Enforcement, Ingestion, and Sanitization."""
 
 import socket
+import time
+import urllib.robotparser
 from pathlib import Path
 
 import httpx
@@ -163,6 +165,34 @@ async def test_fetch_rejects_dns_rebinding_before_connect(monkeypatch):
 
     assert resolutions == 2
     assert requests == []
+
+
+@pytest.mark.asyncio
+async def test_per_domain_fetch_caches_are_bounded_with_lru_eviction():
+    settings = Settings(
+        _env_file=None,
+        RESPECT_ROBOTS=True,
+        PER_DOMAIN_DELAY_S=0.1,
+    )
+    connector = HttpFetchConnector(settings=settings)
+    capacity = connector._MAX_DOMAIN_CACHE_ENTRIES
+
+    for index in range(capacity + 5):
+        await connector._apply_politeness(f"domain-{index}.example")
+    assert len(connector._domain_last_request) == capacity
+    assert "domain-0.example" not in connector._domain_last_request
+    assert "domain-2049.example" in connector._domain_last_request
+
+    now = time.monotonic()
+    for index in range(capacity + 5):
+        connector._remember_robots_policy(
+            f"domain-{index}.example",
+            urllib.robotparser.RobotFileParser(),
+            now,
+        )
+    assert len(connector._robots_cache) == capacity
+    assert "domain-0.example" not in connector._robots_cache
+    assert "domain-2049.example" in connector._robots_cache
 
 
 @pytest.mark.asyncio
