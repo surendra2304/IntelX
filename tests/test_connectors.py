@@ -383,7 +383,9 @@ def test_file_connector_supported_formats(tmp_path):
 @pytest.mark.asyncio
 async def test_live_search_provider_outage_is_not_reported_as_no_results(monkeypatch):
     """Distinguish a genuine empty search response from failed external providers."""
-    searcher = WebSearchConnector(settings=Settings(MOCK_MODE=False))
+    searcher = WebSearchConnector(
+        settings=Settings(MOCK_MODE=False, TAVILY_API_KEY=None, SEARXNG_URL=None)
+    )
 
     class BrokenProvider:
         async def fetch(self, target, **kwargs):
@@ -406,7 +408,9 @@ async def test_live_search_provider_outage_is_not_reported_as_no_results(monkeyp
 
 @pytest.mark.asyncio
 async def test_live_search_empty_success_remains_an_honest_null_result(monkeypatch):
-    searcher = WebSearchConnector(settings=Settings(MOCK_MODE=False))
+    searcher = WebSearchConnector(
+        settings=Settings(MOCK_MODE=False, TAVILY_API_KEY=None, SEARXNG_URL=None)
+    )
 
     class EmptyProvider:
         async def fetch(self, target, **kwargs):
@@ -420,7 +424,9 @@ async def test_live_search_empty_success_remains_an_honest_null_result(monkeypat
 
 @pytest.mark.asyncio
 async def test_live_search_uses_partial_results_when_a_provider_fails(monkeypatch):
-    searcher = WebSearchConnector(settings=Settings(MOCK_MODE=False))
+    searcher = WebSearchConnector(
+        settings=Settings(MOCK_MODE=False, TAVILY_API_KEY=None, SEARXNG_URL=None)
+    )
     expected = SearchResult(
         url="https://news.example.test/report",
         title="Independent report",

@@ -6,6 +6,7 @@ from datetime import UTC
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from intelx.api.v1 import v1_router
+from intelx.api.v1.cortex import router as cortex_root_router
 from intelx.api.v1.health import router as health_root_router
 from intelx.api.v1.stratex import router as stratex_root_router
 from intelx.core.auth import get_friday_api_key
@@ -53,6 +54,9 @@ root_api_router.include_router(v1_router)
 
 # StrateX Direct Route (/v1/intelligence/research)
 root_api_router.include_router(stratex_root_router, prefix="/v1")
+
+# Cortex Direct Route (/v1/cortex/...)
+root_api_router.include_router(cortex_root_router, prefix="/v1")
 
 
 @root_api_router.post("/v1/task/execute", tags=["Universal Task Protocol"])

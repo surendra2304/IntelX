@@ -13,6 +13,7 @@ from intelx.agents.analyst import AnalysisResult
 from intelx.agents.base import BaseAgent
 from intelx.agents.critic import CritiqueReport
 from intelx.core.confidence import get_confidence_label
+from intelx.core.enums import ClaimStatus
 from intelx.core.report import (
     filter_and_ground_findings,
     render_report_markdown,
@@ -391,6 +392,16 @@ class SynthesizerAgent(BaseAgent):
             get_model_for_role = getattr(gateway_settings, "get_model_for_role", None)
             if callable(get_model_for_role):
                 configured_model = get_model_for_role(self.role)
+        disputed_claims = [
+            c for c in claims if getattr(c, "status", None) == ClaimStatus.DISPUTED
+        ]
+        contradictions_list: list[dict[str, str]] = [
+            {
+                "side_a": getattr(c, "quote", "") or getattr(c, "text", ""),
+                "side_b": "Contradicted by independent multi-source evidence",
+            }
+            for c in disputed_claims
+        ]
         report_md = render_report_markdown(
             objective=objective,
             executive_answer=clean_exec_answer,
@@ -398,6 +409,7 @@ class SynthesizerAgent(BaseAgent):
             unverified_findings=unverified_findings,
             claims=claims,
             sources=all_sources,
+            contradictions=contradictions_list,
             gaps=draft.gaps,
             critique=critique_dict,
             degradations=degradations,
@@ -416,28 +428,45 @@ class SynthesizerAgent(BaseAgent):
 
         # Persist findings to database
         if session and run_id:
+            disputed_map = {
+                getattr(c, "id", ""): getattr(c, "quote", "") or getattr(c, "text", "")
+                for c in claims
+                if getattr(c, "status", None) == ClaimStatus.DISPUTED
+            }
             for gf in grounded_findings:
+                gf_claim_ids = gf.get("claim_ids") or []
+                gf_contradictions = [
+                    f"Contradicted claim {cid}: {disputed_map[cid]}"
+                    for cid in gf_claim_ids
+                    if cid in disputed_map
+                ]
                 finding_row = Finding(
                     run_id=run_id,
                     conclusion=gf.get("statement") or gf.get("conclusion") or "",
                     confidence=gf.get("confidence", 0.8),
                     confidence_method="v1-composite",
-                    claim_ids_json=gf.get("claim_ids") or [],
+                    claim_ids_json=gf_claim_ids,
                     gaps_json=[],
-                    contradictions_json=[],
+                    contradictions_json=gf_contradictions,
                     unverified_json=[],
                 )
                 session.add(finding_row)
 
             for uf in unverified_findings:
+                uf_claim_ids = uf.get("claim_ids") or []
+                uf_contradictions = [
+                    f"Contradicted claim {cid}: {disputed_map[cid]}"
+                    for cid in uf_claim_ids
+                    if cid in disputed_map
+                ]
                 finding_row = Finding(
                     run_id=run_id,
                     conclusion=uf.get("statement") or uf.get("conclusion") or "",
                     confidence=uf.get("confidence", 0.2),
                     confidence_method="v1-composite",
-                    claim_ids_json=uf.get("claim_ids") or [],
+                    claim_ids_json=uf_claim_ids,
                     gaps_json=draft.gaps,
-                    contradictions_json=[],
+                    contradictions_json=uf_contradictions,
                     unverified_json=[uf.get("unverified_reason", "Lacks grounded support")],
                 )
                 session.add(finding_row)

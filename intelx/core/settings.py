@@ -223,6 +223,71 @@ class Settings(BaseSettings):
         description="Webhook URL on StrateX for automated trade execution triggers",
     )
 
+    # Cortex Website Operations & Lead Intelligence Integration
+    CORTEX_BASE_URL: str = Field(
+        default="http://cortex:8000",
+        validation_alias=AliasChoices("INTELX_CORTEX_BASE_URL", "CORTEX_BASE_URL", "CORTEX_URL"),
+        description="Base URL for Cortex website and lead qualification engine",
+    )
+    CORTEX_API_KEY: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_CORTEX_API_KEY", "CORTEX_API_KEY"),
+        description="API key for Cortex integration",
+    )
+    CORTEX_WEBHOOK_URL: str | None = Field(
+        default="http://cortex:8000/api/v1/webhooks/intelx-lead-intel",
+        validation_alias=AliasChoices("INTELX_CORTEX_WEBHOOK_URL", "CORTEX_WEBHOOK_URL"),
+        description="Webhook URL on Cortex for website visitor and lead intelligence delivery",
+    )
+
+    # FRIDAY Central Desktop Operating System Integration
+    FRIDAY_BASE_URL: str = Field(
+        default="http://friday:10000",
+        validation_alias=AliasChoices("INTELX_FRIDAY_BASE_URL", "FRIDAY_BASE_URL", "FRIDAY_URL"),
+        description="Base URL for FRIDAY central desktop operating system",
+    )
+    FRIDAY_WEBHOOK_URL: str | None = Field(
+        default="http://friday:10000/api/v1/notifications",
+        validation_alias=AliasChoices("INTELX_FRIDAY_WEBHOOK_URL", "FRIDAY_WEBHOOK_URL"),
+        description="Webhook URL on FRIDAY central OS for research notifications",
+    )
+
+    # Sentinel Cybersecurity & Threat Defense Integration
+    SENTINEL_BASE_URL: str = Field(
+        default="http://sentinel:8000",
+        validation_alias=AliasChoices("INTELX_SENTINEL_BASE_URL", "SENTINEL_BASE_URL", "SENTINEL_URL"),
+        description="Base URL for Sentinel cybersecurity engine",
+    )
+    SENTINEL_API_KEY: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_SENTINEL_API_KEY", "SENTINEL_API_KEY"),
+        description="API key for Sentinel integration",
+    )
+
+    # Forge Software Engineering Integration
+    FORGE_BASE_URL: str = Field(
+        default="http://forge:8000",
+        validation_alias=AliasChoices("INTELX_FORGE_BASE_URL", "FORGE_BASE_URL", "FORGE_URL"),
+        description="Base URL for Forge software engineering engine",
+    )
+    FORGE_API_KEY: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_FORGE_API_KEY", "FORGE_API_KEY"),
+        description="API key for Forge integration",
+    )
+
+    # VyralX Growth & Social Viral Engine Integration
+    VYRALX_BASE_URL: str = Field(
+        default="http://vyralx:8000",
+        validation_alias=AliasChoices("INTELX_VYRALX_BASE_URL", "VYRALX_BASE_URL", "VYRALX_URL"),
+        description="Base URL for VyralX growth and viral engine",
+    )
+    VYRALX_API_KEY: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTELX_VYRALX_API_KEY", "VYRALX_API_KEY"),
+        description="API key for VyralX integration",
+    )
+
     # CORS Whitelist Configuration
     CORS_ORIGINS: list[str] = Field(
         default=[

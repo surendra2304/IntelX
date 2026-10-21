@@ -20,6 +20,7 @@ os.environ["INTELX_MOCK_MODE"] = "true"
 from intelx.app.factory import create_app  # noqa: E402
 from intelx.core.settings import get_settings  # noqa: E402
 from intelx.db.base import Base  # noqa: E402
+import intelx.db.models  # noqa: F401, E402
 from intelx.db.engine import get_async_engine  # noqa: E402
 
 

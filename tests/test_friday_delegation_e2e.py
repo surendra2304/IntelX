@@ -13,6 +13,13 @@ from intelx.orchestration.worker import OrchestrationWorker
 @pytest.mark.asyncio
 async def test_friday_delegation_pipeline_e2e(tmp_path):
     """Verify FRIDAY delegation -> Worker execution -> Findings with citations -> Report generation."""
+    from intelx.db.base import Base
+    from intelx.db.engine import get_async_engine
+
+    engine = get_async_engine()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
     settings = get_settings()
     settings.MOCK_MODE = True
     settings.FRIDAY_API_KEY = "friday-e2e-secret-key"

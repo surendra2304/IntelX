@@ -34,6 +34,11 @@ AUTONOMOUS_RESEARCH_TOPICS = [
         "objective": "Investigate recent cryptocurrency market volatility, regulatory signals, and Binance algorithmic trade catalysts",
     },
     {
+        "agent": "cortex",
+        "domain": "general",
+        "objective": "Investigate website visitor trends, B2B lead generation signals, conversion optimization, and prospective enterprise client domain reconnaissance",
+    },
+    {
         "agent": "sentinel",
         "domain": "security",
         "objective": "Analyze emerging zero-day exploits, CVE vulnerability advisories, and proactive cybersecurity defense mitigations",

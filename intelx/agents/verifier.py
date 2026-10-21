@@ -16,6 +16,10 @@ from intelx.agents.extractor import ExtractorAgent
 from intelx.agents.retriever import RetrieverAgent
 from intelx.agents.scout import ScoutAgent
 from intelx.core.confidence import compute_confidence_score
+from intelx.core.contradiction import (
+    DETERMINISTIC_CONTRADICTION_METHOD,
+    calculate_contradiction_confidence,
+)
 from intelx.core.credibility import SourceCredibilityScorer
 from intelx.core.enums import (
     ClaimStatus,
@@ -277,8 +281,12 @@ class VerifierAgent(BaseAgent):
 
             for claim in (claim_a, claim_b):
                 claim.status = ClaimStatus.DISPUTED
-                claim.confidence = min(claim.confidence, 0.35)
-                claim.confidence_method = "deterministic-contradiction-v1"
+                claim.confidence = calculate_contradiction_confidence(
+                    base_confidence=claim.confidence,
+                    has_contradiction=True,
+                    conflict_count=1,
+                )
+                claim.confidence_method = DETERMINISTIC_CONTRADICTION_METHOD
 
             if created_any:
                 await RunRepo.add_event(
