@@ -80,6 +80,7 @@ async def bounded_call(
     on_retry: Callable[[int, Exception, float], None] | None = None,
 ) -> Any:
     """Execute async function with exponential backoff and jitter, failing fast on non-retryable errors."""
+
     async def invoke() -> Any:
         result = fn()
         if not inspect.isawaitable(result):
