@@ -449,7 +449,6 @@ async def create_followup_job(
         session=session,
         objective=f"Followup: {req.focus}",
         scope_json=scope_dict,
-        parent_run_id=job_id,
         created_by=api_key.name,
     )
     await session.commit()

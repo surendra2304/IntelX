@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
 from intelx.core.auth import Principal, get_current_principal
@@ -16,6 +17,11 @@ router = APIRouter(prefix="/subscriptions", tags=["Continuous Research Subscript
 # In-memory subscription store for active fleet tracking
 _SUBSCRIPTIONS: dict[str, dict[str, Any]] = {}
 _delta_engine = DeltaResearch()
+
+
+def clear_subscriptions_for_testing() -> None:
+    """Clear in-memory subscriptions cache (testing only)."""
+    _SUBSCRIPTIONS.clear()
 
 
 class CreateSubscriptionRequest(BaseModel):
@@ -41,6 +47,22 @@ class SubscriptionResponse(BaseModel):
     created_at: str
 
 
+@router.get(
+    "",
+    response_model=list[SubscriptionResponse],
+    summary="List Continuous Research Subscriptions",
+)
+async def list_subscriptions(
+    principal: Principal = Depends(get_current_principal),
+) -> list[SubscriptionResponse]:
+    """List all continuous research subscriptions for the caller's tenant."""
+    results: list[SubscriptionResponse] = []
+    for sub in _SUBSCRIPTIONS.values():
+        if sub["tenant_id"] == principal.tenant_id or "*" in principal.scopes:
+            results.append(SubscriptionResponse(**sub))
+    return results
+
+
 @router.post(
     "",
     response_model=SubscriptionResponse,
@@ -63,7 +85,7 @@ async def create_subscription(
         "budget_usd": req.budget_usd,
         "status": "ACTIVE",
         "last_run_id": None,
-        "created_at": "2026-09-03T00:00:00Z",
+        "created_at": datetime.now(UTC).isoformat(),
     }
     _SUBSCRIPTIONS[sub_id] = record
     return SubscriptionResponse(**record)
@@ -129,3 +151,24 @@ async def resume_subscription(
         )
     sub["status"] = "ACTIVE"
     return SubscriptionResponse(**sub)
+
+
+@router.delete(
+    "/{subscription_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Cancel and Remove Subscription",
+)
+async def delete_subscription(
+    subscription_id: str,
+    principal: Principal = Depends(get_current_principal),
+) -> Response:
+    """Cancel and remove a research subscription."""
+    sub = _SUBSCRIPTIONS.get(subscription_id)
+    if not sub:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
+    if sub["tenant_id"] != principal.tenant_id and "*" not in principal.scopes:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Cross-tenant subscription access denied"
+        )
+    del _SUBSCRIPTIONS[subscription_id]
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
