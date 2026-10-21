@@ -102,9 +102,7 @@ class CheckpointManager:
             history = self.history.setdefault(stored.research_id, [])
             current_max = max((item.version for item in history), default=0)
             if stored.version <= current_max:
-                raise ValueError(
-                    f"checkpoint version must exceed existing version {current_max}"
-                )
+                raise ValueError(f"checkpoint version must exceed existing version {current_max}")
             history.append(stored)
             if len(history) > self.max_history_per_run:
                 del history[: len(history) - self.max_history_per_run]
