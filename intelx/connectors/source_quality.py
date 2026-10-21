@@ -34,6 +34,15 @@ PRIMARY_HINTS = (
 LOW_QUALITY_HINTS = ("pinterest", "quora", "forums", "aggregator", "unknown", "spam")
 
 
+def _matches_domain_or_subdomain(host: str, domain: str) -> bool:
+    """Match an exact DNS name or its subdomains, never an arbitrary substring."""
+    normalized_host = host.rstrip(".").lower()
+    normalized_domain = domain.rstrip(".").lower()
+    return normalized_host == normalized_domain or normalized_host.endswith(
+        "." + normalized_domain
+    )
+
+
 class SourceQuality:
     """Computes transparent, inspectable source credibility and ranking metrics."""
 
@@ -47,20 +56,31 @@ class SourceQuality:
         duplicate_count: int = 0,
     ) -> SourceScore:
         """Calculate weighted quality score across 5 core dimensions."""
-        host = (urlsplit(url).hostname or "").lower()
+        host = (urlsplit(url).hostname or "").lower().rstrip(".")
         authority = 0.55
-        if any(x in host for x in PRIMARY_HINTS):
+        if any(_matches_domain_or_subdomain(host, hint) for hint in PRIMARY_HINTS):
             authority += 0.30
-        if any(x in host for x in LOW_QUALITY_HINTS):
+        if set(host.split(".")) & set(LOW_QUALITY_HINTS):
             authority -= 0.20
 
         text = (title + " " + snippet).lower()
         matched = sum(1 for t in query_terms if t.lower() in text)
         relevance = min(1.0, matched / max(1, len(query_terms)))
 
-        freshness = (
-            1.0 if published_age_days is None else math.exp(-max(0, published_age_days) / 3650)
-        )
+        if published_age_days is None:
+            # Unknown age is not evidence that a source is maximally fresh.
+            freshness = 0.5
+        else:
+            try:
+                age_days = float(published_age_days)
+            except (TypeError, ValueError):
+                freshness = 0.0
+            else:
+                freshness = (
+                    math.exp(-age_days / 3650)
+                    if math.isfinite(age_days) and age_days >= 0
+                    else 0.0
+                )
         independence = 1.0 / (1.0 + duplicate_count * 0.5)
         accessibility = 0.95 if url.startswith(("https://", "http://")) else 0.60
 
