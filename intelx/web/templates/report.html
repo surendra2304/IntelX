@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}Report: {{ run.objective[:40] }} — IntelX{% endblock %}
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 20px;">
+  <div style="min-width: 0; flex: 1;">
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+      <a href="/research/{{ run.id }}" style="color: var(--text-muted); font-size: 12px; text-decoration: none; font-weight: 500;">&larr; Back to Job DAG</a>
+      <span style="color: var(--border-color);">&bull;</span>
+      <span style="font-size: 12px; color: var(--text-muted);">Completed {{ run.completed_at.strftime('%Y-%m-%d %H:%M UTC') if run.completed_at else '' }}</span>
+    </div>
+    <h1 style="font-size: 22px; font-weight: 800; color: var(--text-main); word-break: break-word;">{{ run.objective }}</h1>
+  </div>
+
+  <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+    {% for art in artifacts %}
+    <a href="/api/v1/artifacts/{{ art.id }}?format={{ art.format.value.lower() }}" download class="btn btn-secondary btn-sm">
+      Download {% if art.format.value.lower() == 'md' %}Report (.md){% elif 'evidence' in art.type.lower() or 'graph' in art.type.lower() %}Evidence (.json){% elif art.format.value.lower() == 'json' %}Report (.json){% elif art.format.value.lower() == 'csv' %}Claims (.csv){% else %}.{{ art.format.value.lower() }}{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Tabs Navigation -->
+<div class="tabs">
+  <button type="button" class="tab-btn active" data-tab="tab-report" onclick="switchTab('tab-report')">Research Report</button>
+  <button type="button" class="tab-btn" data-tab="tab-claims" onclick="switchTab('tab-claims')">Claims ({{ claims|length }})</button>
+  <button type="button" class="tab-btn" data-tab="tab-contra" onclick="switchTab('tab-contra')">Contradictions ({{ disputed_claims|length }})</button>
+  <button type="button" class="tab-btn" data-tab="tab-sources" onclick="switchTab('tab-sources')">Sources ({{ sources|length }})</button>
+  <button type="button" class="tab-btn" data-tab="tab-gaps" onclick="switchTab('tab-gaps')">Gaps & Degradations</button>
+  <button type="button" class="tab-btn" data-tab="tab-ecosystem" onclick="switchTab('tab-ecosystem')">Ecosystem Sync</button>
+</div>
+
+<!-- Tab 1: Rendered Report -->
+<div id="tab-report" class="tab-content active">
+  <div class="card">
+    <div class="report-content">
+      {{ report_html | safe }}
+    </div>
+  </div>
+</div>
+
+<!-- Tab 2: Claims Table -->
+<div id="tab-claims" class="tab-content">
+  <div class="card">
+    <div class="table-container">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Claim Proposition</th>
+            <th>Type</th>
+            <th>Confidence</th>
+            <th>Status</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in claims %}
+          <tr>
+            <td>
+              <button type="button" class="citation-badge citation-claim" onclick="openCitationDrawer('C', '{{ c.id }}')">[C:{{ c.id }}]</button>
+            </td>
+            <td style="font-weight: 500;">{{ c.text }}</td>
+            <td><code>{{ c.claim_type.value }}</code></td>
+            <td>{{ "%.1f"|format(c.confidence * 100) }}%</td>
+            <td><span class="status-chip status-{{ c.status.value.lower() }}">{{ c.status.value }}</span></td>
+            <td>
+              <button type="button" class="citation-badge citation-source" onclick="openCitationDrawer('S', '{{ c.source_id }}')">[S:{{ c.source_id }}]</button>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">No claims registered.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Tab 3: Contradictions -->
+<div id="tab-contra" class="tab-content">
+  <div class="card">
+    <div class="card-header"><h3 style="font-size: 15px; font-weight: 700;">Disputed Assertions & Contradictions</h3></div>
+    {% if disputed_claims %}
+    <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 12px;">
+      {% for dc in disputed_claims %}
+      <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius-md); padding: 14px;">
+        <div style="font-weight: 700; color: #b45309; margin-bottom: 4px;">Contested Assertion</div>
+        <div style="font-size: 14px; margin-bottom: 8px;">"{{ dc.text }}"</div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button type="button" class="citation-badge citation-claim" onclick="openCitationDrawer('C', '{{ dc.id }}')">[C:{{ dc.id }}]</button>
+          <button type="button" class="citation-badge citation-source" onclick="openCitationDrawer('S', '{{ dc.source_id }}')">[S:{{ dc.source_id }}]</button>
+          <span class="status-chip status-review_required">DISPUTED</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 16px 0;">No contradictions or disputed assertions identified. Evidence consensus achieved.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Tab 4: Sources -->
+<div id="tab-sources" class="tab-content">
+  <div class="card">
+    <div class="table-container">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Title</th>
+            <th>Domain</th>
+            <th>Trust Tier</th>
+            <th>Risk</th>
+            <th>Published</th>
+            <th>Retrieved</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in sources %}
+          <tr>
+            <td>
+              <button type="button" class="citation-badge citation-source" onclick="openCitationDrawer('S', '{{ s.id }}')">[S:{{ s.id }}]</button>
+            </td>
+            <td style="font-weight: 600;">{{ s.title or 'Untitled' }}</td>
+            <td><code>{{ s.domain or 'local' }}</code></td>
+            <td><span class="tier-badge tier-{{ s.trust_tier.value.lower() }}">{{ s.trust_tier.value }}</span></td>
+            <td>
+              {% if s.injection_risk %}
+              <span style="color: var(--color-red); font-weight: 700;">⚠️ Risk</span>
+              {% else %}
+              <span style="color: var(--color-green);">Clean</span>
+              {% endif %}
+            </td>
+              <td style="font-size: 12px; color: var(--text-muted);">
+                {% if s.published_at %}{{ s.published_at.strftime('%Y-%m-%d %H:%M') }}{% else %}Not recorded; freshness unknown{% endif %}
+              </td>
+              <td style="font-size: 12px; color: var(--text-muted);">
+                {{ s.retrieved_at.strftime('%Y-%m-%d %H:%M') if s.retrieved_at else 'Not recorded' }}
+                <div>Retrieval time does not establish currentness.</div>
+              </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 20px;">No sources ingested.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Tab 5: Gaps -->
+<div id="tab-gaps" class="tab-content">
+  <div class="card">
+    <div class="card-header"><h3 style="font-size: 15px; font-weight: 700;">Identified Epistemic Gaps</h3></div>
+    <ul class="report-list" style="margin-top: 12px;">
+      {% if findings %}
+        {% for f in findings %}
+          {% for gap in f.gaps_json %}
+          <li>{{ gap }}</li>
+          {% endfor %}
+        {% endfor %}
+      {% else %}
+        <li>No unresolved empirical gaps documented.</li>
+      {% endif %}
+    </ul>
+  </div>
+</div>
+
+<!-- Tab 6: Ecosystem Sync (Futuris & StrateX) -->
+<div id="tab-ecosystem" class="tab-content">
+  <div class="card">
+    <div class="card-header">
+      <h3 style="font-size: 15px; font-weight: 700;">FRIDAY Universe Ecosystem Collaboration</h3>
+      <span style="font-size: 12px; color: var(--text-muted);">Real-time cross-agent context synchronization</span>
+    </div>
+    
+    <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 16px;">
+      IntelX empirical research directly drives predictive probabilistic forecasting in <strong>Futuris</strong> and algorithmic market execution in <strong>StrateX</strong>. Trigger on-demand synchronization below or verify automated signal delivery.
+    </p>
+
+    <label for="sync-finding" style="display:block; margin:12px 0 6px;">Select a finding from this research run</label>
+    <select id="sync-finding" required style="width:100%; margin-bottom:16px;">
+      <option value="">Choose a saved finding…</option>
+      {% for finding in findings %}
+      <option value="{{ finding.conclusion }}">{{ finding.conclusion[:180] }}</option>
+      {% endfor %}
+    </select>
+
+    <div class="ecosystem-grid">
+      <!-- Futuris Card -->
+      <div class="ecosystem-card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h4 style="font-size: 15px; font-weight: 700; color: var(--text-main);">📈 Futuris Forecasting</h4>
+          <span class="ecosystem-status-badge">Status not checked</span>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted);">
+          Exchanges qualitative exogenous findings, temporal event sequence, and source credibility metrics to trigger automatic recalibration of forecast models.
+        </p>
+        <div style="margin-top: auto; padding-top: 10px; display: flex; gap: 8px;">
+          <button type="button" class="btn btn-primary btn-sm" id="btn-sync-futuris" onclick="syncWithFuturis('{{ run.id }}')">
+            Trigger Futuris Forecast
+          </button>
+        </div>
+        <div id="status-futuris" style="font-size: 12px; color: var(--text-muted); margin-top: 6px;"></div>
+      </div>
+
+      <!-- StrateX Card -->
+      <div class="ecosystem-card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h4 style="font-size: 15px; font-weight: 700; color: var(--text-main);">⚡ StrateX Quant Execution</h4>
+          <span class="ecosystem-status-badge">Status not checked</span>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted);">
+          Extracts sentiment drivers, regulatory catalysts, and macroeconomic shifts to inform Binance futures algorithmic strategies and risk overlays.
+        </p>
+        <div style="margin-top: auto; padding-top: 10px; display: flex; gap: 8px;">
+          <button type="button" class="btn btn-primary btn-sm" id="btn-sync-stratex" onclick="syncWithStratex('{{ run.id }}')">
+            Dispatch StrateX Trade Signal
+          </button>
+        </div>
+        <div id="status-stratex" style="font-size: 12px; color: var(--text-muted); margin-top: 6px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

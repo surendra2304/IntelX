@@ -1,0 +1,621 @@
+"""Tests for INTELX REST API Surface, Auth, Rate Limiting, Policies, and Lifecycle."""
+
+import asyncio
+from pathlib import Path
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
+from sqlalchemy import select
+
+from intelx.api.router import ScrapePayload, SearchPayload, SummarizePayload
+from intelx.api.v1.endpoints import CreateJobRequest
+from intelx.app.factory import create_app
+from intelx.core.auth import hash_api_key, rate_limiter
+from intelx.core.enums import ApiKeyRole, ArtifactFormat, ArtifactType, ClaimStatus, RunStatus
+from intelx.db.models import ApiKey, Artifact
+from intelx.db.repos import ClaimRepo, RunRepo
+from intelx.db.session import get_sessionmaker
+from intelx.orchestration.worker import OrchestrationWorker
+
+
+def test_create_job_accepts_legacy_budget_location_and_validates_limits():
+    request = CreateJobRequest.model_validate(
+        {
+            "objective": "Analyze a documented technical question",
+            "scope": {
+                "depth": "quick",
+                "budget": {"max_usd": 1.25, "max_minutes": 7},
+            },
+        }
+    )
+    assert request.budget.max_usd == 1.25
+    assert request.budget.max_minutes == 7
+    assert "budget" not in request.scope.model_dump()
+
+    with pytest.raises(ValidationError):
+        CreateJobRequest.model_validate(
+            {
+                "objective": "Analyze a documented technical question",
+                "budget": {"max_usd": -0.01},
+            }
+        )
+    with pytest.raises(ValidationError):
+        CreateJobRequest.model_validate(
+            {
+                "objective": "Analyze a documented technical question",
+                "budget": {"max_minutes": 0},
+            }
+        )
+
+
+@pytest_asyncio.fixture
+async def app_client():
+    """Create test client with initialized database schemas and seeded API keys."""
+    app = create_app()
+    admin_key_raw = "intelx_admin_secret_test_key"
+    member_key_raw = "intelx_member_secret_test_key"
+
+    # Seed keys directly into test database
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        # Admin key
+        k_admin = ApiKey(
+            key_hash=hash_api_key(admin_key_raw),
+            name="test-admin",
+            role=ApiKeyRole.ADMIN,
+        )
+        # Member key
+        k_member = ApiKey(
+            key_hash=hash_api_key(member_key_raw),
+            name="test-member",
+            role=ApiKeyRole.MEMBER,
+        )
+        session.add_all([k_admin, k_member])
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        client.admin_headers = {"Authorization": f"Bearer {admin_key_raw}"}
+        client.member_headers = {"Authorization": f"Bearer {member_key_raw}"}
+        yield client
+
+
+@pytest.mark.asyncio
+async def test_auth_401_and_403_and_idempotent_replay(app_client):
+    """Verify 401 on missing/invalid auth, 403 on role violation, and 200 on idempotent replay."""
+    # 1. 401 Unauthorized
+    res_no_auth = await app_client.get("/api/v1/research/jobs")
+    assert res_no_auth.status_code == 401
+
+    res_bad_auth = await app_client.get(
+        "/api/v1/research/jobs", headers={"Authorization": "Bearer bad_secret"}
+    )
+    assert res_bad_auth.status_code == 401
+
+    # 2. 403 Forbidden (member attempting admin endpoint)
+    res_403 = await app_client.get("/api/v1/policies", headers=app_client.member_headers)
+    assert res_403.status_code == 403
+
+    # Admin access allowed
+    res_admin = await app_client.get("/api/v1/policies", headers=app_client.admin_headers)
+    assert res_admin.status_code == 200
+
+    # 3. Idempotent Job Submission Replay
+    payload = {"objective": "Assess fusion reactor plasma containment progress"}
+    headers_idem = {
+        **app_client.member_headers,
+        "Idempotency-Key": "idem-key-fusion-123",
+    }
+
+    res_first = await app_client.post("/api/v1/research/jobs", json=payload, headers=headers_idem)
+    assert res_first.status_code == 202
+    job_id = res_first.json()["id"]
+
+    # Replay within 24h -> returns 200 with same job_id
+    res_replay = await app_client.post("/api/v1/research/jobs", json=payload, headers=headers_idem)
+    assert res_replay.status_code == 200
+    assert res_replay.json()["id"] == job_id
+
+
+@pytest.mark.asyncio
+async def test_rate_limiter_429(app_client):
+    """Verify rate limiter triggers 429 when threshold exceeded."""
+    test_key_raw = "intelx_rate_limit_test_key"
+    test_hash = hash_api_key(test_key_raw)
+
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        session.add(
+            ApiKey(
+                key_hash=test_hash,
+                name="rate-limit-test",
+                role=ApiKeyRole.MEMBER,
+            )
+        )
+        await session.commit()
+
+    hdrs = {"Authorization": f"Bearer {test_key_raw}"}
+
+    # Artificially fill rate limiter bucket
+    for _ in range(120):
+        rate_limiter.check_rate_limit(test_hash, limit=120)
+
+    # 121st request -> 429 Too Many Requests
+    res = await app_client.get("/api/v1/research/jobs", headers=hdrs)
+    assert res.status_code == 429
+    assert "Retry-After" in res.headers
+
+
+@pytest.mark.asyncio
+async def test_full_api_lifecycle_and_artifact_download(app_client):
+    """Verify submit -> execute -> poll events -> download report.md + report.json."""
+    fixture_path = (
+        Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt"
+    ).resolve()
+    payload = {
+        "objective": "Evaluate solid-state electrolyte conductivity",
+        "scope": {"depth": "standard", "allowed_domains": ["local"]},
+        "budget": {"max_usd": 5.0, "max_minutes": 10},
+    }
+
+    # 1. Submit Job
+    res = await app_client.post(
+        "/api/v1/research/jobs", json=payload, headers=app_client.member_headers
+    )
+    assert res.status_code == 202
+    job_id = res.json()["id"]
+
+    # Ingest a source and claim associated with this run for testing synthesis
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        from intelx.memory.normalize import ingest_and_normalize
+
+        text_content = fixture_path.read_text(encoding="utf-8")
+        source, doc, chunks, _ = await ingest_and_normalize(
+            session=session,
+            raw_bytes=text_content.encode("utf-8"),
+            location=str(fixture_path),
+            kind="FILE",
+            created_by_run_id=job_id,
+        )
+        quote = "significant thermal stability"
+        sp_start = text_content.index(quote)
+        sp_end = sp_start + len(quote)
+        await ClaimRepo.create_claim(
+            session=session,
+            run_id=job_id,
+            source_id=source.id,
+            document_id=doc.id,
+            chunk_id=chunks[0].id,
+            text_content="Electrolyte shows significant thermal stability across cycles.",
+            quote=quote,
+            span_start=sp_start,
+            span_end=sp_end,
+            claim_type="FACT",
+        )
+        await session.commit()
+
+    # 2. Run background worker on the queued job
+    worker = OrchestrationWorker()
+    processed = await worker.run_once(sessionmaker)
+    assert processed is True
+
+    # 3. Check Job Status
+    res_job = await app_client.get(
+        f"/api/v1/research/jobs/{job_id}", headers=app_client.member_headers
+    )
+    assert res_job.status_code == 200
+    assert res_job.json()["status"] == "COMPLETED"
+
+    # 4. Check Events
+    res_events = await app_client.get(
+        f"/api/v1/research/jobs/{job_id}/events",
+        headers=app_client.member_headers,
+    )
+    assert res_events.status_code == 200
+    assert len(res_events.json()) >= 3
+
+    # 5. List Artifacts
+    res_art = await app_client.get(
+        f"/api/v1/research/jobs/{job_id}/artifacts",
+        headers=app_client.member_headers,
+    )
+    assert res_art.status_code == 200
+    artifacts = res_art.json()
+    assert len(artifacts) == 4
+
+    # 6. Download Artifacts
+    md_art = next(a for a in artifacts if a["format"] == "MD")
+    res_md = await app_client.get(
+        f"/api/v1/artifacts/{md_art['id']}?format=md",
+        headers=app_client.member_headers,
+    )
+    assert res_md.status_code == 200
+    assert "# Research Report:" in res_md.text
+
+    json_art = next(a for a in artifacts if a["format"] == "JSON")
+    res_json = await app_client.get(
+        f"/api/v1/artifacts/{json_art['id']}?format=json",
+        headers=app_client.member_headers,
+    )
+    assert res_json.status_code == 200
+    assert res_json.json()["schema_version"] == "v1.0"
+
+
+@pytest.mark.asyncio
+async def test_job_resources_are_hidden_from_other_member_keys(app_client):
+    """Runs, event streams, artifacts, and follow-ups must remain owner-scoped."""
+    other_key = "intelx_second_member_secret_test_key"
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        session.add(
+            ApiKey(
+                key_hash=hash_api_key(other_key),
+                name="test-member-2",
+                role=ApiKeyRole.MEMBER,
+            )
+        )
+        await session.commit()
+
+    create_response = await app_client.post(
+        "/api/v1/research/jobs",
+        json={"objective": "Trace ownership for this private research run"},
+        headers=app_client.member_headers,
+    )
+    assert create_response.status_code == 202
+    job_id = create_response.json()["id"]
+
+    async with sessionmaker() as session:
+        session.add(
+            Artifact(
+                run_id=job_id,
+                type=ArtifactType.REPORT,
+                format=ArtifactFormat.MD,
+                path="/missing/private-report.md",
+                sha256="0" * 64,
+            )
+        )
+        await session.commit()
+        artifact_id = (
+            await session.execute(select(Artifact.id).where(Artifact.run_id == job_id))
+        ).scalar_one()
+
+    other_headers = {"Authorization": f"Bearer {other_key}"}
+    private_requests = [
+        app_client.get(f"/api/v1/research/jobs/{job_id}", headers=other_headers),
+        app_client.get(f"/api/v1/research/jobs/{job_id}/events", headers=other_headers),
+        app_client.get(f"/api/v1/research/jobs/{job_id}/events?stream=true", headers=other_headers),
+        app_client.get(f"/api/v1/research/jobs/{job_id}/artifacts", headers=other_headers),
+        app_client.get(f"/api/v1/artifacts/{artifact_id}", headers=other_headers),
+        app_client.post(
+            f"/api/v1/research/jobs/{job_id}/followups",
+            json={"focus": "challenge the original evidence"},
+            headers=other_headers,
+        ),
+    ]
+    responses = await asyncio.gather(*private_requests)
+    assert [response.status_code for response in responses] == [404] * len(private_requests)
+
+    owner_response = await app_client.get(
+        f"/api/v1/research/jobs/{job_id}", headers=app_client.member_headers
+    )
+    assert owner_response.status_code == 200
+    admin_response = await app_client.get(
+        f"/api/v1/research/jobs/{job_id}", headers=app_client.admin_headers
+    )
+    assert admin_response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_job_cancellation_lifecycle(app_client):
+    """Verify cancel on active job returns 200 and cancel on completed job returns 409."""
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        run_active = await RunRepo.create_run(
+            session,
+            objective="Active job cancellation test",
+            created_by="test-member",
+        )
+        run_completed = await RunRepo.create_run(
+            session,
+            objective="Completed job cancellation test",
+            created_by="test-member",
+        )
+        run_completed.status = RunStatus.COMPLETED
+        await session.commit()
+        active_id = run_active.id
+        completed_id = run_completed.id
+
+    # 1. Cancel Active Job -> 200
+    res_cancel_active = await app_client.post(
+        f"/api/v1/research/jobs/{active_id}/cancel",
+        headers=app_client.member_headers,
+    )
+    assert res_cancel_active.status_code == 200
+    assert res_cancel_active.json()["status"] == "CANCELLED"
+
+    # 2. Cancel Completed Job -> 409 Conflict
+    res_cancel_comp = await app_client.post(
+        f"/api/v1/research/jobs/{completed_id}/cancel",
+        headers=app_client.member_headers,
+    )
+    assert res_cancel_comp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_policy_denial_and_audit(app_client):
+    """Verify denylisting a domain blocks execution and writes an audit event."""
+    # 1. Update Policy via Admin PUT
+    new_policy = {
+        "domain_denylist": ["untrusted-domain.com"],
+        "max_sources_per_run": 25,
+        "allowed_connector_kinds": ["HTTP", "SEARCH", "FILE"],
+        "blocked_file_extensions": [".exe", ".bat"],
+        "max_run_usd": 15.0,
+        "max_run_minutes": 45,
+    }
+    res_put = await app_client.put(
+        "/api/v1/policies", json=new_policy, headers=app_client.admin_headers
+    )
+    assert res_put.status_code == 200
+    assert res_put.json()["config"]["domain_denylist"] == ["untrusted-domain.com"]
+
+    # 2. Verify Audit Log contains policy.updated
+    res_audit = await app_client.get("/api/v1/audit", headers=app_client.admin_headers)
+    assert res_audit.status_code == 200
+    actions = [a["action"] for a in res_audit.json()]
+    assert "policy.updated" in actions
+
+    # 3. Verify Cryptographic Audit Verification endpoint
+    res_verify = await app_client.get("/api/v1/audit/verify", headers=app_client.admin_headers)
+    assert res_verify.status_code == 200
+    assert res_verify.json()["valid"] is True
+
+
+@pytest.mark.asyncio
+async def test_claim_retraction_audit(app_client):
+    """Verify claim retraction updates status and writes an audit ledger entry."""
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        from intelx.memory.normalize import ingest_and_normalize
+
+        run = await RunRepo.create_run(session, objective="Claim retraction test")
+        text = "Erronous benchmark measurement data."
+        source, doc, chunks, _ = await ingest_and_normalize(
+            session=session,
+            raw_bytes=text.encode("utf-8"),
+            location="local_test.txt",
+            kind="FILE",
+        )
+        quote = "benchmark measurement"
+        sp_start = text.index(quote)
+        sp_end = sp_start + len(quote)
+        claim = await ClaimRepo.create_claim(
+            session=session,
+            run_id=run.id,
+            source_id=source.id,
+            document_id=doc.id,
+            chunk_id=chunks[0].id,
+            text_content="Erronous benchmark measurement.",
+            quote=quote,
+            span_start=sp_start,
+            span_end=sp_end,
+            claim_type="MEASUREMENT",
+        )
+        await session.commit()
+        claim_id = claim.id
+
+    # Retract claim via Admin POST
+    res_retract = await app_client.post(
+        f"/api/v1/knowledge/claims/{claim_id}/retract",
+        json={"reason": "Lab equipment calibration failure invalidated readings."},
+        headers=app_client.admin_headers,
+    )
+    assert res_retract.status_code == 200
+    assert res_retract.json()["status"] == "RETRACTED"
+
+    # Verify claim status in DB
+    async with sessionmaker() as session:
+        updated_claim = await ClaimRepo.get_claim(session, claim_id)
+        assert updated_claim.status == ClaimStatus.RETRACTED
+        assert "calibration failure" in updated_claim.retraction_reason
+
+
+def test_core_search_and_scrape_payloads_validate_bounds():
+    with pytest.raises(ValidationError):
+        SearchPayload(query="valid search", limit=0)
+    with pytest.raises(ValidationError):
+        SearchPayload(query="x" * 1_001)
+    with pytest.raises(ValidationError):
+        ScrapePayload(url="https://example.com", max_bytes=0)
+    with pytest.raises(ValidationError):
+        ScrapePayload(url="https://example.com", max_bytes=10_000_001)
+    with pytest.raises(ValidationError):
+        SummarizePayload(text="text", max_length=0)
+
+
+@pytest.mark.asyncio
+async def test_post_search_honors_body_limit_and_reports_live_failure(monkeypatch):
+    import intelx.api.router as router_module
+
+    class FakeResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    class FakeSession:
+        async def execute(self, _statement):
+            return FakeResult()
+
+    observed = {}
+
+    class BrokenWebSearch:
+        async def fetch(self, search_query, max_results):
+            observed["query"] = search_query
+            observed["max_results"] = max_results
+            raise OSError("upstream is offline")
+
+    monkeypatch.setattr(router_module, "WebSearchConnector", BrokenWebSearch)
+    result = await router_module.api_search(
+        query=None,
+        limit=10,
+        body=SearchPayload(query="  battery safety  ", limit=3),
+        session=FakeSession(),
+    )
+
+    assert observed == {"query": "battery safety", "max_results": 3}
+    assert result["query"] == "battery safety"
+    assert result["total_results"] == 0
+    assert result["web_search_status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_scrape_route_passes_byte_limit_and_normalizes_fetched_body(monkeypatch):
+    from types import SimpleNamespace
+
+    import intelx.api.router as router_module
+
+    html = (
+        b"<html><head><title>Research Page</title></head><body>"
+        b"<nav>Navigation noise</nav><main><h1>Battery benchmark</h1>"
+        b"<p>Measured energy density is 250 Wh/kg.</p></main></body></html>"
+    )
+    observed = {}
+
+    class FakeFetchConnector:
+        async def fetch(self, url, **kwargs):
+            observed["url"] = url
+            observed["max_bytes"] = kwargs["max_bytes"]
+            return SimpleNamespace(
+                url=url,
+                final_url="https://example.com/final",
+                content=html,
+                content_type="text/html",
+                status_code=200,
+                robots_ok=True,
+                headers={"content-type": "text/html"},
+            )
+
+    monkeypatch.setattr(router_module, "HttpFetchConnector", FakeFetchConnector)
+    result = await router_module.api_scrape(
+        ScrapePayload(url="https://example.com", max_bytes=4_096)
+    )
+
+    assert observed == {"url": "https://example.com", "max_bytes": 4_096}
+    assert result["status"] == "ok"
+    assert result["title"] == "Research Page"
+    assert result["content_length"] == len(html)
+    assert result["final_url"] == "https://example.com/final"
+    assert "Battery benchmark" in result["text"]
+    assert "Navigation noise" not in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_scrape_route_reports_robots_denial_without_empty_success(monkeypatch):
+    from types import SimpleNamespace
+
+    import intelx.api.router as router_module
+
+    class DisallowedFetchConnector:
+        async def fetch(self, url, **kwargs):
+            return SimpleNamespace(
+                url=url,
+                final_url=url,
+                content=b"",
+                content_type="text/html",
+                status_code=403,
+                robots_ok=False,
+                error="Disallowed by robots.txt",
+            )
+
+    monkeypatch.setattr(router_module, "HttpFetchConnector", DisallowedFetchConnector)
+    result = await router_module.api_scrape(ScrapePayload(url="https://example.com"))
+
+    assert result["status"] == "error"
+    assert result["status_code"] == 403
+    assert "robots.txt" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_openapi_schema_generation(app_client):
+    """Verify OpenAPI JSON schema generates cleanly and includes all v1 routes."""
+    res = await app_client.get("/openapi.json")
+    assert res.status_code == 200
+    schema = res.json()
+    paths = schema.get("paths", {})
+
+    assert "/api/v1/research/jobs" in paths
+    assert "/api/v1/research/jobs/{job_id}" in paths
+    assert "/api/v1/research/jobs/{job_id}/cancel" in paths
+    assert "/api/v1/research/jobs/{job_id}/events" in paths
+    assert "/api/v1/research/jobs/{job_id}/artifacts" in paths
+    assert "/api/v1/artifacts/{artifact_id}" in paths
+    assert "/api/v1/research/jobs/{job_id}/followups" in paths
+    assert "/api/v1/research/jobs/{job_id}/review" in paths
+    assert "/api/v1/knowledge/query" in paths
+    assert "/api/v1/sources/{source_id}/trust" in paths
+    assert "/api/v1/knowledge/claims/{claim_id}/retract" in paths
+    assert "/api/v1/policies" in paths
+    assert "/api/v1/audit" in paths
+    assert "/api/v1/audit/verify" in paths
+
+
+@pytest.mark.asyncio
+async def test_mock_job_api_and_worker_completion(app_client):
+    """Verify POST /api/v1/research/jobs in Mock Mode executes via worker to COMPLETED with claims > 0."""
+    # 1. Submit research job via API
+    res = await app_client.post(
+        "/api/v1/research/jobs",
+        json={
+            "objective": "Assess next-generation layered oxide sodium-ion cathode benchmarks, energy density limits, and thermal runaway thresholds",
+            "depth": "standard",
+            "max_sources": 5,
+            "budget_usd": 5.0,
+            "budget_minutes": 10,
+        },
+        headers=app_client.member_headers,
+    )
+    assert res.status_code == 202
+    job_data = res.json()
+    job_id = job_data["id"]
+    assert job_data["status"] == "QUEUED"
+
+    # 2. Process job through OrchestrationWorker loop
+    sessionmaker = get_sessionmaker()
+    worker = OrchestrationWorker()
+    await worker.run_once(sessionmaker)
+
+    # 3. Verify job status, outcome, and nonzero cost via API
+    res_job = await app_client.get(
+        f"/api/v1/research/jobs/{job_id}",
+        headers=app_client.member_headers,
+    )
+    assert res_job.status_code == 200
+    finished_data = res_job.json()
+    assert finished_data["status"] == "COMPLETED"
+    assert finished_data["outcome"] in ("ANSWERED", "INSUFFICIENT_EVIDENCE")
+    assert finished_data["usd_cost"] > 0.0
+    assert finished_data["input_tokens"] > 0
+    assert finished_data["output_tokens"] > 0
+
+    # 4. Verify claims and artifacts exist
+    from sqlalchemy import select
+
+    from intelx.db.models import Artifact, Claim
+
+    async with sessionmaker() as session:
+        claims = list(
+            (await session.execute(select(Claim).where(Claim.run_id == job_id))).scalars().all()
+        )
+        assert len(claims) >= 3
+        assert any(c.status == ClaimStatus.ACTIVE for c in claims)
+
+        arts = list(
+            (await session.execute(select(Artifact).where(Artifact.run_id == job_id)))
+            .scalars()
+            .all()
+        )
+        assert len(arts) >= 1

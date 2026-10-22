@@ -1,0 +1,8 @@
+# High-Capacity Silicon Anode Energy Density Characterization
+Published: 2026-05-01
+Domain: nature.com
+Publisher: Springer Nature
+
+In this work, silicon-graphite composite anodes paired with nickel-rich cathodes demonstrated a gravimetric cell energy density of 420 Wh/kg.
+The porous carbon matrix accommodated up to 280% volumetric expansion without mechanical pulverization.
+Initial Coulombic efficiency reached 89.4% with full electrolyte compatibility.

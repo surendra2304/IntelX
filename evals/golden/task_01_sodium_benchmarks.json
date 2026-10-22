@@ -1,0 +1,21 @@
+{
+  "id": "task_01_sodium_benchmarks",
+  "objective": "Assess sodium-ion cathode benchmarks and thermal stability",
+  "fixture_docs": [
+    "evals/fixtures/sodium_lab_2026.txt"
+  ],
+  "expected": {
+    "must_find_claims": [
+      "160 Wh/kg",
+      "thermal stability"
+    ],
+    "must_cite_domains": [
+      "nature-energy.org"
+    ],
+    "must_not_claim": [
+      "perpetual motion"
+    ],
+    "expected_contradictions": [],
+    "expected_outcome": "ANSWERED"
+  }
+}

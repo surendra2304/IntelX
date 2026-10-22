@@ -1,0 +1,44 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: intelx
+    restart: unless-stopped
+    ports:
+      - "8005:8000"
+    environment:
+      - PORT=8000
+      - INTELX_ENV=production
+      - INTELX_MOCK_MODE=false
+      - INTELX_DB_URL=sqlite+aiosqlite:////app/data/intelx.db
+      - INTELX_DATA_DIR=/app/data
+      - INTELX_API_KEYS=${INTELX_API_KEYS:-}
+      - INTELX_API_KEY=${INTELX_API_KEY:-}
+      - INTELX_SECRET_KEY=${INTELX_SECRET_KEY:-}
+      - INTELX_LLM_PROVIDER=inference
+      - INTELX_INFERENCE_URL=${INTELX_INFERENCE_URL:-http://inference:8000}
+      - INTELX_LLM_MODEL=${INTELX_LLM_MODEL:-auto}
+      - INTELX_INFERENCE_API_KEY=${INTELX_INFERENCE_API_KEY:-}
+      - INTELX_MEMORA_URL=${INTELX_MEMORA_URL:-http://memora:8000}
+      - INTELX_RUN_EMBEDDED_WORKER=true
+    volumes:
+      - intelx_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - friday_mesh
+
+volumes:
+  intelx_data:
+    driver: local
+
+networks:
+  friday_mesh:
+    external: true

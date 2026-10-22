@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Audit Trail — IntelX{% endblock %}
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+  <div>
+    <h1 style="font-size: 22px; font-weight: 800; color: var(--text-main);">Cryptographic Audit Ledger</h1>
+    <p style="color: var(--text-muted); font-size: 13px;">Tamper-evident append-only SHA-256 hash chained governance events</p>
+  </div>
+  
+  <div>
+    {% if chain_valid %}
+    <span style="background: var(--color-green-bg); color: var(--color-green); padding: 6px 14px; border-radius: var(--radius-md); font-weight: 700; font-size: 13px; border: 1px solid #bbf7d0;">
+      ✓ Audit Chain Intact & Verified
+    </span>
+    {% else %}
+    <span style="background: var(--color-red-bg); color: var(--color-red); padding: 6px 14px; border-radius: var(--radius-md); font-weight: 700; font-size: 13px; border: 1px solid #fecaca;">
+      ⚠ Audit Chain Integrity Alert
+    </span>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2 style="font-size: 16px; font-weight: 700;">Audit Events ({{ events|length }})</h2>
+  </div>
+
+  <div class="table-container">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Timestamp</th>
+          <th>Actor</th>
+          <th>Action</th>
+          <th>Target Object</th>
+          <th>Details</th>
+          <th>SHA-256 Block Hash</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ev in events %}
+        <tr>
+          <td style="font-family: var(--font-mono); font-size: 11px;">#{{ ev.id }}</td>
+          <td style="font-size: 12px; color: var(--text-muted);">{{ ev.ts.strftime('%Y-%m-%d %H:%M:%S UTC') }}</td>
+          <td><strong>{{ ev.actor }}</strong></td>
+          <td><code>{{ ev.action }}</code></td>
+          <td>{{ ev.object_type }}:{{ ev.object_id[:10] }}</td>
+          <td style="font-size: 12px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            {{ ev.detail_json }}
+          </td>
+          <td>
+            <code style="font-size: 10px; color: var(--text-muted);" title="{{ ev.hash }}">{{ ev.hash[:16] }}...</code>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 24px;">No audit records logged.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

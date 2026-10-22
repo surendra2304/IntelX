@@ -1,0 +1,9 @@
+# Historical Overview: Early Sodium-Ion Chemistry
+Published: 2021-01-10
+Domain: archive-chem.org
+Publisher: Academic Archive
+
+Early commercial assessments of sodium-ion battery prototypes indicate strict physical limitations.
+Prussian blue analogs currently achieve a maximum energy density of 90 Wh/kg, which is inadequate for electric vehicles.
+Cycle life degrades rapidly beyond 300 cycles with substantial capacity fading.
+Thermal runaway limits remain uncharacterized across wide temperature swings.

@@ -1,0 +1,241 @@
+"""INTELX Scout Agent: Multi-Angle Query Portfolio Discovery and Source Quality Ranking."""
+
+import logging
+import urllib.parse
+from typing import Any
+
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from intelx.agents.base import BaseAgent
+from intelx.agents.planner import Plan
+from intelx.agents.query_planner import QueryPortfolioPlanner
+from intelx.connectors.base import default_policy_guard
+from intelx.connectors.search import WebSearchConnector
+from intelx.connectors.source_quality import SourceQuality
+from intelx.core.errors import ProviderError
+from intelx.core.settings import get_settings
+from intelx.db.repos import ClaimRepo
+from intelx.models.gateway import ModelGateway
+
+logger = logging.getLogger(__name__)
+
+
+class SourceCandidate(BaseModel):
+    """Potential evidence source identified for retrieval."""
+
+    location: str
+    title: str
+    reason: str
+    expected_relevance: float = Field(default=0.8, ge=0.0, le=1.0)
+    snippet: str | None = None
+
+
+class ScoutOutput(BaseModel):
+    """Collection of ranked source candidates and partial search failures."""
+
+    candidates: list[SourceCandidate] = Field(default_factory=list, max_length=8)
+    search_failures: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ScoutAgent(BaseAgent):
+    """Agent discovering external web sources and reusable internal knowledge via query portfolios."""
+
+    def __init__(
+        self,
+        gateway: ModelGateway | None = None,
+        search_connector: WebSearchConnector | None = None,
+    ) -> None:
+        super().__init__(role="scout", name="ScoutAgent", gateway=gateway)
+        self.search_connector = search_connector or WebSearchConnector()
+        self.portfolio_planner = QueryPortfolioPlanner()
+        self.source_quality = SourceQuality()
+
+    async def execute(
+        self,
+        subquestion: str,
+        plan: Plan | None = None,
+        already_seen: set[str] | list[str] | None = None,
+        session: AsyncSession | None = None,
+        run_id: str | None = None,
+        **kwargs: Any,
+    ) -> ScoutOutput:
+        """Scout external web sources and local knowledge base for relevant candidates."""
+        seen_set = set(already_seen or [])
+        candidates: list[SourceCandidate] = []
+        settings = get_settings()
+
+        # 1. Search existing internal knowledge base via FTS5
+        if session:
+            try:
+                core_kw = self.portfolio_planner.keywords(subquestion)
+                fts_query = " ".join(core_kw[:4]) if core_kw else subquestion[:30]
+                fts_chunks = await ClaimRepo.search_chunks_fts(session, fts_query)
+                for chunk in fts_chunks[:3]:
+                    loc = f"internal://chunk/{chunk.id}"
+                    if loc not in seen_set:
+                        seen_set.add(loc)
+                        candidates.append(
+                            SourceCandidate(
+                                location=loc,
+                                title=f"Internal Knowledge: {chunk.text[:60]}...",
+                                reason="Relevant existing knowledge in local corpus",
+                                expected_relevance=0.85,
+                            )
+                        )
+            except Exception as e:
+                logger.debug(f"Internal knowledge FTS lookup skipped: {e}")
+
+            # Also discover from ingested FRIDAY Universe sources in database
+            try:
+                from sqlalchemy import and_, select
+
+                from intelx.db.models import Source
+
+                db_stop_words = {
+                    "what",
+                    "where",
+                    "when",
+                    "which",
+                    "with",
+                    "from",
+                    "that",
+                    "this",
+                    "have",
+                    "been",
+                    "does",
+                    "into",
+                    "about",
+                    "regarding",
+                    "concerning",
+                    "results",
+                    "study",
+                    "report",
+                    "paper",
+                    "data",
+                    "timeline",
+                    "details",
+                    "overview",
+                    "announcement",
+                    "announcements",
+                    "status",
+                    "schedule",
+                    "specifications",
+                    "definitions",
+                    "baseline",
+                    "benchmarks",
+                    "empirical",
+                    "experimental",
+                    "operational",
+                    "disputed",
+                    "claims",
+                    "measured",
+                    "statements",
+                    "primary",
+                    "investigation",
+                    "documentation",
+                    "verified",
+                    "updates",
+                    "milestones",
+                    "features",
+                    "facts",
+                    "occurred",
+                }
+                words = [
+                    w
+                    for w in self.portfolio_planner.keywords(subquestion)
+                    if w not in db_stop_words and len(w) > 2
+                ]
+                # Require at least 2 distinct substantive search tokens to prevent spurious DB matches
+                if len(words) >= 2:
+                    conditions = [Source.title.ilike(f"%{w}%") for w in words[:3]]
+                    stmt = (
+                        select(Source)
+                        .where(and_(*conditions))
+                        .order_by(Source.retrieved_at.desc())
+                        .limit(3)
+                    )
+                    res = await session.execute(stmt)
+                    for src in res.scalars().all():
+                        loc = src.location.strip()
+                        if loc and loc not in seen_set:
+                            seen_set.add(loc)
+                            q_score = self.source_quality.score(
+                                url=loc,
+                                title=src.title or "Ingested Source",
+                                snippet=src.title or "",
+                                query_terms=set(words),
+                            )
+                            candidates.append(
+                                SourceCandidate(
+                                    location=loc,
+                                    title=src.title
+                                    or src.publisher
+                                    or "Ingested Intelligence Source",
+                                    reason=f"Ingested intelligence from {src.publisher or 'database'}",
+                                    expected_relevance=q_score.total,
+                                )
+                            )
+            except Exception as ex:
+                logger.debug(f"Source table lookup skipped: {ex}")
+
+        # 2. Generate multi-angle query portfolio (direct, primary, counterevidence)
+        queries = self.portfolio_planner.build(plan_item_id=subquestion[:24], question=subquestion)
+        query_terms = set(self.portfolio_planner.keywords(subquestion))
+
+        search_failures: list[dict[str, Any]] = []
+        for q in queries[:3]:  # Execute top 3 prioritized portfolio queries
+            try:
+                search_results = await self.search_connector.fetch(q.text, max_results=6)
+            except ProviderError as exc:
+                search_failures.append(
+                    {
+                        "source_angle": q.source_angle,
+                        "error": exc.message,
+                        "details": exc.details,
+                    }
+                )
+                continue
+
+            for res in search_results:
+                loc = res.url.strip()
+                if not loc or loc in seen_set:
+                    continue
+
+                # Check connector domain security policy
+                parsed = urllib.parse.urlparse(loc)
+                domain = parsed.hostname or ""
+                if domain and not default_policy_guard(domain, settings):
+                    logger.debug(f"Scout filtering out policy-blocked domain '{domain}'")
+                    continue
+
+                seen_set.add(loc)
+                q_score = self.source_quality.score(
+                    url=loc,
+                    title=res.title or domain,
+                    snippet=res.snippet or "",
+                    query_terms=query_terms,
+                )
+
+                candidates.append(
+                    SourceCandidate(
+                        location=loc,
+                        title=res.title or domain,
+                        reason=f"[{q.source_angle}] {res.snippet[:100] if res.snippet else 'Web search match'}",
+                        snippet=res.snippet if res.snippet else None,
+                        expected_relevance=q_score.total,
+                    )
+                )
+
+        if search_failures and not candidates:
+            raise ProviderError(
+                "Source discovery was incomplete: live search failed before any candidates were found.",
+                details={"search_failures": search_failures},
+            )
+
+        # 3. Sort by computed quality score and cap at 8 candidates
+        candidates.sort(key=lambda c: c.expected_relevance, reverse=True)
+        return ScoutOutput(
+            candidates=candidates[:8],
+            search_failures=search_failures,
+        )

@@ -1,0 +1,501 @@
+"""INTELX Synthesizer Agent: Executive Intelligence Report Synthesis & Artifact Generation."""
+
+import json
+import logging
+import re
+from typing import Any
+
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from intelx.agents.analyst import AnalysisResult
+from intelx.agents.base import BaseAgent
+from intelx.agents.critic import CritiqueReport
+from intelx.core.confidence import get_confidence_label
+from intelx.core.enums import ClaimStatus
+from intelx.core.report import (
+    filter_and_ground_findings,
+    render_report_markdown,
+    validate_citations,
+)
+from intelx.db.models import Claim, Evidence, Finding, ResearchRun, Source
+from intelx.db.session import get_sqlite_write_lock
+from intelx.memory.artifacts import generate_and_save_artifacts
+from intelx.models.gateway import ModelGateway
+
+logger = logging.getLogger(__name__)
+
+
+class DraftFinding(BaseModel):
+    """Draft finding proposition backed by claim IDs."""
+
+    statement: str = "Verified analytical finding."
+    confidence: float = Field(default=0.80, ge=0.05, le=0.95)
+    confidence_label: str = Field(default="High")
+    claim_ids: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def _validate_raw(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "statement" not in data or not data["statement"]:
+                data["statement"] = (
+                    data.get("conclusion")
+                    or data.get("finding")
+                    or data.get("text")
+                    or data.get("claim")
+                    or "Verified analytical finding."
+                )
+            if "claim_ids" not in data or not data["claim_ids"]:
+                cids = data.get("claims") or data.get("citations") or data.get("claim_id") or []
+                if isinstance(cids, str):
+                    cids = [cids]
+                data["claim_ids"] = list(cids)
+            raw_conf = data.get("confidence")
+            if raw_conf is not None:
+                try:
+                    conf = float(raw_conf)
+                    data["confidence"] = max(0.05, min(0.95, conf))
+                except (ValueError, TypeError):
+                    data["confidence"] = 0.80
+            else:
+                data["confidence"] = 0.80
+        return data
+
+    @classmethod
+    def model_validate(cls, obj: Any, *args: Any, **kwargs: Any) -> "DraftFinding":
+        obj = cls._validate_raw(obj)
+        return super().model_validate(obj, *args, **kwargs)
+
+
+# Alias for backward compatibility
+SynthesizedFinding = DraftFinding
+
+
+class DraftReport(BaseModel):
+    """Structured LLM synthesis payload prior to markdown rendering."""
+
+    executive_answer: str = "Research synthesis concluded."
+    key_findings: list[DraftFinding] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def _validate_raw(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "executive_answer" not in data or not data["executive_answer"]:
+                data["executive_answer"] = (
+                    data.get("research_synthesis_report")
+                    or data.get("direct_answer")
+                    or data.get("summary")
+                    or data.get("executive_summary")
+                    or data.get("answer")
+                    or "Research synthesis concluded with available empirical evidence."
+                )
+            if "key_findings" not in data or not data["key_findings"]:
+                raw_findings = data.get("findings") or data.get("conclusions") or []
+                data["key_findings"] = raw_findings
+            if "gaps" not in data:
+                data["gaps"] = data.get("limitations") or data.get("knowledge_gaps") or []
+        return data
+
+    @classmethod
+    def model_validate(cls, obj: Any, *args: Any, **kwargs: Any) -> "DraftReport":
+        obj = cls._validate_raw(obj)
+        return super().model_validate(obj, *args, **kwargs)
+
+
+class SynthesisResult(BaseModel):
+    """Complete synthesized research outcome with rendered report and artifact records."""
+
+    executive_summary: str
+    findings: list[DraftFinding] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    report_markdown: str = ""
+    overall_confidence_label: str = "Moderate"
+
+
+class SynthesizerAgent(BaseAgent):
+    """Agent producing final intelligence synthesis and creating artifacts."""
+
+    SYSTEM_PROMPT = (
+        "You are the INTELX Chief Intelligence Synthesizer.\n"
+        "Your duty is to produce an authoritative, evidence-backed intelligence synthesis.\n"
+        "Anchor every single finding to specific claim IDs from the provided evidence corpus.\n"
+        "If evidence is insufficient to answer the objective, state this explicitly in the "
+        "executive answer and detail exactly what data was missing in the gaps list."
+    )
+
+    def __init__(self, gateway: ModelGateway | None = None) -> None:
+        super().__init__(role="synthesizer", name="SynthesizerAgent", gateway=gateway)
+
+    async def execute(
+        self,
+        objective: str,
+        claims: list[Claim | dict[str, Any]],
+        analysis: AnalysisResult | None = None,
+        critique: CritiqueReport | dict[str, Any] | None = None,
+        sources: list[Source] | None = None,
+        evidence: list[Evidence] | None = None,
+        degradations: list[str] | None = None,
+        session: AsyncSession | None = None,
+        run_id: str | None = None,
+        **kwargs: Any,
+    ) -> SynthesisResult:
+        """Synthesize verified claims into executive findings, render report, and emit artifacts."""
+        all_sources = sources or []
+        all_evidence = evidence or []
+
+        if session and run_id:
+            if not all_sources:
+                stmt_s = select(Source).where(Source.created_by_run_id == run_id)
+                run_sources = list((await session.execute(stmt_s)).scalars().all())
+
+                claim_source_ids = [
+                    getattr(c, "source_id", None)
+                    or (c.get("source_id") if isinstance(c, dict) else None)
+                    for c in claims
+                ]
+                claim_source_ids = [sid for sid in claim_source_ids if sid]
+                if claim_source_ids:
+                    stmt_cs = select(Source).where(Source.id.in_(claim_source_ids))
+                    claim_sources = list((await session.execute(stmt_cs)).scalars().all())
+                else:
+                    claim_sources = []
+
+                combined = {s.id: s for s in (run_sources + claim_sources)}
+                all_sources = list(combined.values())
+
+            if not all_evidence:
+                stmt_e = select(Evidence).where(Evidence.created_by_run_id == run_id)
+                all_evidence = list((await session.execute(stmt_e)).scalars().all())
+
+        claims_by_id: dict[str, Any] = {}
+        for c in claims:
+            cid = getattr(c, "id", None) or (c.get("id") if isinstance(c, dict) else None)
+            if cid:
+                claims_by_id[cid] = c
+
+        valid_source_ids = {
+            getattr(s, "id", None) or (s.get("id") if isinstance(s, dict) else None)
+            for s in all_sources
+        }
+        valid_source_ids = {sid for sid in valid_source_ids if sid}
+        valid_claim_ids = set(claims_by_id.keys())
+
+        # Keep execution provenance explicit even when the insufficient-evidence path
+        # skips the synthesis provider call entirely.
+        llm_res = None
+
+        # Insufficient evidence path
+        if not claims:
+            insufficient_finding = DraftFinding(
+                statement=f"Insufficient evidence to answer objective: '{objective[:40]}'",
+                confidence=0.10,
+                confidence_label="Very low",
+                claim_ids=[],
+            )
+            draft = DraftReport(
+                executive_answer=(
+                    f"Investigation for '{objective}' concluded with INSUFFICIENT EVIDENCE. "
+                    "No verified empirical claims could be extracted within the designated scope."
+                ),
+                key_findings=[insufficient_finding],
+                gaps=[
+                    "No verifiable primary sources found matching scope constraints.",
+                    "Sufficient evidence requires accessible authoritative disclosures.",
+                ],
+            )
+            grounded_findings = []
+            unverified_findings = [
+                {
+                    "conclusion": insufficient_finding.statement,
+                    "confidence": 0.10,
+                    "claim_ids_json": [],
+                    "unverified_reason": "No primary evidence retrieved",
+                }
+            ]
+            overall_conf_label = "Very low"
+        else:
+            # LLM Synthesis: Prioritize claims relevant to the research objective, then by confidence
+            obj_words = set(re.findall(r"\w{3,}", objective.lower())) - {
+                "what",
+                "when",
+                "where",
+                "which",
+                "with",
+                "from",
+                "that",
+                "this",
+                "about",
+            }
+
+            def claim_priority(c: Any) -> tuple[int, float]:
+                txt = (
+                    getattr(c, "text", None) or (c.get("text") if isinstance(c, dict) else "") or ""
+                ).lower()
+                matches = sum(1 for w in obj_words if w in txt)
+                # Query terms often omit the unit-bearing statement itself (e.g. a
+                # benchmark question may not literally say "Wh/kg"). Keep empirical
+                # measurements visible in the report instead of spending every finding
+                # slot on textually similar but less decision-relevant prose.
+                metric_focus = bool(
+                    obj_words
+                    & {
+                        "benchmark",
+                        "benchmarks",
+                        "measurement",
+                        "measurements",
+                        "performance",
+                        "compare",
+                        "comparison",
+                        "capacity",
+                        "density",
+                        "thermal",
+                        "cycle",
+                    }
+                )
+                has_measurement = bool(
+                    re.search(
+                        r"\b\d+(?:\.\d+)?\s*(?:%|wh\s*/\s*kg|wh/kg|m[sS]/cm|cycles?|qubits|m[wW]|degrees? Celsius|°C)(?=\W|$)",
+                        txt,
+                        re.IGNORECASE,
+                    )
+                )
+                if metric_focus and has_measurement:
+                    matches += 2
+                conf = (
+                    getattr(c, "confidence", None)
+                    or (c.get("confidence") if isinstance(c, dict) else 0.8)
+                    or 0.8
+                )
+                try:
+                    conf_val = float(conf)
+                except (ValueError, TypeError):
+                    conf_val = 0.8
+                return (matches, conf_val)
+
+            sorted_claims = sorted(claims, key=claim_priority, reverse=True)[:25]
+            formatted_claims = []
+            for c in sorted_claims:
+                cid = getattr(c, "id", None) or (c.get("id") if isinstance(c, dict) else None)
+                ctext = getattr(c, "text", None) or (c.get("text") if isinstance(c, dict) else None)
+                cconf = getattr(c, "confidence", 1.0) or (
+                    c.get("confidence", 1.0) if isinstance(c, dict) else 1.0
+                )
+                status = getattr(c, "status", None) or (
+                    c.get("status") if isinstance(c, dict) else None
+                )
+                claim_type = getattr(c, "claim_type", None) or (
+                    c.get("claim_type") if isinstance(c, dict) else None
+                )
+                formatted_claims.append(
+                    {
+                        "id": cid,
+                        "text": ctext,
+                        "confidence": cconf,
+                        "status": getattr(status, "value", status),
+                        "claim_type": getattr(claim_type, "value", claim_type),
+                    }
+                )
+
+            user_prompt = (
+                f"RESEARCH OBJECTIVE: {objective}\n\n"
+                f"VERIFIED EVIDENCE CLAIMS ({len(formatted_claims)} claims):\n"
+                f"{json.dumps(formatted_claims, indent=2)}\n\n"
+                "Produce the executive answer and key findings."
+            )
+
+            messages = [
+                {"role": "system", "content": self.SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ]
+
+            llm_res = await self.gateway.complete(
+                messages=messages,
+                role=self.role,
+                schema_model=DraftReport,
+                run_id=run_id,
+            )
+            draft: DraftReport = llm_res.parsed
+
+            # Groundedness Check
+            raw_findings = [f.model_dump() for f in draft.key_findings]
+            grounded_findings, unverified_findings = filter_and_ground_findings(
+                raw_findings, claims_by_id
+            )
+
+            # If LLM draft findings lacked grounded claims, synthesize directly from verified claims
+            if not grounded_findings and claims:
+                for c in claims[:5]:
+                    cid = getattr(c, "id", None) or (c.get("id") if isinstance(c, dict) else None)
+                    ctext = getattr(c, "text", None) or (
+                        c.get("text") if isinstance(c, dict) else None
+                    )
+                    cconf = getattr(c, "confidence", 0.85) or (
+                        c.get("confidence", 0.85) if isinstance(c, dict) else 0.85
+                    )
+                    try:
+                        conf_val = float(cconf)
+                    except (ValueError, TypeError):
+                        conf_val = 0.85
+                    if ctext:
+                        grounded_findings.append(
+                            {
+                                "statement": ctext,
+                                "confidence": conf_val,
+                                "confidence_label": get_confidence_label(conf_val),
+                                "claim_ids": [cid] if cid else [],
+                            }
+                        )
+
+            # Overall confidence: max finding confidence that passed groundedness
+            if grounded_findings:
+                max_conf = max(f.get("confidence", 0.5) for f in grounded_findings)
+                overall_conf_label = get_confidence_label(max_conf)
+            else:
+                overall_conf_label = "Low"
+
+        # Clean any draft thinking artifacts / preambles from executive answer
+        clean_exec_answer = draft.executive_answer or ""
+        import re as _re_s
+
+        clean_exec_answer = _re_s.sub(r"(?s)^<think>.*?</think>", "", clean_exec_answer).strip()
+        if "Thus output likely bullet points:" in clean_exec_answer:
+            clean_exec_answer = clean_exec_answer.split("Thus output likely bullet points:")[
+                -1
+            ].strip()
+        elif "Let's craft" in clean_exec_answer:
+            clean_exec_answer = clean_exec_answer.split("Let's craft")[-1].strip()
+        elif clean_exec_answer.lower().startswith("the user wants a clear"):
+            parts = _re_s.split(
+                r"\n(?=- |\* |\bFree Fire\b|\bThe official\b|\bReleased\b|\bOriginal\b)",
+                clean_exec_answer,
+                maxsplit=1,
+            )
+            if len(parts) > 1 and len(parts[1].strip()) > 20:
+                clean_exec_answer = parts[1].strip()
+
+        # Render official report markdown
+        critique_dict = critique.model_dump() if isinstance(critique, CritiqueReport) else critique
+        mode = kwargs.get("research_mode") or kwargs.get("domain_hint")
+        gateway_settings = getattr(self.gateway, "settings", None)
+        if getattr(gateway_settings, "MOCK_MODE", False):
+            execution_mode = "MOCK"
+        elif llm_res is None:
+            execution_mode = "LIVE CONFIGURED / NO SYNTHESIS"
+        elif str(getattr(llm_res, "provider", "")).lower() == "mock":
+            execution_mode = "MOCK FALLBACK"
+        else:
+            execution_mode = "LIVE MODEL CALL"
+        configured_model = getattr(llm_res, "model", None)
+        if not configured_model and gateway_settings:
+            get_model_for_role = getattr(gateway_settings, "get_model_for_role", None)
+            if callable(get_model_for_role):
+                configured_model = get_model_for_role(self.role)
+        disputed_claims = [c for c in claims if getattr(c, "status", None) == ClaimStatus.DISPUTED]
+        contradictions_list: list[dict[str, str]] = [
+            {
+                "side_a": getattr(c, "quote", "") or getattr(c, "text", ""),
+                "side_b": "Contradicted by independent multi-source evidence",
+            }
+            for c in disputed_claims
+        ]
+        report_md = render_report_markdown(
+            objective=objective,
+            executive_answer=clean_exec_answer,
+            grounded_findings=grounded_findings,
+            unverified_findings=unverified_findings,
+            claims=claims,
+            sources=all_sources,
+            contradictions=contradictions_list,
+            gaps=draft.gaps,
+            critique=critique_dict,
+            degradations=degradations,
+            overall_confidence_label=overall_conf_label,
+            model_name=configured_model or "unknown",
+            execution_mode=execution_mode,
+            research_mode=mode,
+        )
+
+        # CITATION INTEGRITY CHECK: Machine-enforced
+        report_md = validate_citations(
+            markdown_text=report_md,
+            valid_source_ids=valid_source_ids,
+            valid_claim_ids=valid_claim_ids,
+        )
+
+        # Persist findings to database
+        if session and run_id:
+            disputed_map = {
+                getattr(c, "id", ""): getattr(c, "quote", "") or getattr(c, "text", "")
+                for c in claims
+                if getattr(c, "status", None) == ClaimStatus.DISPUTED
+            }
+            for gf in grounded_findings:
+                gf_claim_ids = gf.get("claim_ids") or []
+                gf_contradictions = [
+                    f"Contradicted claim {cid}: {disputed_map[cid]}"
+                    for cid in gf_claim_ids
+                    if cid in disputed_map
+                ]
+                finding_row = Finding(
+                    run_id=run_id,
+                    conclusion=gf.get("statement") or gf.get("conclusion") or "",
+                    confidence=gf.get("confidence", 0.8),
+                    confidence_method="v1-composite",
+                    claim_ids_json=gf_claim_ids,
+                    gaps_json=[],
+                    contradictions_json=gf_contradictions,
+                    unverified_json=[],
+                )
+                session.add(finding_row)
+
+            for uf in unverified_findings:
+                uf_claim_ids = uf.get("claim_ids") or []
+                uf_contradictions = [
+                    f"Contradicted claim {cid}: {disputed_map[cid]}"
+                    for cid in uf_claim_ids
+                    if cid in disputed_map
+                ]
+                finding_row = Finding(
+                    run_id=run_id,
+                    conclusion=uf.get("statement") or uf.get("conclusion") or "",
+                    confidence=uf.get("confidence", 0.2),
+                    confidence_method="v1-composite",
+                    claim_ids_json=uf_claim_ids,
+                    gaps_json=draft.gaps,
+                    contradictions_json=uf_contradictions,
+                    unverified_json=[uf.get("unverified_reason", "Lacks grounded support")],
+                )
+                session.add(finding_row)
+
+            async with get_sqlite_write_lock():
+                await session.flush()
+
+                # Generate and register all 4 artifacts
+                stmt_r = select(ResearchRun).where(ResearchRun.id == run_id)
+                run_obj = (await session.execute(stmt_r)).scalar_one_or_none()
+                if run_obj:
+                    await generate_and_save_artifacts(
+                        session=session,
+                        run=run_obj,
+                        report_markdown=report_md,
+                        grounded_findings=grounded_findings,
+                        unverified_findings=unverified_findings,
+                        claims=claims,
+                        sources=all_sources,
+                        evidence_items=all_evidence,
+                        gaps=draft.gaps,
+                        degradations=degradations,
+                        overall_confidence_label=overall_conf_label,
+                        execution_mode=execution_mode,
+                    )
+                await session.commit()
+
+        return SynthesisResult(
+            executive_summary=draft.executive_answer,
+            findings=draft.key_findings,
+            gaps=draft.gaps,
+            report_markdown=report_md,
+            overall_confidence_label=overall_conf_label,
+        )

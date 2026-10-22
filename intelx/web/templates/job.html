@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run.id[:8] }} — IntelX{% endblock %}
+{% block content %}
+<section class="job-heading">
+  <div class="job-heading-copy"><div class="job-breadcrumb"><a href="/">Research desk</a><span>/</span><span>Run {{ run.id[:8] }}</span></div><div class="job-status-line"><span class="status-marker status-marker-{{ run.status.value|lower }}"></span><span class="status-chip status-{{ run.status.value|lower }}" id="job-status-chip">{{ run.status.value|replace('_', ' ') }}</span><code>{{ run.id }}</code></div><h1>{{ run.objective }}</h1><p>Submitted {{ run.created_at.strftime('%d %B %Y · %H:%M UTC') }}{% if run.created_by %} by {{ run.created_by }}{% endif %}</p></div>
+  <div class="job-actions">{% if run.status.value == 'COMPLETED' %}<a href="/research/{{ run.id }}/report" class="btn btn-primary">Open report <span aria-hidden="true">↗</span></a>{% elif run.status.value not in ['COMPLETED', 'FAILED', 'CANCELLED'] %}<form method="post" action="/research/{{ run.id }}/cancel"><button type="submit" class="btn btn-danger">Cancel run</button></form>{% endif %}<a href="/" class="btn btn-outline">Back to desk</a></div>
+</section>
+
+{% if run.status.value == 'FAILED' and run.error_json %}<div class="job-error"><strong>Run failed</strong><pre>{{ run.error_json|tojson(indent=2) }}</pre></div>{% endif %}
+
+<section class="job-metrics" aria-label="Run telemetry">
+  <article class="job-metric"><span>STATUS</span><strong id="job-status-value">{{ run.status.value|replace('_', ' ') }}</strong><small>Recorded job state</small></article>
+  <article class="job-metric"><span>RUN COST</span><strong>${{ '%.4f'|format(run.usd_cost) }}</strong><small>Reported by this run</small></article>
+  <article class="job-metric"><span>TOKENS IN / OUT</span><strong>{{ run.input_tokens }} <i>/</i> {{ run.output_tokens }}</strong><small>Recorded token usage</small></article>
+  <article class="job-metric"><span>TOOL CALLS</span><strong>{{ run.tool_calls }}</strong><small>Recorded invocations</small></article>
+</section>
+
+<section class="research-panel job-events-panel">
+  <div class="panel-heading"><div><span class="section-kicker">JOB HISTORY</span><h2>Orchestration events</h2><p>Events saved for this run. This view polls the authenticated IntelX workspace endpoint.</p></div><span class="poll-indicator" id="pollIndicator" data-state="{% if run.status.value in ['COMPLETED', 'FAILED', 'CANCELLED'] %}stopped{% else %}connecting{% endif %}"><i></i><span>{% if run.status.value in ['COMPLETED', 'FAILED', 'CANCELLED'] %}Run finished{% else %}Connecting to job updates…{% endif %}</span></span></div>
+  <div class="event-log" id="eventLog" aria-live="polite" aria-busy="false">
+    {% for ev in events %}<article class="event-entry"><time>{{ ev.created_at.strftime('%H:%M:%S UTC') }}</time><strong>{{ ev.type }}</strong><pre>{{ ev.payload_json|tojson }}</pre></article>
+    {% else %}<div class="event-state" id="event-empty" data-empty="true"><span>◌</span><strong>No orchestration events recorded yet</strong><p>When the worker writes run events, they will appear here.</p></div>{% endfor %}
+  </div>
+  <div class="event-error" id="event-error" role="status" hidden>Could not refresh this run. The last saved events remain visible; retrying shortly.</div>
+</section>
+<div id="job-poll-config" data-job-id="{{ run.id }}" data-last-event-id="{{ events[-1].id if events else 0 }}" data-terminal="{{ 'true' if run.status.value in ['COMPLETED', 'FAILED', 'CANCELLED'] else 'false' }}" hidden></div>
+{% endblock %}

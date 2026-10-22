@@ -1,0 +1,573 @@
+"""INTELX Verifier Agent: Cross-Source Corroboration and Contradiction Detection."""
+
+import logging
+import math
+import re
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from intelx.agents.base import BaseAgent
+from intelx.agents.contradictions import ContradictionEngine
+from intelx.agents.extractor import ExtractorAgent
+from intelx.agents.retriever import RetrieverAgent
+from intelx.agents.scout import ScoutAgent
+from intelx.core.confidence import compute_confidence_score
+from intelx.core.contradiction import (
+    DETERMINISTIC_CONTRADICTION_METHOD,
+    calculate_contradiction_confidence,
+)
+from intelx.core.credibility import SourceCredibilityScorer
+from intelx.core.enums import (
+    ClaimStatus,
+    ClaimType,
+    EvidenceSupportType,
+    TrustTier,
+)
+from intelx.core.independence import is_independent_evidence
+from intelx.db.models import Chunk, Claim, Document, Evidence, Source
+from intelx.db.repos import EvidenceRepo, RunRepo, SourceRepo
+from intelx.db.session import get_sqlite_write_lock
+from intelx.models.gateway import ModelGateway
+
+logger = logging.getLogger(__name__)
+
+
+def contradiction_eligible_claims(claims: list[Claim]) -> list[Claim]:
+    """Limit deterministic conflict analysis to falsifiable factual claim types."""
+    eligible_types = (ClaimType.FACT, ClaimType.MEASUREMENT, ClaimType.EVENT)
+    return [claim for claim in claims if claim.claim_type in eligible_types]
+
+
+def _parse_time_horizon(scope: dict[str, Any] | None) -> timedelta | None:
+    """Parse explicitly requested day/year horizons; unsupported values are not cutoffs."""
+    query_scope = scope.get("query_scope") if isinstance(scope, dict) else None
+    value = query_scope.get("time_horizon") if isinstance(query_scope, dict) else None
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"([1-9]\d*)([dy])", value.strip(), re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        amount = int(match.group(1))
+        unit = match.group(2).lower()
+        return timedelta(days=amount if unit == "d" else amount * 365)
+    except (OverflowError, ValueError):
+        # Python limits decimal-to-int conversions for very long strings. Treat these
+        # unsupported horizons like other unrepresentably large values instead of
+        # allowing untrusted scope data to abort the verification pipeline.
+        return None
+
+
+def _is_source_stale(
+    published_at: datetime | None,
+    horizon: timedelta | None,
+    now: datetime,
+) -> bool:
+    """Compare publication time to an explicit horizon, treating naive values as UTC."""
+    if published_at is None or horizon is None:
+        return False
+    published_at_utc = (
+        published_at.replace(tzinfo=UTC)
+        if published_at.tzinfo is None
+        else published_at.astimezone(UTC)
+    )
+    try:
+        cutoff = now - horizon
+    except OverflowError:
+        return False
+    return published_at_utc < cutoff
+
+
+class VerificationVerdict(BaseModel):
+    """Structured verdict from LLM comparing candidate evidence against an active claim."""
+
+    verdict: str = Field(
+        default="SUPPORTED",
+        description="SUPPORTED, PARTIALLY_SUPPORTED, CONTRADICTED, or UNVERIFIABLE",
+    )
+    support_type: EvidenceSupportType = EvidenceSupportType.SUPPORTS
+    confidence_adjustment: float = Field(default=0.0, ge=-0.10, le=0.10)
+    reasoning: str = "Verified via evidence alignment."
+    contradiction_details: str | None = None
+
+    @classmethod
+    def _validate_raw(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "verdict" not in data or not data["verdict"]:
+                data["verdict"] = data.get("verification_status") or "SUPPORTED"
+            if "reasoning" not in data or not data["reasoning"]:
+                data["reasoning"] = (
+                    data.get("rationale")
+                    or data.get("explanation")
+                    or data.get("summary")
+                    or "Cross-source evidentiary corroboration established."
+                )
+        return data
+
+    @classmethod
+    def model_validate(cls, obj: Any, *args: Any, **kwargs: Any) -> "VerificationVerdict":
+        obj = cls._validate_raw(obj)
+        return super().model_validate(obj, *args, **kwargs)
+
+
+class VerifierAgent(BaseAgent):
+    """Agent executing deep multi-source cross-examination and contradiction detection."""
+
+    SYSTEM_PROMPT = (
+        "You are the INTELX Verification Authority.\n"
+        "Your role is to rigorously cross-examine claims against candidate evidence.\n"
+        "Classify the evidentiary relationship into: SUPPORTED, PARTIALLY_SUPPORTED, "
+        "CONTRADICTED, or UNVERIFIABLE.\n"
+        "If contradicting, explain the exact empirical disagreement.\n"
+        "Provide a bounded confidence adjustment between -0.10 and +0.10 with written rationale."
+    )
+
+    def __init__(
+        self,
+        gateway: ModelGateway | None = None,
+        scout_agent: ScoutAgent | None = None,
+        retriever_agent: RetrieverAgent | None = None,
+        extractor_agent: ExtractorAgent | None = None,
+    ) -> None:
+        super().__init__(role="verifier", name="VerifierAgent", gateway=gateway)
+        self.scout = scout_agent or ScoutAgent(gateway=self.gateway)
+        self.retriever = retriever_agent or RetrieverAgent(gateway=self.gateway)
+        self.extractor = extractor_agent or ExtractorAgent(gateway=self.gateway)
+
+    async def _record_deterministic_conflicts(
+        self,
+        claims: list[Claim],
+        session: AsyncSession,
+        run_id: str,
+    ) -> None:
+        """Persist independently sourced measurement conflicts with exact spans on both sides."""
+        claim_by_id = {claim.id: claim for claim in claims}
+        source_ids = {claim.source_id for claim in claims}
+        document_ids = {claim.document_id for claim in claims}
+        source_rows = (
+            list((await session.execute(select(Source).where(Source.id.in_(source_ids)))).scalars())
+            if source_ids
+            else []
+        )
+        document_rows = (
+            list(
+                (
+                    await session.execute(select(Document).where(Document.id.in_(document_ids)))
+                ).scalars()
+            )
+            if document_ids
+            else []
+        )
+        source_cache = {source.id: source for source in source_rows}
+        document_cache = {document.id: document for document in document_rows}
+        context_by_claim = {}
+        for claim in claims:
+            source = source_cache.get(claim.source_id)
+            document = document_cache.get(claim.document_id)
+            local_context = ""
+            if document:
+                context_start = max(0, claim.span_start - 256)
+                context_end = min(len(document.text), claim.span_end + 256)
+                local_context = document.text[context_start:context_end]
+            context_by_claim[claim.id] = " ".join(
+                part
+                for part in (
+                    source.title if source else "",
+                    source.domain if source else "",
+                    local_context,
+                )
+                if part
+            )
+
+        contradiction_candidates = contradiction_eligible_claims(claims)
+        contradiction_context = {
+            claim.id: context_by_claim.get(claim.id, "") for claim in contradiction_candidates
+        }
+        existing_keys = set()
+        existing_stmt = select(
+            Evidence.claim_id,
+            Evidence.source_id,
+            Evidence.document_id,
+            Evidence.quote,
+        ).where(
+            Evidence.created_by_run_id == run_id,
+            Evidence.support_type == EvidenceSupportType.CONTRADICTS,
+        )
+        for r in (await session.execute(existing_stmt)).all():
+            existing_keys.add(tuple(r))
+
+        for conflict in ContradictionEngine().analyze(
+            contradiction_candidates, contradiction_context
+        ):
+            claim_a = claim_by_id.get(conflict.claim_a_id)
+            claim_b = claim_by_id.get(conflict.claim_b_id)
+            if (
+                claim_a is None
+                or claim_b is None
+                or claim_a.source_id == claim_b.source_id
+                or claim_a.status in (ClaimStatus.RETRACTED, ClaimStatus.SUPERSEDED)
+                or claim_b.status in (ClaimStatus.RETRACTED, ClaimStatus.SUPERSEDED)
+            ):
+                continue
+
+            for claim in (claim_a, claim_b):
+                if claim.source_id not in source_cache:
+                    source_cache[claim.source_id] = await SourceRepo.get_source(
+                        session, claim.source_id
+                    )
+                if claim.document_id not in document_cache:
+                    document_cache[claim.document_id] = await SourceRepo.get_document(
+                        session, claim.document_id
+                    )
+
+            source_a = source_cache[claim_a.source_id]
+            source_b = source_cache[claim_b.source_id]
+            doc_a = document_cache[claim_a.document_id]
+            doc_b = document_cache[claim_b.document_id]
+            if not source_a or not source_b or not doc_a or not doc_b:
+                continue
+
+            independent, independence_reason = is_independent_evidence(
+                source_a,
+                doc_a,
+                claim_a.quote,
+                source_b,
+                doc_b,
+                claim_b.quote,
+            )
+            if not independent:
+                logger.info(
+                    "Ignoring non-independent conflict candidate (%s): claims %s and %s",
+                    independence_reason,
+                    claim_a.id,
+                    claim_b.id,
+                )
+                continue
+
+            evidence_specs = (
+                (claim_a, claim_b, source_a),
+                (claim_b, claim_a, source_b),
+            )
+            created_any = False
+            for target_claim, opposing_claim, target_source in evidence_specs:
+                key = (
+                    target_claim.id,
+                    opposing_claim.source_id,
+                    opposing_claim.document_id,
+                    opposing_claim.quote,
+                )
+                if key in existing_keys:
+                    continue
+                existing_keys.add(key)
+                await EvidenceRepo.create_evidence(
+                    session=session,
+                    claim_id=target_claim.id,
+                    source_id=opposing_claim.source_id,
+                    document_id=opposing_claim.document_id,
+                    chunk_id=opposing_claim.chunk_id,
+                    span_start=opposing_claim.span_start,
+                    span_end=opposing_claim.span_end,
+                    quote=opposing_claim.quote,
+                    support_type=EvidenceSupportType.CONTRADICTS,
+                    created_by_run_id=run_id,
+                    created_by_agent="contradiction-engine",
+                    independent_of_json=[target_source.id],
+                )
+                created_any = True
+
+            for claim in (claim_a, claim_b):
+                claim.status = ClaimStatus.DISPUTED
+                claim.confidence = calculate_contradiction_confidence(
+                    base_confidence=claim.confidence,
+                    has_contradiction=True,
+                    conflict_count=1,
+                )
+                claim.confidence_method = DETERMINISTIC_CONTRADICTION_METHOD
+
+            if created_any:
+                await RunRepo.add_event(
+                    session=session,
+                    run_id=run_id,
+                    event_type="claim.disputed",
+                    payload_json={
+                        "claim_id_1": claim_a.id,
+                        "claim_id_2": claim_b.id,
+                        "reason": conflict.reason,
+                        "conflict_type": conflict.conflict_type,
+                        "independence_reason": independence_reason,
+                        "created_by_agent": "contradiction-engine",
+                    },
+                )
+
+        await session.flush()
+
+    async def execute(
+        self,
+        claims: list[Claim],
+        scope: dict[str, Any] | None = None,
+        session: AsyncSession | None = None,
+        run_id: str | None = None,
+        depth: str = "standard",
+        **kwargs: Any,
+    ) -> list[Claim]:
+        """Verify priority claims, record independent corroborations or contradictions."""
+        if not session or not run_id:
+            return claims
+
+        time_horizon = _parse_time_horizon(scope)
+        verification_time = datetime.now(UTC)
+
+        # Filter important claims based on depth (capped to avoid combinatorial search explosion)
+        if depth.lower() == "deep":
+            target_claims = claims[:8]
+        elif depth.lower() == "quick":
+            target_claims = [
+                c for c in claims if c.claim_type in (ClaimType.FACT, ClaimType.MEASUREMENT)
+            ][:2]
+        else:
+            target_claims = [
+                c
+                for c in claims
+                if c.claim_type in (ClaimType.FACT, ClaimType.MEASUREMENT, ClaimType.EVENT)
+            ][:4]
+
+        for claim in target_claims:
+            ai_confidences: list[float] = []
+            # 1. Fetch original source and document
+            orig_source = await SourceRepo.get_source(session, claim.source_id)
+            orig_doc = await SourceRepo.get_document(session, claim.document_id)
+
+            if not orig_source or not orig_doc:
+                continue
+
+            # 2. Scout for alternative corroborating/refuting evidence
+            query_phrasing = f"evidence {claim.predicate or ''} {claim.subject or claim.text[:60]}"
+            scout_res = await self.scout.execute(
+                subquestion=query_phrasing,
+                already_seen=[orig_source.location],
+                session=session,
+                run_id=run_id,
+            )
+
+            if not scout_res.candidates:
+                continue
+
+            # 3. Retrieve new candidate documents
+            ret_res = await self.retriever.execute(
+                candidates=scout_res.candidates[:2],
+                session=session,
+                run_id=run_id,
+            )
+
+            independent_supports = 0
+            has_standard_or_trusted_support = orig_source.trust_tier in (
+                TrustTier.STANDARD,
+                TrustTier.TRUSTED,
+            )
+            strongest_tier = orig_source.trust_tier
+            is_contradicted = False
+
+            for doc_meta in ret_res.retrieved:
+                new_source = await SourceRepo.get_source(session, doc_meta.source_id)
+                new_doc = await SourceRepo.get_document(session, doc_meta.document_id)
+                if not new_source or not new_doc:
+                    continue
+
+                # Query chunks for new document
+                stmt = select(Document).where(Document.id == doc_meta.document_id)
+                doc_obj = (await session.execute(stmt)).scalar_one_or_none()
+                stmt_chunks = (
+                    select(Chunk)
+                    .where(Chunk.document_id == doc_meta.document_id)
+                    .order_by(Chunk.idx.asc())
+                )
+                chunks_list = list((await session.execute(stmt_chunks)).scalars().all())
+                if not doc_obj or not chunks_list:
+                    continue
+
+                # 4. Extract claims from new document
+                extraction = await self.extractor.execute(
+                    document=doc_obj,
+                    chunks=chunks_list,
+                    run_id=run_id,
+                    source_id=new_source.id,
+                    session=session,
+                )
+
+                for new_claim_data in extraction.claims:
+                    # 5. Independence Check
+                    is_indep, indep_reason = is_independent_evidence(
+                        orig_source,
+                        orig_doc,
+                        claim.quote,
+                        new_source,
+                        new_doc,
+                        new_claim_data.quote,
+                    )
+
+                    # 6. Evaluate relationship via gateway
+                    eval_prompt = (
+                        f"ORIGINAL CLAIM: {claim.text}\n"
+                        f"ORIGINAL QUOTE: {claim.quote}\n\n"
+                        f"CANDIDATE CLAIM: {new_claim_data.text}\n"
+                        f"CANDIDATE QUOTE: {new_claim_data.quote}\n\n"
+                        "Evaluate if the candidate claim supports, partially supports, "
+                        "contradicts, or is unrelated/unverifiable relative to the original claim."
+                    )
+
+                    messages = [
+                        {"role": "system", "content": self.SYSTEM_PROMPT},
+                        {"role": "user", "content": eval_prompt},
+                    ]
+
+                    verdict_res = await self.gateway.complete(
+                        messages=messages,
+                        role="verifier",
+                        schema_model=VerificationVerdict,
+                        run_id=run_id,
+                    )
+                    verdict: VerificationVerdict = verdict_res.parsed
+                    provider_name = getattr(verdict_res, "provider", None)
+                    metadata = getattr(verdict_res, "metadata", None) or {}
+                    if provider_name in ("inference", "ai_universe") and isinstance(metadata, dict):
+                        provider_confidence = metadata.get("confidence")
+                        if provider_confidence is not None:
+                            try:
+                                confidence_value = float(provider_confidence)
+                            except (TypeError, ValueError):
+                                logger.warning("Ignoring invalid provider confidence metadata")
+                            else:
+                                if (
+                                    math.isfinite(confidence_value)
+                                    and 0.0 <= confidence_value <= 1.0
+                                ):
+                                    ai_confidences.append(confidence_value)
+                                else:
+                                    logger.warning(
+                                        "Ignoring out-of-range provider confidence metadata"
+                                    )
+
+                    # Compute exact absolute span in new document
+                    ev_quote = new_claim_data.quote
+                    ev_start = new_doc.text.find(ev_quote)
+                    if ev_start == -1:
+                        ev_start = chunks_list[0].start_char + new_claim_data.relative_span.start
+                        ev_end = chunks_list[0].start_char + new_claim_data.relative_span.end
+                    else:
+                        ev_end = ev_start + len(ev_quote)
+
+                    # 7. Contradiction Handling
+                    if (
+                        verdict.verdict.upper() == "CONTRADICTED"
+                        or verdict.support_type == EvidenceSupportType.CONTRADICTS
+                    ):
+                        is_contradicted = True
+                        claim.status = ClaimStatus.DISPUTED
+
+                        # Look up persisted new claims to mark disputed as well
+                        stmt_new = select(Claim).where(
+                            Claim.run_id == run_id,
+                            Claim.source_id == new_source.id,
+                            Claim.quote == new_claim_data.quote,
+                        )
+                        new_claim_rows = list((await session.execute(stmt_new)).scalars().all())
+                        for ncr in new_claim_rows:
+                            ncr.status = ClaimStatus.DISPUTED
+
+                        # Emit 'claim.disputed' event
+                        await RunRepo.add_event(
+                            session=session,
+                            run_id=run_id,
+                            event_type="claim.disputed",
+                            payload_json={
+                                "claim_id_1": claim.id,
+                                "claim_id_2": new_claim_rows[0].id if new_claim_rows else None,
+                                "reason": verdict.contradiction_details or verdict.reasoning,
+                            },
+                        )
+
+                        # Record contradicting evidence rows on both sides
+                        await EvidenceRepo.create_evidence(
+                            session=session,
+                            claim_id=claim.id,
+                            source_id=new_source.id,
+                            document_id=new_doc.id,
+                            chunk_id=chunks_list[0].id,
+                            span_start=ev_start,
+                            span_end=ev_end,
+                            quote=ev_quote,
+                            support_type=EvidenceSupportType.CONTRADICTS,
+                            created_by_run_id=run_id,
+                            created_by_agent="verifier",
+                            independent_of_json=[orig_source.id] if is_indep else [],
+                        )
+                        continue
+
+                    # 8. Supporting Evidence
+                    elif verdict.verdict.upper() in ("SUPPORTED", "PARTIALLY_SUPPORTED"):
+                        if is_indep:
+                            independent_supports += 1
+                            if new_source.trust_tier in (TrustTier.STANDARD, TrustTier.TRUSTED):
+                                has_standard_or_trusted_support = True
+                                strongest_tier = new_source.trust_tier
+
+                        # Create supporting evidence link
+                        await EvidenceRepo.create_evidence(
+                            session=session,
+                            claim_id=claim.id,
+                            source_id=new_source.id,
+                            document_id=new_doc.id,
+                            chunk_id=chunks_list[0].id,
+                            span_start=ev_start,
+                            span_end=ev_end,
+                            quote=ev_quote,
+                            support_type=verdict.support_type,
+                            created_by_run_id=run_id,
+                            created_by_agent="verifier",
+                            independent_of_json=[orig_source.id] if is_indep else [],
+                        )
+
+            # 9. Enforce QUARANTINE Rule: cannot exceed 0.50 without standard/trusted support
+            if (
+                orig_source.trust_tier == TrustTier.QUARANTINE
+                and not has_standard_or_trusted_support
+            ):
+                strongest_tier = TrustTier.QUARANTINE
+
+            # 10. Recompute and persist final confidence score
+            if not is_contradicted:
+                cred_score = None
+                if orig_source and orig_source.location:
+                    domain_hint = scope.get("domain_hint") if scope else None
+                    cred_score, _ = SourceCredibilityScorer.score_source(
+                        orig_source.location, domain_hint
+                    )
+
+                ai_conf = sum(ai_confidences) / len(ai_confidences) if ai_confidences else None
+
+                score, label, _ = compute_confidence_score(
+                    strongest_tier=strongest_tier,
+                    independent_corroborations=independent_supports,
+                    is_stale=_is_source_stale(
+                        orig_source.published_at,
+                        time_horizon,
+                        verification_time,
+                    ),
+                    claim_type=claim.claim_type,
+                    llm_adjustment=0.0,
+                    rationale="Post-verification composite evaluation",
+                    credibility_score=cred_score,
+                    ai_universe_confidence=ai_conf,
+                )
+                claim.confidence = score
+                claim.confidence_method = "v1-composite"
+
+        async with get_sqlite_write_lock():
+            await self._record_deterministic_conflicts(claims, session, run_id)
+            await session.flush()
+            await session.commit()
+        return claims

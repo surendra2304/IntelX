@@ -1,0 +1,335 @@
+"""INTELX Central Model Gateway for Role-Based Routing, Structured Output, and Cost Accounting."""
+
+import json
+import logging
+from typing import Any
+
+from pydantic import BaseModel
+
+from intelx.core.errors import ProviderError, StructuredOutputError
+from intelx.core.settings import Settings, get_settings
+from intelx.models.ai_universe_provider import AIUniverseProvider
+from intelx.models.providers import (
+    AnthropicProvider,
+    BaseLLMProvider,
+    MockProvider,
+    OpenAICompatibleProvider,
+)
+from intelx.models.types import ModelResult, Usage
+
+logger = logging.getLogger(__name__)
+
+
+class ModelGateway:
+    """Central gateway routing all agent LLM requests with schema validation, AI-Universe support, and fallback."""
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.settings = settings or get_settings()
+        self._mock_provider = MockProvider()
+        self._openai_provider: OpenAICompatibleProvider | None = None
+        self._anthropic_provider: AnthropicProvider | None = None
+        self._ai_universe_provider: AIUniverseProvider | None = None
+        self._run_usage: dict[str, Usage] = {}
+
+    def get_usage(self, run_id: str | None) -> Usage:
+        """Retrieve aggregated token and cost usage for a run."""
+        if not run_id:
+            return Usage(input_tokens=0, output_tokens=0, usd_cost=0.0)
+        return self._run_usage.get(run_id, Usage(input_tokens=0, output_tokens=0, usd_cost=0.0))
+
+    def _get_provider(self) -> tuple[str, BaseLLMProvider]:
+        """Resolve active LLM provider backend based on settings."""
+        if self.settings.MOCK_MODE:
+            return "mock", self._mock_provider
+
+        provider_name = (self.settings.LLM_PROVIDER or "mock").lower()
+        if provider_name in ("inference", "ai_universe", "aiuniverse"):
+            if self._ai_universe_provider is None:
+                self._ai_universe_provider = AIUniverseProvider(settings=self.settings)
+            return "inference", self._ai_universe_provider
+        elif provider_name in (
+            "openai_compatible",
+            "openai",
+            "groq",
+            "vllm",
+            "ollama",
+            "openrouter",
+        ):
+            if self._openai_provider is None:
+                self._openai_provider = OpenAICompatibleProvider(settings=self.settings)
+            return provider_name, self._openai_provider
+        elif provider_name == "anthropic":
+            if self._anthropic_provider is None:
+                self._anthropic_provider = AnthropicProvider(settings=self.settings)
+            return "anthropic", self._anthropic_provider
+
+        return "mock", self._mock_provider
+
+    async def _execute_with_fallback(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model_name: str,
+        role: str,
+        schema_model: type[BaseModel] | None,
+        temperature: float,
+        max_tokens: int,
+    ) -> tuple[str, Usage, str, dict[str, Any]]:
+        """Attempt configured providers and return metadata tied to the successful call."""
+        primary_name, primary_provider = self._get_provider()
+        primary_error: Exception | None = None
+
+        # Attempt 1: Primary provider
+        try:
+            text_out, usage = await primary_provider.complete(
+                messages=messages,
+                model=model_name,
+                role=role,
+                schema_model=schema_model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            metadata = dict(getattr(primary_provider, "last_metadata", {}) or {})
+            return text_out, usage, primary_name, metadata
+        except Exception as e:
+            primary_error = e
+            logger.warning(
+                f"Primary provider [{primary_name}] failed for role [{role}]: {e}. "
+                "Executing fallback chain..."
+            )
+
+        # Attempt 2: Secondary direct LLM provider (if primary was AI-Universe/Inference and LLM keys exist)
+        if primary_name in ("ai_universe", "inference"):
+            if self.settings.get_llm_api_key("openai_compatible"):
+                try:
+                    if self._openai_provider is None:
+                        self._openai_provider = OpenAICompatibleProvider(settings=self.settings)
+                    logger.info(
+                        "Falling back from AI-Universe to secondary OpenAI-Compatible provider"
+                    )
+                    text_out, usage = await self._openai_provider.complete(
+                        messages=messages,
+                        model=model_name,
+                        role=role,
+                        schema_model=schema_model,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
+                    return text_out, usage, "openai_compatible", {}
+                except Exception as e2:
+                    logger.warning(f"Secondary LLM provider fallback failed: {e2}")
+
+        # A provider outage must not be presented as a successful synthetic answer unless
+        # the operator explicitly opted into mock fallback for a non-production environment.
+        if self.settings.is_production() or not self.settings.ALLOW_MOCK_FALLBACK:
+            raise ProviderError(
+                f"All configured model providers failed for role [{role}]; mock fallback is disabled."
+            ) from primary_error
+
+        logger.warning("Explicit non-production mock fallback enabled for role [%s]", role)
+        text_out, usage = await self._mock_provider.complete(
+            messages=messages,
+            model="mock-gpt-4o",
+            role=role,
+            schema_model=schema_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return text_out, usage, "mock", {}
+
+    async def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        role: str,
+        schema_model: type[BaseModel] | None = None,
+        temperature: float = 0.2,
+        max_tokens: int = 2000,
+        run_id: str | None = None,
+    ) -> ModelResult:
+        """Execute role-routed LLM completion with fallback chain, schema validation, and retry."""
+        model_name = self.settings.get_model_for_role(role)
+        log_suffix = f" (run={run_id})" if run_id else ""
+        logger.info(f"LLM request role=[{role}] model=[{model_name}]{log_suffix}")
+
+        # 1. Completion attempt with fallback chain
+        text_output, usage, active_provider, metadata = await self._execute_with_fallback(
+            messages=messages,
+            model_name=model_name,
+            role=role,
+            schema_model=schema_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+        parsed_instance: Any | None = None
+
+        if schema_model is not None:
+            parsed_instance, validation_err = self._try_parse_schema(text_output, schema_model)
+            if parsed_instance is None:
+                # 2. Structured Output Self-Correction: Retry ONCE with error feedback
+                logger.warning(
+                    f"Schema validation failed for {schema_model.__name__}: {validation_err}. "
+                    "Initiating retry..."
+                )
+                correction_prompt = (
+                    f"Your previous response failed validation for {schema_model.__name__}:\n"
+                    f"Errors: {validation_err}\n"
+                    "Please respond with valid JSON strictly matching the schema definition."
+                )
+                correction_messages = list(messages) + [
+                    {"role": "assistant", "content": text_output},
+                    {"role": "user", "content": correction_prompt},
+                ]
+
+                (
+                    retry_text,
+                    retry_usage,
+                    retry_provider,
+                    retry_metadata,
+                ) = await self._execute_with_fallback(
+                    messages=correction_messages,
+                    model_name=model_name,
+                    role=role,
+                    schema_model=schema_model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                active_provider = retry_provider
+                metadata = retry_metadata
+
+                # Accumulate usage from retry
+                usage = Usage(
+                    input_tokens=usage.input_tokens + retry_usage.input_tokens,
+                    output_tokens=usage.output_tokens + retry_usage.output_tokens,
+                    usd_cost=round(usage.usd_cost + retry_usage.usd_cost, 6),
+                )
+                text_output = retry_text
+
+                parsed_instance, retry_err = self._try_parse_schema(retry_text, schema_model)
+                if parsed_instance is None and active_provider != "mock":
+                    if self.settings.is_production() or not self.settings.ALLOW_MOCK_FALLBACK:
+                        raise StructuredOutputError(
+                            f"Provider output failed schema validation for {schema_model.__name__}; "
+                            "synthetic fallback is disabled.",
+                            details={
+                                "role": role,
+                                "model": model_name,
+                                "provider": active_provider,
+                                "error": str(retry_err),
+                            },
+                        )
+                    logger.warning(
+                        "Explicit non-production mock fallback enabled after %s schema failures",
+                        schema_model.__name__,
+                    )
+                    mock_text, mock_usage = await self._mock_provider.complete(
+                        messages=messages,
+                        model="mock-gpt-4o",
+                        role=role,
+                        schema_model=schema_model,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
+                    text_output = mock_text
+                    parsed_instance, retry_err = self._try_parse_schema(mock_text, schema_model)
+                    active_provider = "mock"
+                    metadata = {}
+
+                if parsed_instance is None:
+                    err_msg = (
+                        f"Model output failed schema validation for {schema_model.__name__} "
+                        f"after retry: {retry_err}"
+                    )
+                    raise StructuredOutputError(
+                        err_msg,
+                        details={
+                            "role": role,
+                            "model": model_name,
+                            "provider": active_provider,
+                            "raw_text": retry_text,
+                            "error": str(retry_err),
+                        },
+                    )
+
+        if run_id:
+            cur = self._run_usage.get(run_id, Usage(input_tokens=0, output_tokens=0, usd_cost=0.0))
+            self._run_usage[run_id] = Usage(
+                input_tokens=cur.input_tokens + usage.input_tokens,
+                output_tokens=cur.output_tokens + usage.output_tokens,
+                usd_cost=round(cur.usd_cost + usage.usd_cost, 6),
+            )
+
+        return ModelResult(
+            text=text_output,
+            parsed=parsed_instance,
+            usage=usage,
+            provider=active_provider,
+            model=model_name,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _try_parse_schema(
+        raw_text: str, schema_model: type[BaseModel]
+    ) -> tuple[BaseModel | None, str | None]:
+        """Attempt to extract JSON and validate against target Pydantic schema."""
+        import re
+
+        cleaned_text = raw_text.strip()
+
+        # Strategy 1: Direct parse
+        try:
+            data = json.loads(cleaned_text)
+            return schema_model.model_validate(data), None
+        except Exception:
+            pass
+
+        # Strategy 2: Extract from ```json ... ``` or ``` ... ``` markdown block
+        m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned_text)
+        if m:
+            try:
+                data = json.loads(m.group(1).strip())
+                return schema_model.model_validate(data), None
+            except Exception:
+                pass
+
+        # Strategy 3: Extract first { to last } JSON object
+        first_brace = cleaned_text.find("{")
+        last_brace = cleaned_text.rfind("}")
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            try:
+                candidate = cleaned_text[first_brace : last_brace + 1]
+                data = json.loads(candidate)
+                return schema_model.model_validate(data), None
+            except Exception:
+                pass
+
+        # Strategy 4: Extract first [ to last ] JSON array
+        first_bracket = cleaned_text.find("[")
+        last_bracket = cleaned_text.rfind("]")
+        if first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
+            try:
+                candidate = cleaned_text[first_bracket : last_bracket + 1]
+                data = json.loads(candidate)
+                return schema_model.model_validate(data), None
+            except Exception:
+                pass
+
+        # If all extraction failed, run direct parse to capture the exact validation or decode error
+        try:
+            data = json.loads(cleaned_text)
+            return schema_model.model_validate(data), None
+        except Exception as e:
+            return None, str(e)
+
+
+_global_gateway: ModelGateway | None = None
+
+
+def get_model_gateway() -> ModelGateway:
+    """Singleton accessor for central ModelGateway instance."""
+    global _global_gateway
+    if _global_gateway is None:
+        _global_gateway = ModelGateway()
+    return _global_gateway

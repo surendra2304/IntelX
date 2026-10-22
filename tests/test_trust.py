@@ -1,0 +1,654 @@
+"""Tests for INTELX Trust Layer: Independence, Confidence, Verifier, Analyst, Critic, and Entity."""
+
+from datetime import UTC, datetime, timedelta, timezone
+
+import pytest
+from sqlalchemy import select
+
+from intelx.agents.analyst import AnalystAgent
+from intelx.agents.critic import CriticAgent
+from intelx.agents.retriever import RetrievedDoc, RetrieverAgent, RetrieverOutput
+from intelx.agents.scout import ScoutAgent, ScoutOutput, SourceCandidate
+from intelx.agents.verifier import (
+    VerificationVerdict,
+    VerifierAgent,
+    _is_source_stale,
+    _parse_time_horizon,
+)
+from intelx.core.confidence import compute_confidence_score
+from intelx.core.credibility import SourceCredibilityScorer
+from intelx.core.enums import (
+    ClaimOrigin,
+    ClaimStatus,
+    ClaimType,
+    EntityMergeStatus,
+    EntityType,
+    EvidenceSupportType,
+    SourceKind,
+    TrustTier,
+)
+from intelx.core.independence import compute_3gram_jaccard, is_independent_evidence
+from intelx.db.models import EntityMerge, Event, Evidence
+from intelx.db.repos import ClaimRepo, RunRepo, SourceRepo
+from intelx.db.session import get_sessionmaker
+from intelx.memory.entities import EntityResolver
+from intelx.memory.normalize import ingest_and_normalize
+from intelx.models.gateway import ModelGateway
+from intelx.models.types import Usage
+
+
+@pytest.fixture
+def db_session_factory():
+    """Get active async sessionmaker."""
+    return get_sessionmaker()
+
+
+def test_independence_rules():
+    """Verify evidence independence detection across publishers, domains, and n-gram overlap."""
+    source_a = {
+        "domain": "reuters.com",
+        "publisher": "Reuters News",
+        "fingerprint": "fp_reuters_101",
+    }
+    source_b_same_pub = {
+        "domain": "yahoo.com",
+        "publisher": "Reuters News",
+        "fingerprint": "fp_yahoo_102",
+    }
+    source_c_syndicated = {
+        "domain": "techwire.net",
+        "publisher": "TechWire",
+        "fingerprint": "fp_techwire_103",
+    }
+    source_d_independent = {
+        "domain": "nature.com",
+        "publisher": "Nature Publishing Group",
+        "fingerprint": "fp_nature_104",
+    }
+
+    quote_orig = "TSMC and IBM demonstrated 40 percent reduction in crosstalk noise."
+    quote_near_copy = (
+        "TSMC and IBM demonstrated 40 percent reduction in crosstalk noise across transmon qubits."
+    )
+    quote_diff = "Independent empirical evaluation of fault tolerance in superconducting circuits."
+
+    # 1. Same publisher -> Dependent
+    is_indep_pub, _ = is_independent_evidence(
+        source_a, None, quote_orig, source_b_same_pub, None, quote_diff
+    )
+    assert is_indep_pub is False
+
+    # 2. Syndicated near-copy (Jaccard >= 0.50) -> Dependent
+    jaccard = compute_3gram_jaccard(quote_orig, quote_near_copy)
+    assert jaccard >= 0.50
+    is_indep_syn, _ = is_independent_evidence(
+        source_a, None, quote_orig, source_c_syndicated, None, quote_near_copy
+    )
+    assert is_indep_syn is False
+
+    # 3. Genuinely different -> Independent
+    is_indep_true, _ = is_independent_evidence(
+        source_a, None, quote_orig, source_d_independent, None, quote_diff
+    )
+    assert is_indep_true is True
+
+
+def test_confidence_formula_properties():
+    """Verify deterministic property rules of the v1-composite confidence formula."""
+    # 1. Base tier checks
+    score_trusted, _, _ = compute_confidence_score(TrustTier.TRUSTED)
+    assert score_trusted == 0.70
+
+    score_standard, _, _ = compute_confidence_score(TrustTier.STANDARD)
+    assert score_standard == 0.50
+
+    score_quarantine, _, _ = compute_confidence_score(TrustTier.QUARANTINE)
+    assert score_quarantine == 0.20
+
+    # 2. Corroboration bonus capped at 3 (+0.45 max)
+    score_corrob_3, _, _ = compute_confidence_score(
+        TrustTier.STANDARD, independent_corroborations=3
+    )
+    assert score_corrob_3 == 0.95
+
+    score_corrob_5, _, _ = compute_confidence_score(
+        TrustTier.STANDARD, independent_corroborations=5
+    )
+    assert score_corrob_5 == 0.95
+
+    # 3. Penalties: Opinion (-0.25) and Staleness (-0.20)
+    score_opinion, _, _ = compute_confidence_score(
+        TrustTier.STANDARD, claim_type=ClaimType.STATEMENT_OF_OPINION
+    )
+    assert score_opinion == 0.25
+
+    score_stale, _, _ = compute_confidence_score(TrustTier.STANDARD, is_stale=True)
+    assert score_stale == 0.30
+
+    # 4. LLM adjustment clamping ([-0.10, +0.10])
+    score_adj_high, _, _ = compute_confidence_score(TrustTier.STANDARD, llm_adjustment=0.50)
+    assert score_adj_high == 0.60
+
+    # 5. Clamping bounds [0.05, 0.95]
+    score_min, _, _ = compute_confidence_score(
+        TrustTier.QUARANTINE, is_stale=True, claim_type=ClaimType.FORECAST, llm_adjustment=-0.10
+    )
+    assert score_min == 0.05
+
+
+def test_parse_time_horizon_rejects_excessively_long_numeric_value():
+    """Untrusted horizon strings must not trip Python's integer-string conversion limit."""
+    huge_horizon = "9" * 5000 + "d"
+    assert _parse_time_horizon({"query_scope": {"time_horizon": huge_horizon}}) is None
+
+
+def test_verifier_treats_exact_horizon_cutoff_as_fresh_across_timezones():
+    """A publication exactly at the explicit cutoff stays fresh in any equivalent timezone."""
+    now = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
+    horizon = _parse_time_horizon({"query_scope": {"time_horizon": "30d"}})
+    assert horizon == timedelta(days=30)
+
+    cutoff_utc = now - horizon
+    cutoff_offset = cutoff_utc.astimezone(timezone(timedelta(hours=5, minutes=30)))
+
+    assert _is_source_stale(cutoff_utc, horizon, now) is False
+    assert _is_source_stale(cutoff_offset, horizon, now) is False
+    assert _is_source_stale(cutoff_utc, horizon, now) == _is_source_stale(
+        cutoff_offset, horizon, now
+    )
+
+    one_microsecond = timedelta(microseconds=1)
+    before_cutoff_utc = cutoff_utc - one_microsecond
+    after_cutoff_utc = cutoff_utc + one_microsecond
+    before_cutoff_offset = before_cutoff_utc.astimezone(timezone(timedelta(hours=5, minutes=30)))
+    after_cutoff_offset = after_cutoff_utc.astimezone(timezone(timedelta(hours=5, minutes=30)))
+
+    assert _is_source_stale(before_cutoff_utc, horizon, now) is True
+    assert _is_source_stale(before_cutoff_offset, horizon, now) is True
+    assert _is_source_stale(after_cutoff_utc, horizon, now) is False
+    assert _is_source_stale(after_cutoff_offset, horizon, now) is False
+
+
+@pytest.mark.asyncio
+async def test_verifier_applies_only_explicit_time_horizon_to_confidence(db_session_factory):
+    """Apply the persisted FRIDAY horizon only to dated evidence outside that range."""
+    async with db_session_factory() as session:
+        now = datetime.now(UTC)
+        cases = (
+            ("30d", now - timedelta(days=60), True),
+            ("30d", (now - timedelta(days=60)).replace(tzinfo=None), True),
+            ("30d", now - timedelta(days=5), False),
+            (None, now - timedelta(days=60), False),
+            ("30d", None, False),
+            ("30weeks", now - timedelta(days=60), False),
+        )
+
+        class CandidateScout:
+            async def execute(self, **kwargs):
+                return ScoutOutput(
+                    candidates=[
+                        SourceCandidate(
+                            location="https://verification.example/evidence",
+                            title="Verification candidate",
+                            reason="Deterministic confidence test",
+                        )
+                    ]
+                )
+
+        class EmptyRetriever:
+            async def execute(self, **kwargs):
+                return RetrieverOutput()
+
+        verifier = VerifierAgent(scout_agent=CandidateScout(), retriever_agent=EmptyRetriever())
+        for index, (horizon, published_at, expected_stale) in enumerate(cases):
+            scope_json = {"query_scope": {"time_horizon": horizon}} if horizon else {}
+            run = await RunRepo.create_run(
+                session,
+                objective="Check the age of evidence",
+                scope_json=scope_json,
+            )
+            source = await SourceRepo.create_source(
+                session=session,
+                kind=SourceKind.WEB,
+                location=f"https://source{index}.example/research",
+                domain="example",
+                title="Research source",
+                published_at=published_at,
+                trust_tier=TrustTier.STANDARD,
+            )
+            document = await SourceRepo.create_document(
+                session=session,
+                source_id=source.id,
+                text_content="A source-backed claim is recorded.",
+            )
+            chunk = await SourceRepo.create_chunk(
+                session=session,
+                document_id=document.id,
+                idx=0,
+                start_char=0,
+                end_char=len(document.text),
+                text_content=document.text,
+            )
+            claim = await ClaimRepo.create_claim(
+                session=session,
+                run_id=run.id,
+                source_id=source.id,
+                document_id=document.id,
+                chunk_id=chunk.id,
+                text_content=document.text,
+                quote=document.text,
+                span_start=0,
+                span_end=len(document.text),
+                claim_type=ClaimType.FACT,
+                origin=ClaimOrigin.EXTRACTED,
+                status=ClaimStatus.ACTIVE,
+            )
+            await session.commit()
+            persisted_run = await RunRepo.get_run(session, run.id)
+            assert persisted_run is not None
+
+            await verifier.execute(
+                claims=[claim],
+                scope=persisted_run.scope_json,
+                session=session,
+                run_id=run.id,
+            )
+
+            credibility_score, _ = SourceCredibilityScorer.score_source(source.location, None)
+            expected_score, _, _ = compute_confidence_score(
+                strongest_tier=TrustTier.STANDARD,
+                is_stale=expected_stale,
+                claim_type=ClaimType.FACT,
+                credibility_score=credibility_score,
+            )
+            assert claim.confidence == expected_score, (
+                f"horizon={horizon!r}, published_at={published_at!r}, "
+                f"scope={persisted_run.scope_json!r}"
+            )
+
+
+@pytest.mark.asyncio
+async def test_contradiction_handling_and_disputed_status(db_session_factory):
+    """Verify contradicting evidence marks both claims DISPUTED and records two-sided evidence."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(session, objective="Battery lifecycle contradiction test")
+
+        text_1 = "Lab testing verified that degradation was strictly under 5 percent."
+        s1, doc1, chunks1, _ = await ingest_and_normalize(
+            session=session,
+            raw_bytes=text_1.encode("utf-8"),
+            location="https://lab1.org/paper.html",
+            kind=SourceKind.WEB,
+            domain="lab1.org",
+            title="Lab 1 Report",
+        )
+
+        quote_1 = "strictly under 5 percent"
+        s1_start = text_1.index(quote_1)
+        claim1 = await ClaimRepo.create_claim(
+            session=session,
+            run_id=run.id,
+            source_id=s1.id,
+            document_id=doc1.id,
+            chunk_id=chunks1[0].id,
+            text_content="Cell degradation was under 5 percent.",
+            quote=quote_1,
+            span_start=s1_start,
+            span_end=s1_start + len(quote_1),
+            claim_type=ClaimType.MEASUREMENT,
+            origin=ClaimOrigin.EXTRACTED,
+            status=ClaimStatus.ACTIVE,
+        )
+
+        text_2 = "Audit results showed cell capacity degradation exceeded 25 percent under load."
+        s2, doc2, chunks2, _ = await ingest_and_normalize(
+            session=session,
+            raw_bytes=text_2.encode("utf-8"),
+            location="https://independent-audit.org/critique.html",
+            kind=SourceKind.WEB,
+            domain="independent-audit.org",
+            title="Independent Audit",
+        )
+
+        quote_2 = "exceeded 25 percent"
+        s2_start = text_2.index(quote_2)
+        await ClaimRepo.create_claim(
+            session=session,
+            run_id=run.id,
+            source_id=s2.id,
+            document_id=doc2.id,
+            chunk_id=chunks2[0].id,
+            text_content="Degradation exceeded 25 percent.",
+            quote=quote_2,
+            span_start=s2_start,
+            span_end=s2_start + len(quote_2),
+            claim_type=ClaimType.MEASUREMENT,
+            origin=ClaimOrigin.EXTRACTED,
+            status=ClaimStatus.ACTIVE,
+        )
+
+        # Mock Verifier Gateway returning contradiction verdict
+        class ContradictingVerifierGateway(ModelGateway):
+            async def complete(self, messages, **kwargs):
+                role = kwargs.get("role", "")
+                if role == "scout":
+                    from intelx.agents.scout import ScoutOutput, SourceCandidate
+
+                    return type(
+                        "Res",
+                        (),
+                        {
+                            "parsed": ScoutOutput(
+                                candidates=[
+                                    SourceCandidate(
+                                        location="https://independent-audit.org/critique.html",
+                                        title="Independent Audit",
+                                        reason="Audit finding",
+                                    )
+                                ]
+                            )
+                        },
+                    )()
+                elif role == "extractor":
+                    from intelx.agents.extractor import (
+                        ExtractedClaim,
+                        ExtractionResult,
+                        RelativeSpan,
+                    )
+
+                    return type(
+                        "Res",
+                        (),
+                        {
+                            "parsed": ExtractionResult(
+                                claims=[
+                                    ExtractedClaim(
+                                        text="Degradation exceeded 25 percent under load.",
+                                        quote=quote_2,
+                                        relative_span=RelativeSpan(start=0, end=len(quote_2)),
+                                        claim_type=ClaimType.MEASUREMENT,
+                                    )
+                                ]
+                            )
+                        },
+                    )()
+                elif role == "verifier":
+                    return type(
+                        "Res",
+                        (),
+                        {
+                            "parsed": VerificationVerdict(
+                                verdict="CONTRADICTED",
+                                support_type=EvidenceSupportType.CONTRADICTS,
+                                reasoning="Audit reports 25% degradation vs 5% claimed.",
+                                contradiction_details="5% vs 25% degradation rate",
+                            ),
+                            "text": "CONTRADICTED",
+                            "usage": Usage(),
+                        },
+                    )()
+                return await super().complete(messages, **kwargs)
+
+        class MockScout(ScoutAgent):
+            async def execute(self, subquestion, **kwargs):
+                return ScoutOutput(
+                    candidates=[
+                        SourceCandidate(
+                            location=s2.location,
+                            title="Independent Audit",
+                            reason="Explicit contradiction-verification test fixture",
+                        )
+                    ]
+                )
+
+        class MockRetriever(RetrieverAgent):
+            async def execute(self, candidates, session, run_id=None, **kwargs):
+                return RetrieverOutput(
+                    retrieved=[
+                        RetrievedDoc(
+                            source_id=s2.id,
+                            document_id=doc2.id,
+                            location=s2.location,
+                            chunks_count=len(chunks2),
+                        )
+                    ]
+                )
+
+        verifier = VerifierAgent(
+            gateway=ContradictingVerifierGateway(),
+            scout_agent=MockScout(),
+            retriever_agent=MockRetriever(),
+        )
+        await verifier.execute(
+            claims=[claim1],
+            session=session,
+            run_id=run.id,
+        )
+
+        assert claim1.status == ClaimStatus.DISPUTED
+
+        stmt_ev = select(Event).where(Event.run_id == run.id, Event.type == "claim.disputed")
+        disputed_ev = (await session.execute(stmt_ev)).scalar_one_or_none()
+        assert disputed_ev is not None
+
+        stmt_evi = select(Evidence).where(
+            Evidence.claim_id == claim1.id,
+            Evidence.support_type == EvidenceSupportType.CONTRADICTS,
+        )
+        contra_evi = (await session.execute(stmt_evi)).scalars().all()
+        assert len(contra_evi) >= 1
+
+
+@pytest.mark.asyncio
+async def test_deterministic_conflict_records_two_sided_exact_evidence(db_session_factory):
+    """Independent incompatible measurements must create disputed claims and auditable spans."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(
+            session, objective="Independent silicon energy-density comparison"
+        )
+        statements = (
+            (
+                "Silicon-graphite composite anodes reached a gravimetric cell energy density of 420 Wh/kg.",
+                "https://nature.example/energy-density",
+                "nature.example",
+                "Springer Nature",
+            ),
+            (
+                "Silicon composite anode cell energy density was capped at 310 Wh/kg under full aging.",
+                "https://physics.example/silicon-aging",
+                "physics.example",
+                "American Physical Society",
+            ),
+        )
+        claims = []
+        documents = []
+        for text, location, domain, publisher in statements:
+            source, document, chunks, _ = await ingest_and_normalize(
+                session=session,
+                raw_bytes=text.encode("utf-8"),
+                location=location,
+                kind=SourceKind.WEB,
+                domain=domain,
+                publisher=publisher,
+                title="Independent measurement report",
+                created_by_run_id=run.id,
+            )
+            claim = await ClaimRepo.create_claim(
+                session=session,
+                run_id=run.id,
+                source_id=source.id,
+                document_id=document.id,
+                chunk_id=chunks[0].id,
+                text_content=text,
+                quote=text,
+                span_start=0,
+                span_end=len(text),
+                claim_type=ClaimType.MEASUREMENT,
+                subject="Entity",
+                origin=ClaimOrigin.EXTRACTED,
+                status=ClaimStatus.ACTIVE,
+            )
+            claims.append(claim)
+            documents.append(document)
+
+        class EmptyScout:
+            async def execute(self, **kwargs):
+                from intelx.agents.scout import ScoutOutput
+
+                return ScoutOutput()
+
+        verifier = VerifierAgent(scout_agent=EmptyScout())
+        await verifier.execute(claims=claims, session=session, run_id=run.id)
+
+        assert all(claim.status == ClaimStatus.DISPUTED for claim in claims)
+        assert all(claim.confidence <= 0.35 for claim in claims)
+        assert all(claim.confidence_method == "deterministic-contradiction-v1" for claim in claims)
+
+        stmt = select(Evidence).where(
+            Evidence.created_by_run_id == run.id,
+            Evidence.created_by_agent == "contradiction-engine",
+            Evidence.support_type == EvidenceSupportType.CONTRADICTS,
+        )
+        contradiction_evidence = list((await session.execute(stmt)).scalars().all())
+        assert len(contradiction_evidence) == 2
+        for evidence in contradiction_evidence:
+            source_document = next(
+                document for document in documents if document.id == evidence.document_id
+            )
+            assert evidence.quote == source_document.text[evidence.span_start : evidence.span_end]
+            assert len(evidence.independent_of_json) == 1
+
+        event_stmt = select(Event).where(Event.run_id == run.id, Event.type == "claim.disputed")
+        assert (await session.execute(event_stmt)).scalar_one_or_none() is not None
+
+
+@pytest.mark.asyncio
+async def test_entity_resolution_workflow(db_session_factory):
+    """Verify EntityResolver auto-merges high similarity and proposes near-matches."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(session, objective="Entity resolution test")
+
+        # 1. Create canonical entity
+        ent1, _ = await EntityResolver.resolve_or_create(
+            session=session,
+            name="Taiwan Semiconductor Manufacturing Company",
+            entity_type=EntityType.ORG,
+            aliases=["TSMC"],
+            run_id=run.id,
+        )
+        assert ent1.id is not None
+
+        # 2. Match via alias -> returns existing canonical entity
+        ent_alias, status_alias = await EntityResolver.resolve_or_create(
+            session=session,
+            name="TSMC",
+            entity_type=EntityType.ORG,
+            run_id=run.id,
+        )
+        assert ent_alias.id == ent1.id
+        assert status_alias == EntityMergeStatus.APPLIED
+
+        # 3. Near-match with suffix variance (score >= 0.95) -> Auto-applies merge
+        ent_auto, status_auto = await EntityResolver.resolve_or_create(
+            session=session,
+            name="Taiwan Semiconductor Manufacturing Co",
+            entity_type=EntityType.ORG,
+            run_id=run.id,
+        )
+        assert ent_auto.id == ent1.id
+        assert status_auto == EntityMergeStatus.APPLIED
+
+        # 4. Moderate similarity (0.70 <= score < 0.95) -> Creates PROPOSED merge
+        ent_prop, status_prop = await EntityResolver.resolve_or_create(
+            session=session,
+            name="Taiwan Semiconductor Manufacturing Enterprise",
+            entity_type=EntityType.ORG,
+            run_id=run.id,
+        )
+        assert ent_prop.id != ent1.id
+        assert status_prop == EntityMergeStatus.PROPOSED
+
+        # Check entity_merges table
+        stmt_merges = select(EntityMerge)
+        merges = (await session.execute(stmt_merges)).scalars().all()
+        assert len(merges) >= 2
+        statuses = [m.status for m in merges]
+        assert EntityMergeStatus.APPLIED in statuses
+        assert EntityMergeStatus.PROPOSED in statuses
+
+
+@pytest.mark.asyncio
+async def test_critic_and_analyst_agents():
+    """Verify AnalystAgent and CriticAgent produce valid structured outputs."""
+    # 1. Analyst Agent
+    analyst = AnalystAgent()
+    mock_claims = [
+        {"id": "c1", "text": "TSMC 2nm node achieved 80% yield.", "confidence": 0.90},
+        {"id": "c2", "text": "Samsung 2nm pilot fab started in Q1 2026.", "confidence": 0.85},
+    ]
+    analysis = await analyst.execute(claims=mock_claims)
+    assert hasattr(analysis, "timeline")
+    assert hasattr(analysis, "themes")
+
+    # 2. Critic Agent
+    critic = CriticAgent()
+    critique = await critic.execute(
+        draft_findings=["2nm foundries will dominate 70% of shipments by year end."],
+        claims=mock_claims,
+    )
+    assert critique.severity in ("LOW", "MEDIUM", "HIGH")
+    assert hasattr(critique, "unsupported_conclusions")
+
+
+@pytest.mark.asyncio
+async def test_mock_dispute_precision_different_vs_same_subject():
+    """Verify mock verifier requires same entity, same metric family, and conflicting values for dispute."""
+    from intelx.models.providers import MockProvider
+
+    provider = MockProvider()
+
+    # 1. Different subjects, different values -> NOT disputed (VERIFIED)
+    msg_diff = [
+        {
+            "role": "user",
+            "content": (
+                "ORIGINAL CLAIM: Chemistry X shows an active gravimetric energy density of 160 Wh/kg.\n"
+                "ORIGINAL QUOTE: Chemistry X shows an active gravimetric energy density of 160 Wh/kg.\n\n"
+                "CANDIDATE CLAIM: Chemistry Y shows an active gravimetric energy density of 310 Wh/kg.\n"
+                "CANDIDATE QUOTE: Chemistry Y shows an active gravimetric energy density of 310 Wh/kg.\n\n"
+                "Evaluate relationship."
+            ),
+        }
+    ]
+    text_diff, _ = await provider.complete(
+        messages=msg_diff,
+        model="mock-gpt-4o",
+        role="verifier",
+        schema_model=VerificationVerdict,
+    )
+    verdict_diff = VerificationVerdict.model_validate_json(text_diff)
+    assert verdict_diff.verdict == "VERIFIED"
+    assert verdict_diff.support_type == EvidenceSupportType.SUPPORTS
+
+    # 2. Same subject, same metric, conflicting values -> DISPUTED (CONTRADICTED)
+    msg_same = [
+        {
+            "role": "user",
+            "content": (
+                "ORIGINAL CLAIM: Chemistry X shows an active gravimetric energy density of 160 Wh/kg.\n"
+                "ORIGINAL QUOTE: Chemistry X shows an active gravimetric energy density of 160 Wh/kg.\n\n"
+                "CANDIDATE CLAIM: Chemistry X shows an active gravimetric energy density of 120 Wh/kg.\n"
+                "CANDIDATE QUOTE: Chemistry X shows an active gravimetric energy density of 120 Wh/kg.\n\n"
+                "Evaluate relationship."
+            ),
+        }
+    ]
+    text_same, _ = await provider.complete(
+        messages=msg_same,
+        model="mock-gpt-4o",
+        role="verifier",
+        schema_model=VerificationVerdict,
+    )
+    verdict_same = VerificationVerdict.model_validate_json(text_same)
+    assert verdict_same.verdict == "CONTRADICTED"
+    assert verdict_same.support_type == EvidenceSupportType.CONTRADICTS

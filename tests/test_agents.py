@@ -1,0 +1,604 @@
+"""Tests for INTELX First Four Agents (Planner, Scout, Retriever, Extractor)."""
+
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from sqlalchemy import select
+
+from intelx.agents.contradictions import ContradictionEngine
+from intelx.agents.extractor import (
+    ExtractedClaim,
+    ExtractionResult,
+    ExtractorAgent,
+    RelativeSpan,
+)
+from intelx.agents.planner import Plan, PlannerAgent
+from intelx.agents.retriever import RetrieverAgent
+from intelx.agents.scout import ScoutAgent, SourceCandidate
+from intelx.agents.verifier import contradiction_eligible_claims
+from intelx.connectors.search import SearchResult
+from intelx.core.enums import ClaimType, SourceKind, TaskErrorClass
+from intelx.core.errors import ProviderError
+from intelx.core.settings import Settings
+from intelx.db.models import Chunk, Claim, Event
+from intelx.db.repos import RunRepo, SourceRepo
+from intelx.db.session import get_sessionmaker
+from intelx.memory.normalize import ingest_and_normalize
+from intelx.models.gateway import ModelGateway
+from intelx.models.types import Usage
+
+
+@pytest.fixture
+def db_session_factory():
+    """Get active async sessionmaker."""
+    return get_sessionmaker()
+
+
+@pytest.mark.asyncio
+async def test_retriever_cache_enriches_missing_publication_metadata(db_session_factory):
+    """Cached documents still backfill explicit date headers needed for temporal caveats."""
+    from datetime import UTC, datetime
+
+    location = "file:///fixtures/cached-publication-metadata.txt"
+    async with db_session_factory() as session:
+        source = await SourceRepo.create_source(
+            session=session,
+            kind=SourceKind.FILE,
+            location=location,
+            domain="archive.example",
+            title="Historical fixture",
+            fingerprint="cached-published-date-test",
+        )
+        await SourceRepo.create_document(
+            session=session,
+            source_id=source.id,
+            text_content="# Historical fixture\nPublished: 2021-01-10\nEvidence text.",
+        )
+        result = await RetrieverAgent().execute(
+            candidates=[
+                SourceCandidate(location=location, title="Historical fixture", reason="test")
+            ],
+            session=session,
+        )
+        assert len(result.retrieved) == 1
+        assert source.published_at == datetime(2021, 1, 10, tzinfo=UTC)
+
+
+def test_contradiction_engine_matches_subject_and_metric_before_disputing_values():
+    """Only materially different measurements of the same subject and metric conflict."""
+    claims = [
+        {
+            "id": "silicon-high",
+            "subject": "Entity",
+            "text": "Silicon-graphite composite anodes reached 420 Wh/kg energy density.",
+        },
+        {
+            "id": "silicon-low",
+            "subject": "Entity",
+            "text": "Under full-aging constraints, achievable cell energy density was capped at 310 Wh/kg.",
+        },
+        {
+            "id": "sodium",
+            "subject": "Entity",
+            "text": "Sodium-ion cathodes achieved 160 Wh/kg energy density.",
+        },
+    ]
+
+    conflicts = ContradictionEngine().analyze(
+        claims,
+        context_by_claim={
+            "silicon-low": "Physical Limitations of Silicon Anodes under Dynamic Cycling"
+        },
+    )
+
+    assert len(conflicts) == 1
+    assert {conflicts[0].claim_a_id, conflicts[0].claim_b_id} == {"silicon-high", "silicon-low"}
+    assert conflicts[0].conflict_type == "measurement"
+    assert "420 Wh/kg vs 310 Wh/kg" in conflicts[0].reason
+
+    different_chemistries = [
+        {
+            "id": "prussian-blue",
+            "subject": "Entity",
+            "text": "Prussian blue analogs reach 90 Wh/kg energy density.",
+        },
+        {
+            "id": "layered-oxide",
+            "subject": "Entity",
+            "text": "The optimized layered oxide formulation reaches 160 Wh/kg energy density.",
+        },
+    ]
+    assert ContradictionEngine().analyze(different_chemistries) == []
+
+
+@pytest.mark.asyncio
+async def test_planner_agent_schema_and_subquestion_cap():
+    """Verify PlannerAgent generates valid Plan within 5 subquestions cap."""
+    agent = PlannerAgent()
+    plan = await agent.execute(
+        objective="Analyze silicon photonics in next-generation AI datacenter interconnects",
+        scope={"depth": 2, "time_range": "2024-2026"},
+    )
+
+    assert isinstance(plan, Plan)
+    assert len(plan.subquestions) >= 1
+    assert len(plan.subquestions) <= 5
+    assert plan.source_strategy.expected_source_count > 0
+    assert plan.completion_criteria.min_sources_per_subquestion >= 1
+    assert plan.budget_allocation.extract_pct > 0.0
+
+
+@pytest.mark.asyncio
+async def test_scout_agent_dedup_and_policy_filtering():
+    """Verify ScoutAgent filters already seen URLs and policy-blocked domains."""
+    settings = Settings(
+        MOCK_MODE=True,
+        DOMAIN_DENYLIST=["blocked-domain.com"],
+    )
+    agent = ScoutAgent(gateway=ModelGateway(settings=settings))
+
+    already_seen = {"https://en.wikipedia.org/wiki/Quantum"}
+    output = await agent.execute(
+        subquestion="Quantum error correction threshold benchmarks",
+        already_seen=already_seen,
+    )
+
+    assert len(output.candidates) >= 1
+    for c in output.candidates:
+        assert c.location not in already_seen
+        assert "blocked-domain.com" not in c.location
+
+
+@pytest.mark.asyncio
+async def test_scout_raises_instead_of_returning_no_candidates_on_search_outage():
+    class FailedSearch:
+        calls = 0
+
+        async def fetch(self, target, **kwargs):
+            self.calls += 1
+            raise ProviderError(
+                "Live search returned no sources while providers failed.",
+                details={"failed_providers": [{"provider": "google_news"}]},
+            )
+
+    search = FailedSearch()
+    agent = ScoutAgent(search_connector=search)
+
+    with pytest.raises(ProviderError, match="search failed before any candidates"):
+        await agent.execute(subquestion="Investigate an unindexed research topic")
+
+    assert search.calls > 0
+
+
+@pytest.mark.asyncio
+async def test_scout_preserves_healthy_results_and_records_partial_search_failures():
+    class PartiallyFailedSearch:
+        calls = 0
+
+        async def fetch(self, target, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise ProviderError(
+                    "One source failed.",
+                    details={"failed_providers": [{"provider": "wikipedia"}]},
+                )
+            return [
+                SearchResult(
+                    url="https://example.com/independent-report",
+                    title="Independent report",
+                    snippet="A candidate from an available source provider.",
+                )
+            ]
+
+    agent = ScoutAgent(search_connector=PartiallyFailedSearch())
+    result = await agent.execute(subquestion="Investigate independent battery research")
+
+    assert len(result.candidates) == 1
+    assert result.search_failures[0]["details"]["failed_providers"][0]["provider"] == "wikipedia"
+
+
+@pytest.mark.asyncio
+async def test_retriever_agent_error_tolerance(db_session_factory):
+    """Verify RetrieverAgent handles transient and logical failures gracefully without crashing."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(session, objective="Retriever test run")
+        fixture_doc = (
+            Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt"
+        ).resolve()
+
+        candidates = [
+            # 1. Valid local file
+            SourceCandidate(
+                location=str(fixture_doc),
+                title="Solid State Battery Report",
+                reason="Local fixture",
+            ),
+            # 2. Logical failure (non-existent local file)
+            SourceCandidate(
+                location="file://non_existent_file_xyz123.txt",
+                title="Missing File",
+                reason="Invalid path",
+            ),
+            # 3. Logical failure (SSRF / invalid target)
+            SourceCandidate(
+                location="http://127.0.0.1:9999/private",
+                title="Private Loopback",
+                reason="Should be rejected by SSRF guard",
+            ),
+        ]
+
+        retriever = RetrieverAgent()
+        output = await retriever.execute(candidates, session=session, run_id=run.id)
+
+        assert len(output.retrieved) == 1
+        assert output.retrieved[0].chunks_count >= 1
+        assert len(output.failures) == 2
+
+        # Verify failures classified properly
+        error_classes = [f.error_class for f in output.failures]
+        assert TaskErrorClass.LOGICAL in error_classes
+
+
+@pytest.mark.asyncio
+async def test_extractor_agent_tampered_quote_dropped(db_session_factory):
+    """Verify Extractor drops unverifiable/tampered quotes and logs event."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(session, objective="Tampered quote test")
+        doc_text = "Superconducting qubits require dilution refrigeration below 20 millikelvin."
+        source, doc, chunks, _ = await ingest_and_normalize(
+            session=session,
+            raw_bytes=doc_text.encode("utf-8"),
+            location="memory://test_qubits.txt",
+            kind=SourceKind.WEB,
+            content_type="text/plain",
+        )
+
+        # Custom defective gateway returning tampered quote that doesn't exist in chunk
+        class DefectiveMockGateway(ModelGateway):
+            async def complete(self, messages, **kwargs):
+                tampered_extraction = ExtractionResult(
+                    claims=[
+                        ExtractedClaim(
+                            text="Dilution refrigeration is completely optional.",
+                            quote="THIS TEXT DOES NOT EXIST IN SOURCE",
+                            relative_span=RelativeSpan(start=0, end=33),
+                            claim_type=ClaimType.FACT,
+                        )
+                    ],
+                    entities=[],
+                    events=[],
+                )
+                return type(
+                    "Res",
+                    (),
+                    {
+                        "parsed": tampered_extraction,
+                        "text": tampered_extraction.model_dump_json(),
+                        "usage": Usage(),
+                    },
+                )()
+
+        extractor = ExtractorAgent(gateway=DefectiveMockGateway())
+        result = await extractor.execute(
+            document=doc,
+            chunks=chunks,
+            run_id=run.id,
+            source_id=source.id,
+            session=session,
+        )
+
+        # Claim must be dropped
+        assert len(result.claims) == 0
+
+        # Event 'claim.rejected_unverifiable' must be recorded in DB
+        stmt = select(Event).where(
+            Event.run_id == run.id, Event.type == "claim.rejected_unverifiable"
+        )
+        rejected_event = (await session.execute(stmt)).scalar_one_or_none()
+        assert rejected_event is not None
+        assert "THIS TEXT DOES NOT EXIST" in str(rejected_event.payload_json)
+
+
+@pytest.mark.asyncio
+async def test_end_to_end_micro_run(db_session_factory):
+    """Execute micro pipeline: Plan -> Scout -> Retrieve -> Extract with DB verification."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(session, objective="Evaluate solid-state batteries")
+        fixture_path = (
+            Path(__file__).resolve().parent / "fixtures" / "docs" / "sample_battery.txt"
+        ).resolve()
+
+        # 1. Planner
+        planner = PlannerAgent()
+        plan = await planner.execute(
+            objective=run.objective,
+            scope={"depth": 1},
+            run_id=run.id,
+        )
+        assert len(plan.subquestions) >= 1
+
+        # 2. Scout
+        scout = ScoutAgent()
+        scout_out = await scout.execute(
+            subquestion=plan.subquestions[0],
+            plan=plan,
+            session=session,
+            run_id=run.id,
+        )
+        assert len(scout_out.candidates) >= 1
+
+        # 3. Retrieve
+        # Inject our local fixture path into candidates
+        scout_out.candidates.insert(
+            0,
+            SourceCandidate(
+                location=str(fixture_path),
+                title="Battery Cycling Lab Data",
+                reason="Empirical lab data",
+                expected_relevance=1.0,
+            ),
+        )
+
+        retriever = RetrieverAgent()
+        ret_out = await retriever.execute(
+            candidates=scout_out.candidates[:2],
+            session=session,
+            run_id=run.id,
+        )
+        assert len(ret_out.retrieved) >= 1
+        ret_doc_meta = ret_out.retrieved[0]
+
+        # 4. Extract
+        doc = await SourceRepo.get_document(session, ret_doc_meta.document_id)
+        assert doc is not None
+
+        # Fetch actual persisted chunks for this document
+        stmt_db_chunks = select(Chunk).where(Chunk.document_id == doc.id).order_by(Chunk.idx.asc())
+        persisted_chunks = (await session.execute(stmt_db_chunks)).scalars().all()
+        assert len(persisted_chunks) >= 1
+
+        # Build valid mock extraction matching exact text
+        class AccurateMockGateway(ModelGateway):
+            async def complete(self, messages, **kwargs):
+                valid_quote = "significant thermal stability"
+                rel_start = doc.text.index(valid_quote)
+                rel_end = rel_start + len(valid_quote)
+
+                valid_extraction = ExtractionResult(
+                    claims=[
+                        ExtractedClaim(
+                            text="Solid state batteries provide significant thermal stability.",
+                            quote=valid_quote,
+                            relative_span=RelativeSpan(start=rel_start, end=rel_end),
+                            claim_type=ClaimType.FACT,
+                            entities=["Solid-state lithium battery"],
+                        )
+                    ],
+                    entities=[],
+                    events=[],
+                )
+                return type(
+                    "Res",
+                    (),
+                    {
+                        "parsed": valid_extraction,
+                        "text": valid_extraction.model_dump_json(),
+                        "usage": Usage(),
+                    },
+                )()
+
+        extractor = ExtractorAgent(gateway=AccurateMockGateway())
+        extract_res = await extractor.execute(
+            document=doc,
+            chunks=list(persisted_chunks),
+            run_id=run.id,
+            source_id=ret_doc_meta.source_id,
+            session=session,
+        )
+
+        assert len(extract_res.claims) == 1
+
+        # Query claims from DB
+        stmt_claims = select(Claim).where(Claim.run_id == run.id)
+        saved_claims = (await session.execute(stmt_claims)).scalars().all()
+        assert len(saved_claims) >= 1
+
+        # Strict span-verbatim verification
+        for c in saved_claims:
+            assert doc.text[c.span_start : c.span_end] == c.quote
+
+
+@pytest.mark.asyncio
+async def test_extractor_quote_alignment_paraphrase_accepted_and_snapped(db_session_factory):
+    """Verify ~0.95 paraphrased quote is accepted and snapped to exact verbatim document text."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(session, objective="Quote alignment test")
+        doc_text = "In this work, silicon-graphite composite anodes paired with nickel-rich cathodes demonstrated a gravimetric cell energy density of 420 Wh/kg."
+        source, doc, chunks, _ = await ingest_and_normalize(
+            session=session,
+            raw_bytes=doc_text.encode("utf-8"),
+            location="memory://test_alignment.txt",
+            kind=SourceKind.WEB,
+            content_type="text/plain",
+        )
+
+        # Paraphrased quote with minor differences (missing punctuation / slightly altered whitespace)
+        paraphrased_quote = "silicon-graphite composite anodes paired with nickel-rich cathodes demonstrated a gravimetric cell energy density of 420 Wh/kg"
+
+        class ParaphrasedMockGateway(ModelGateway):
+            async def complete(self, messages, **kwargs):
+                extraction = ExtractionResult(
+                    claims=[
+                        ExtractedClaim(
+                            text="Silicon composite anodes achieve 420 Wh/kg energy density.",
+                            quote=paraphrased_quote,
+                            relative_span=RelativeSpan(start=0, end=len(paraphrased_quote)),
+                            claim_type=ClaimType.FACT,
+                        )
+                    ],
+                    entities=[],
+                    events=[],
+                )
+                return type(
+                    "Res",
+                    (),
+                    {
+                        "parsed": extraction,
+                        "text": extraction.model_dump_json(),
+                        "usage": Usage(),
+                    },
+                )()
+
+        extractor = ExtractorAgent(gateway=ParaphrasedMockGateway())
+        res = await extractor.execute(
+            document=doc,
+            chunks=chunks,
+            run_id=run.id,
+            source_id=source.id,
+            session=session,
+        )
+
+        # Claim must be accepted and snapped to exact verbatim substring
+        assert len(res.claims) == 1
+        stmt_claims = select(Claim).where(Claim.run_id == run.id)
+        saved = (await session.execute(stmt_claims)).scalars().first()
+        assert saved is not None
+        assert doc.text[saved.span_start : saved.span_end] == saved.quote
+        assert saved.quote in doc_text
+
+
+@pytest.mark.asyncio
+async def test_extractor_quote_alignment_low_similarity_dropped(db_session_factory):
+    """Verify ~0.50 heavily paraphrased/hallucinated quote is dropped with event."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(session, objective="Low similarity drop test")
+        doc_text = "In this work, silicon-graphite composite anodes paired with nickel-rich cathodes demonstrated a gravimetric cell energy density of 420 Wh/kg."
+        source, doc, chunks, _ = await ingest_and_normalize(
+            session=session,
+            raw_bytes=doc_text.encode("utf-8"),
+            location="memory://test_drop.txt",
+            kind=SourceKind.WEB,
+            content_type="text/plain",
+        )
+
+        # Heavily paraphrased / hallucinated quote
+        hallucinated_quote = (
+            "The researchers showed that silicon batteries can reach 420 Wh per kg."
+        )
+
+        class HallucinatedMockGateway(ModelGateway):
+            async def complete(self, messages, **kwargs):
+                extraction = ExtractionResult(
+                    claims=[
+                        ExtractedClaim(
+                            text="Silicon batteries reach 420 Wh/kg.",
+                            quote=hallucinated_quote,
+                            relative_span=RelativeSpan(start=0, end=len(hallucinated_quote)),
+                            claim_type=ClaimType.FACT,
+                        )
+                    ],
+                    entities=[],
+                    events=[],
+                )
+                return type(
+                    "Res",
+                    (),
+                    {
+                        "parsed": extraction,
+                        "text": extraction.model_dump_json(),
+                        "usage": Usage(),
+                    },
+                )()
+
+        extractor = ExtractorAgent(gateway=HallucinatedMockGateway())
+        res = await extractor.execute(
+            document=doc,
+            chunks=chunks,
+            run_id=run.id,
+            source_id=source.id,
+            session=session,
+        )
+
+        # Claim must be dropped
+        assert len(res.claims) == 0
+        stmt = select(Event).where(
+            Event.run_id == run.id, Event.type == "claim.rejected_unverifiable"
+        )
+        ev = (await session.execute(stmt)).scalar_one_or_none()
+        assert ev is not None
+
+
+@pytest.mark.asyncio
+async def test_retriever_snippet_fallback_on_fetch_failure(db_session_factory):
+    """Verify RetrieverAgent ingests search snippet when HTTP fetch fails."""
+    async with db_session_factory() as session:
+        run = await RunRepo.create_run(session, objective="Snippet fallback test")
+
+        candidates = [
+            SourceCandidate(
+                location="http://192.168.1.1/blocked_private",
+                title="Blocked Enterprise Battery Report",
+                snippet="Solid-state composite electrolyte maintains 95% efficiency under 2 MPa pressure.",
+                reason="Search result with snippet",
+            )
+        ]
+
+        retriever = RetrieverAgent()
+        out = await retriever.execute(candidates, session=session, run_id=run.id)
+
+        assert len(out.retrieved) == 1
+        ret_doc = out.retrieved[0]
+        assert ret_doc.chunks_count >= 1
+
+        doc = await SourceRepo.get_document(session, ret_doc.document_id)
+        assert doc is not None
+        assert "95% efficiency" in doc.text
+
+        source = await SourceRepo.get_source(session, ret_doc.source_id)
+        assert source is not None
+        assert source.license_note == "search-engine-snippet"
+
+
+def test_retention_percentages_are_parsed_as_capacity_retention():
+    """Retention % claims must not be classified as generic percentages."""
+    assert ContradictionEngine._measurement("Capacity retention was 82% after cycling.") == (
+        "capacity_retention",
+        "%",
+        82.0,
+    )
+    assert ContradictionEngine._measurement("Capacity retention was 61% after cycling.") == (
+        "capacity_retention",
+        "%",
+        61.0,
+    )
+
+
+def test_direct_negation_compares_the_negated_predicate_not_shared_nouns():
+    """Only opposing polarity on the same predicate creates a negation conflict."""
+    assert (
+        ContradictionEngine._qualitative_conflict(
+            "The sodium cell does not increase capacity retention.",
+            "The sodium cell increases capacity retention.",
+        )
+        == "direct negation of a shared proposition"
+    )
+    assert (
+        ContradictionEngine._qualitative_conflict(
+            "The sodium cell does not increase capacity retention.",
+            "The sodium cell shows high capacity retention.",
+        )
+        is None
+    )
+
+
+def test_deterministic_contradiction_scan_excludes_opinions_and_forecasts():
+    claims = [
+        SimpleNamespace(claim_type=ClaimType.FACT),
+        SimpleNamespace(claim_type=ClaimType.MEASUREMENT),
+        SimpleNamespace(claim_type=ClaimType.EVENT),
+        SimpleNamespace(claim_type=ClaimType.STATEMENT_OF_OPINION),
+        SimpleNamespace(claim_type=ClaimType.FORECAST),
+    ]
+    eligible = contradiction_eligible_claims(claims)
+    assert eligible == claims[:3]

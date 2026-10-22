@@ -1,0 +1,321 @@
+"""Tests for AI-Universe Multi-Agent Intelligence Provider Integration and Fallback Chain."""
+
+import json
+from unittest.mock import patch
+
+import httpx
+import pytest
+import respx
+from pydantic import BaseModel
+
+import intelx.models.ai_universe_provider as ai_universe_module
+from intelx.core.confidence import compute_confidence_score
+from intelx.core.errors import ProviderError
+from intelx.core.settings import Settings
+from intelx.models.ai_universe_provider import AI_UNIVERSE_ROLE_MAP, AIUniverseProvider
+from intelx.models.gateway import ModelGateway
+
+
+class DummySchema(BaseModel):
+    summary: str
+    confidence: float
+
+
+def test_ai_universe_role_persona_mappings():
+    """Verify exact role-to-persona mapping matching the architectural contract."""
+    assert AI_UNIVERSE_ROLE_MAP["planner"] == "Strategist"
+    assert AI_UNIVERSE_ROLE_MAP["extractor"] == "Coder"
+    assert AI_UNIVERSE_ROLE_MAP["verifier"] == "Fact Checker + Critic"
+    assert AI_UNIVERSE_ROLE_MAP["analyst"] == "Data Analyst"
+    assert AI_UNIVERSE_ROLE_MAP["critic"] == "Critic"
+    assert AI_UNIVERSE_ROLE_MAP["synthesizer"] == "Synthesizer"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ai_universe_provider_successful_completion():
+    """Verify AIUniverseProvider sends request and receives structured multi-agent response."""
+    endpoint_url = "https://friday-universe.duckdns.org/v1/intelx/research"
+    mock_response = {
+        "response": json.dumps({"summary": "Debated and verified claim.", "confidence": 0.95}),
+        "confidence": 0.95,
+        "key_evidence_used": ["doc-1#span(0,40)"],
+        "dissent": "No dissenting opinion among Fact Checker and Critic agents.",
+        "provenance": {
+            "agent_personas": ["Fact Checker", "Critic"],
+            "model": "ai-universe-multi-agent",
+            "latency_ms": 110,
+        },
+    }
+
+    respx.post(endpoint_url).mock(return_value=httpx.Response(200, json=mock_response))
+
+    provider = AIUniverseProvider(
+        base_url="https://friday-universe.duckdns.org", api_key="aiu-secret-key"
+    )
+    messages = [{"role": "user", "content": "Verify claim regarding quantum coherence time."}]
+
+    text, usage = await provider.complete(
+        messages=messages,
+        model="ai-universe-v1",
+        role="verifier",
+        schema_model=DummySchema,
+    )
+
+    assert text is not None
+    data = json.loads(text)
+    assert data["summary"] == "Debated and verified claim."
+    assert provider.last_metadata["role"] == "verifier"
+    assert provider.last_metadata["persona"] == "Fact Checker + Critic"
+    assert provider.last_metadata["confidence"] == 0.95
+    assert usage.input_tokens > 0
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_gateway_uses_injected_inference_endpoint_and_key():
+    """A gateway configured with a private inference URL must send requests there."""
+    endpoint = "https://inference.example.test/v1/intelx/research"
+    route = respx.post(endpoint).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "response": json.dumps(
+                    {"summary": "Evidence-backed adapter check.", "confidence": 0.93}
+                ),
+                "confidence": 0.93,
+            },
+        )
+    )
+    settings = Settings(
+        MOCK_MODE=False,
+        LLM_PROVIDER="inference",
+        LLM_MODEL="inference-test-model",
+        INFERENCE_URL="https://inference.example.test",
+        INFERENCE_API_KEY="local-inference-test-key",
+    )
+    gateway = ModelGateway(settings=settings)
+
+    result = await gateway.complete(
+        messages=[{"role": "user", "content": "Check injected inference configuration."}],
+        role="analyst",
+        schema_model=DummySchema,
+    )
+
+    assert route.called
+    assert route.calls.last.request.headers["Authorization"] == "Bearer local-inference-test-key"
+    assert result.provider == "inference"
+    assert result.parsed.summary == "Evidence-backed adapter check."
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ai_universe_provider_endpoint_fallback():
+    """Verify provider falls back to /intelx/research if /v1/intelx/research returns 404."""
+    v1_url = "https://friday-universe.duckdns.org/v1/intelx/research"
+    alt_url = "https://friday-universe.duckdns.org/intelx/research"
+
+    respx.post(v1_url).mock(return_value=httpx.Response(404))
+    respx.post(alt_url).mock(
+        return_value=httpx.Response(
+            200, json={"response": "Fallback path success", "confidence": 0.88}
+        )
+    )
+
+    provider = AIUniverseProvider(base_url="https://friday-universe.duckdns.org")
+    text, _ = await provider.complete(
+        messages=[{"role": "user", "content": "Test fallback"}],
+        model="ai-universe-v1",
+        role="planner",
+    )
+    assert text == "Fallback path success"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_gateway_fallback_chain_from_ai_universe_to_mock():
+    """Verify ModelGateway falls back gracefully to MockProvider when AI-Universe is offline."""
+    v1_url = "https://friday-universe.duckdns.org/v1/intelx/research"
+    alt_url = "https://friday-universe.duckdns.org/intelx/research"
+
+    # Simulate connection failure to AI-Universe
+    respx.post(v1_url).mock(side_effect=httpx.ConnectError("Connection refused"))
+    respx.post(alt_url).mock(side_effect=httpx.ConnectError("Connection refused"))
+
+    custom_settings = Settings(
+        MOCK_MODE=False,
+        LLM_PROVIDER="ai_universe",
+        INFERENCE_URL="https://friday-universe.duckdns.org",
+        LLM_API_KEY=None,
+        ALLOW_MOCK_FALLBACK=True,
+    )
+    gateway = ModelGateway(settings=custom_settings)
+
+    result = await gateway.complete(
+        messages=[{"role": "user", "content": "Decompose research plan."}],
+        role="planner",
+    )
+
+    assert result is not None
+    assert result.provider == "mock"
+    assert len(result.text) > 0
+
+
+@pytest.mark.asyncio
+async def test_production_gateway_fails_closed_when_primary_provider_is_down(monkeypatch):
+    """Production calls must never turn a provider outage into a successful mock answer."""
+    settings = Settings(
+        ENV="production",
+        MOCK_MODE=False,
+        LLM_PROVIDER="inference",
+        LLM_MODEL="production-model",
+    )
+    gateway = ModelGateway(settings=settings)
+
+    class FailingProvider:
+        async def complete(self, **_kwargs):
+            raise ProviderError("simulated provider outage")
+
+    monkeypatch.setattr(gateway, "_get_provider", lambda: ("inference", FailingProvider()))
+
+    with pytest.raises(ProviderError, match="mock fallback is disabled"):
+        await gateway.complete(
+            messages=[{"role": "user", "content": "Verify evidence"}], role="verifier"
+        )
+
+
+def test_confidence_formula_with_ai_universe_multiplier():
+    """Verify AI-Universe stated confidence acts as a multiplier in confidence formula v1."""
+    # Baseline without AI-Universe
+    score_base, _, details_base = compute_confidence_score(
+        strongest_tier="STANDARD",
+        independent_corroborations=2,
+    )
+
+    # With high AI-Universe confidence (1.0)
+    score_high, _, details_high = compute_confidence_score(
+        strongest_tier="STANDARD",
+        independent_corroborations=2,
+        ai_universe_confidence=1.0,
+    )
+    assert details_high["ai_universe_confidence"] == 1.0
+    assert score_high == score_base
+
+    # With reduced AI-Universe confidence from multi-agent debate (0.60)
+    score_debated, _, details_debated = compute_confidence_score(
+        strongest_tier="STANDARD",
+        independent_corroborations=2,
+        ai_universe_confidence=0.60,
+    )
+    assert details_debated["ai_universe_confidence"] == 0.60
+    assert score_debated < score_base
+    assert score_debated == pytest.approx(score_base * 0.60, abs=0.05)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ai_universe_provider_canned_mock_bypass():
+    """Verify that when endpoint returns a canned mock template, provider automatically bypasses via /ask."""
+    v1_url = "https://friday-universe.duckdns.org/v1/intelx/research"
+    ask_url = "https://friday-universe.duckdns.org/ask"
+
+    canned_resp = {
+        "response": {
+            "research_synthesis_report": "Comprehensive Research Assessment on: 'free fire release date'\nKey Finding: Strong convergence across 0 extracted verbatim spans.\nCredibility Level: 80% weighted empirical reliability.",
+            "cited_spans": [],
+            "coherence_score": 0.95,
+        }
+    }
+    real_ask_resp = {
+        "task_id": "task-real-123",
+        "answer": json.dumps(
+            {"summary": "Genuine LLM synthesized intelligence.", "confidence": 0.95}
+        ),
+    }
+
+    respx.post(v1_url).mock(return_value=httpx.Response(200, json=canned_resp))
+    respx.post(ask_url).mock(return_value=httpx.Response(200, json=real_ask_resp))
+
+    provider = AIUniverseProvider(
+        base_url="https://friday-universe.duckdns.org", api_key="test-key"
+    )
+    messages = [{"role": "user", "content": "RESEARCH OBJECTIVE: free fire release date"}]
+
+    text, usage = await provider.complete(
+        messages=messages,
+        model="ai-universe-v1",
+        role="synthesizer",
+        schema_model=DummySchema,
+    )
+
+    assert "Comprehensive Research Assessment on:" not in text
+    assert "Genuine LLM synthesized intelligence." in text
+    data = json.loads(text)
+    assert data["summary"] == "Genuine LLM synthesized intelligence."
+
+
+CANNED_RESEARCH_RESPONSE = {
+    "response": {
+        "research_synthesis_report": "Comprehensive Research Assessment on: 'free fire release date'\n"
+        "Key Finding: Strong convergence across 0 extracted verbatim spans.\n"
+        "Credibility Level: 80% weighted empirical reliability.",
+        "cited_spans": [],
+        "coherence_score": 0.95,
+    }
+}
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ai_universe_provider_without_key_bypasses_canned_mock():
+    """With no inference key configured, the bypass must still call /ask and use the genuine answer."""
+    v1_url = "https://friday-universe.duckdns.org/v1/intelx/research"
+    ask_url = "https://friday-universe.duckdns.org/ask"
+
+    real_ask_resp = {
+        "task_id": "task-real-456",
+        "answer": json.dumps({"summary": "Keyless genuine synthesis.", "confidence": 0.9}),
+    }
+
+    respx.post(v1_url).mock(return_value=httpx.Response(200, json=CANNED_RESEARCH_RESPONSE))
+    ask_route = respx.post(ask_url).mock(return_value=httpx.Response(200, json=real_ask_resp))
+
+    keyless = Settings(INFERENCE_API_KEY=None)
+    with patch.object(ai_universe_module, "get_settings", return_value=keyless):
+        provider = AIUniverseProvider(base_url="https://friday-universe.duckdns.org")
+        messages = [{"role": "user", "content": "RESEARCH OBJECTIVE: hermetic keyless run"}]
+        text, _ = await provider.complete(
+            messages=messages,
+            model="ai-universe-v1",
+            role="synthesizer",
+            schema_model=DummySchema,
+        )
+
+    assert ask_route.called
+    assert "Keyless genuine synthesis." in text
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ai_universe_provider_fails_loudly_when_bypass_yields_nothing():
+    """A canned response with no recoverable /ask answer must raise, never return canned content."""
+    v1_url = "https://friday-universe.duckdns.org/v1/intelx/research"
+    ask_url = "https://friday-universe.duckdns.org/ask"
+
+    respx.post(v1_url).mock(return_value=httpx.Response(200, json=CANNED_RESEARCH_RESPONSE))
+    respx.post(ask_url).mock(return_value=httpx.Response(404))
+    respx.post("https://friday-universe.duckdns.org/v1/ask").mock(return_value=httpx.Response(404))
+
+    keyless = Settings(INFERENCE_API_KEY=None)
+    with patch.object(ai_universe_module, "get_settings", return_value=keyless):
+        provider = AIUniverseProvider(base_url="https://friday-universe.duckdns.org")
+        messages = [{"role": "user", "content": "RESEARCH OBJECTIVE: loud failure"}]
+        with pytest.raises(ProviderError) as excinfo:
+            await provider.complete(
+                messages=messages,
+                model="ai-universe-v1",
+                role="synthesizer",
+                schema_model=DummySchema,
+            )
+
+    assert "canned mock" in str(excinfo.value)

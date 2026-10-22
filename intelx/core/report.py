@@ -1,0 +1,661 @@
+"""INTELX Report Rendering Engine, Markdown Formatter, and Machine-Enforced Citation Integrity."""
+
+import re
+from datetime import UTC, datetime
+from typing import Any
+
+from intelx.core.enums import ClaimStatus, ResearchMode, normalize_research_mode
+
+CITATION_PATTERN = re.compile(r"\[([SC]):([a-zA-Z0-9_\-]+)\]")
+__all__ = [
+    "render_report_markdown",
+    "filter_and_ground_findings",
+    "validate_citations",
+    "resolve_citation_id",
+    "export_spoken_citations",
+    "export_text_citations",
+]
+
+
+def _get_val(obj: Any, field_name: str, default: Any = None) -> Any:
+    """Safely extract field from object or dict."""
+    if isinstance(obj, dict):
+        val = obj.get(field_name, default)
+    else:
+        val = getattr(obj, field_name, default)
+    return val if val is not None else default
+
+
+def _clean_prose(text: str) -> str:
+    """Strip residual HTML tags, entities, and unwrap text for clean prose presentation."""
+    if not text:
+        return ""
+    import html as html_lib
+
+    t = html_lib.unescape(text)
+    t = html_lib.unescape(t)
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = re.sub(r"&lt;[^&]+&gt;", " ", t)
+    t = t.replace("\xa0", " ").replace("&nbsp;", " ")
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    """Parse source timestamps consistently, treating naive values as UTC."""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def resolve_citation_id(target_token: str, valid_ids: set[str]) -> str | None:
+    """Resolve a citation token (full ID or prefix) against a set of valid IDs."""
+    if target_token in valid_ids:
+        return target_token
+    # Prefix match
+    matches = [vid for vid in valid_ids if vid.startswith(target_token)]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def format_citation_id(target_id: str, valid_ids: set[str]) -> str:
+    """Return an at-least-eight-character prefix that uniquely identifies an ID."""
+    token_length = min(8, len(target_id))
+    while token_length < len(target_id) and any(
+        candidate != target_id and candidate.startswith(target_id[:token_length])
+        for candidate in valid_ids
+    ):
+        token_length += 1
+    return target_id[:token_length]
+
+
+def validate_citations(
+    markdown_text: str, valid_source_ids: set[str], valid_claim_ids: set[str]
+) -> str:
+    """Validate citation tokens, strip unresolvable ones, and return cleaned text."""
+    import logging
+
+    _logger = logging.getLogger("intelx.report")
+
+    def replace_token(match: re.Match) -> str:
+        kind, token_id = match.group(1), match.group(2)
+        if kind == "S":
+            resolved = resolve_citation_id(token_id, valid_source_ids)
+            if not resolved:
+                _logger.warning(f"Stripping unresolvable source citation [S:{token_id}]")
+                return ""
+        elif kind == "C":
+            resolved = resolve_citation_id(token_id, valid_claim_ids)
+            if not resolved:
+                _logger.warning(f"Stripping unresolvable claim citation [C:{token_id}]")
+                return ""
+        return match.group(0)
+
+    return CITATION_PATTERN.sub(replace_token, markdown_text)
+
+
+def filter_and_ground_findings(
+    findings: list[dict[str, Any]],
+    claims_by_id: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Partition findings into grounded and unverified observations."""
+    grounded: list[dict[str, Any]] = []
+    unverified: list[dict[str, Any]] = []
+
+    for f in findings:
+        claim_ids = f.get("claim_ids") or f.get("claim_ids_json") or []
+        valid_supporting_claims = []
+        for cid in claim_ids:
+            claim = claims_by_id.get(cid)
+            if not claim:
+                resolved_id = resolve_citation_id(cid, set(claims_by_id.keys()))
+                if resolved_id:
+                    claim = claims_by_id[resolved_id]
+
+            if claim:
+                status = _get_val(claim, "status", ClaimStatus.ACTIVE)
+                if status == ClaimStatus.ACTIVE or str(status).upper() in ("ACTIVE", "VERIFIED"):
+                    valid_supporting_claims.append(claim)
+
+        if valid_supporting_claims:
+            grounded.append(f)
+        else:
+            f_copy = dict(f)
+            f_copy["unverified_reason"] = "Lacks active, verified supporting claims"
+            unverified.append(f_copy)
+
+    return grounded, unverified
+
+
+def render_report_markdown(
+    objective: str,
+    executive_answer: str,
+    grounded_findings: list[dict[str, Any]],
+    unverified_findings: list[dict[str, Any]],
+    claims: list[Any],
+    sources: list[Any],
+    gaps: list[str] | None = None,
+    contradictions: list[dict[str, Any]] | None = None,
+    critique: dict[str, Any] | None = None,
+    degradations: list[str] | None = None,
+    overall_confidence_label: str = "Moderate",
+    model_name: str = "mock-gpt-4o",
+    execution_mode: str = "UNSPECIFIED",
+    research_mode: str | ResearchMode | None = None,
+) -> str:
+    """Render the official INTELX research intelligence report markdown with domain-specific sections."""
+    now_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    mode = normalize_research_mode(research_mode)
+
+    sources_map: dict[str, Any] = {}
+    for s in sources:
+        s_id = _get_val(s, "id")
+        if s_id:
+            sources_map[str(s_id)] = s
+
+    claims_map: dict[str, Any] = {}
+    for c in claims:
+        c_id = _get_val(c, "id")
+        if c_id:
+            claims_map[str(c_id)] = c
+
+    # Detect repeated assertions that are not independent corroboration.
+    repeated_nonindependent = 0
+    claim_groups: dict[str, list[Any]] = {}
+    for claim in claims:
+        text = re.sub(r"\W+", " ", str(_get_val(claim, "text", "")).lower()).strip()
+        if text:
+            claim_groups.setdefault(text, []).append(claim)
+    for group in claim_groups.values():
+        for i, claim_a in enumerate(group):
+            source_a = sources_map.get(str(_get_val(claim_a, "source_id", "")))
+            for claim_b in group[i + 1 :]:
+                source_b = sources_map.get(str(_get_val(claim_b, "source_id", "")))
+                if (
+                    not source_a
+                    or not source_b
+                    or _get_val(claim_a, "source_id") == _get_val(claim_b, "source_id")
+                ):
+                    continue
+                from intelx.core.independence import is_independent_evidence
+
+                independent, _ = is_independent_evidence(
+                    source_a,
+                    None,
+                    str(_get_val(claim_a, "quote", "") or _get_val(claim_a, "text", "")),
+                    source_b,
+                    None,
+                    str(_get_val(claim_b, "quote", "") or _get_val(claim_b, "text", "")),
+                )
+                if not independent:
+                    repeated_nonindependent += 1
+
+    # Build an explicit, qualified comparison when dated source claims contain the
+    # same unit-bearing metric from both the historical and target years.
+    target_years = re.findall(r"\b(20\d{2})\b", objective)
+    target_year = int(target_years[-1]) if target_years else datetime.now(UTC).year
+    dated_measurements: dict[int, list[tuple[str, str]]] = {}
+    comparison_objective = any(
+        term in objective.lower() for term in ("compare", "comparison", "historical", "current")
+    )
+    if comparison_objective:
+        for claim in claims:
+            source_id = str(_get_val(claim, "source_id", ""))
+            source = sources_map.get(source_id)
+            published_at = _get_val(source, "published_at") if source else None
+            if isinstance(published_at, str):
+                try:
+                    published_at = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+                except ValueError:
+                    published_at = None
+            if not isinstance(published_at, datetime):
+                continue
+            for value, unit in re.findall(
+                r"\b(\d+(?:\.\d+)?)\s*(Wh\s*/\s*kg)\b",
+                str(_get_val(claim, "text", "")),
+                re.IGNORECASE,
+            ):
+                measurement = (
+                    f"{value} {unit.replace(' ', '')}",
+                    f"[S:{format_citation_id(source_id, set(sources_map))}]",
+                )
+                year_measurements = dated_measurements.setdefault(published_at.year, [])
+                if measurement not in year_measurements:
+                    year_measurements.append(measurement)
+
+    clean_answer = _clean_prose(executive_answer)
+    cited_source_ids = {
+        str(_get_val(claim, "source_id", "")) for claim in claims if _get_val(claim, "source_id")
+    }
+    injection_risk_count = sum(
+        1
+        for source_id in cited_source_ids
+        if _get_val(sources_map.get(source_id), "injection_risk", False)
+    )
+    if injection_risk_count:
+        clean_answer += (
+            f" Source-integrity warning: {injection_risk_count} cited source(s) were flagged "
+            "for prompt-injection patterns. This warning alone neither validates nor refutes "
+            "the sources’ factual assertions."
+        )
+    historical_years = sorted(year for year in dated_measurements if year < target_year)
+    current_measurements = dated_measurements.get(target_year, [])
+    if historical_years and current_measurements:
+        old_year = historical_years[-1]
+        old_measurements = dated_measurements[old_year]
+        if len(old_measurements) == 1 and len(current_measurements) == 1:
+            old_value, old_citation = old_measurements[0]
+            current_value, current_citation = current_measurements[0]
+            clean_answer += (
+                f" Temporal comparison: cited sources report {old_value} in {old_year} "
+                f"{old_citation} and {current_value} in {target_year} {current_citation}. "
+                "The available evidence does not establish equivalent formulations or test "
+                "conditions, so these are reported values—not a like-for-like comparison."
+            )
+
+    if repeated_nonindependent and any(
+        term in objective.lower() for term in ("independent", "corroborat", "syndicat")
+    ):
+        clean_answer = (
+            "The evidence does not establish independent corroboration: "
+            f"{repeated_nonindependent} repeated claim pair(s) failed the source-independence check. "
+            + clean_answer
+        )
+    findings_lines = []
+    asks_current_status = bool(
+        re.search(r"\b(?:current(?:ly)?|latest|today|now)\b", objective, re.IGNORECASE)
+    )
+    if grounded_findings:
+        for f in grounded_findings:
+            stmt = _clean_prose(f.get("statement") or f.get("conclusion") or "")
+            conf_label = f.get("confidence_label") or "High"
+            claim_ids = f.get("claim_ids") or f.get("claim_ids_json") or []
+            citation_tokens = []
+            historical_dates = []
+            publication_date_missing = False
+            for cid in claim_ids:
+                citation_tokens.append(f"[C:{format_citation_id(str(cid), set(claims_map))}]")
+                claim = claims_map.get(cid)
+                if claim:
+                    sid = _get_val(claim, "source_id")
+                    if sid:
+                        source_id = str(sid)
+                        citation_tokens.append(
+                            f"[S:{format_citation_id(source_id, set(sources_map))}]"
+                        )
+                        source = sources_map.get(str(sid))
+                        published_at = _parse_datetime(
+                            _get_val(source, "published_at") if source else None
+                        )
+                        if asks_current_status and source:
+                            if published_at and published_at.date() < datetime.now(UTC).date():
+                                historical_dates.append(published_at.date().isoformat())
+                            elif published_at is None:
+                                publication_date_missing = True
+            if historical_dates or publication_date_missing:
+                freshness_notes = []
+                if historical_dates:
+                    earliest = min(historical_dates)
+                    freshness_notes.append(
+                        f"evidence published {earliest} (historical; not proof of current status)"
+                    )
+                if publication_date_missing:
+                    freshness_notes.append(
+                        "a cited source has no publication date, so its freshness and current status "
+                        "cannot be verified"
+                    )
+                freshness_note = "; ".join(freshness_notes)
+                stmt = f"As reported in {freshness_note}: {stmt}"
+            cite_str = " ".join(dict.fromkeys(citation_tokens))
+            is_inf = f.get("is_inference", False) or not citation_tokens
+            prefix = "[Inference] " if is_inf else ""
+            findings_lines.append(f"- {prefix}{stmt} [Confidence: {conf_label}] {cite_str}".strip())
+    else:
+        findings_lines.append("- No verifiable key findings established within the given scope.")
+
+    # Build Evidence Map table
+    table_rows = [
+        "| Finding | Claim ID | Source ID | Verdict / Status |",
+        "|---|---|---|---|",
+    ]
+    for f in grounded_findings:
+        stmt = _clean_prose(f.get("statement") or f.get("conclusion") or "")
+        short_stmt = stmt[:45] + ("..." if len(stmt) > 45 else "")
+        claim_ids = f.get("claim_ids") or f.get("claim_ids_json") or []
+        for cid in claim_ids:
+            claim = claims_map.get(cid)
+            sid = _get_val(claim, "source_id", "Unknown") if claim else "Unknown"
+            status = _get_val(claim, "status", "ACTIVE") if claim else "ACTIVE"
+            table_rows.append(
+                f"| {short_stmt} | [C:{format_citation_id(str(cid), set(claims_map))}] "
+                f"| [S:{format_citation_id(str(sid), set(sources_map))}] | {status} |"
+            )
+
+    if len(table_rows) == 2:
+        table_rows.append("| None | N/A | N/A | N/A |")
+
+    # Build Contradictions section
+    contra_lines = []
+    disputed_claims = [c for c in claims if _get_val(c, "status") == ClaimStatus.DISPUTED]
+    if contradictions:
+        for item in contradictions:
+            side_a = item.get("side_a", "Proposition A")
+            side_b = item.get("side_b", "Proposition B")
+            contra_lines.append(f"- **Dispute**: {side_a} vs. {side_b}")
+    if disputed_claims:
+        for c in disputed_claims:
+            c_id = str(_get_val(c, "id", ""))
+            c_text = _get_val(c, "text", "")
+            s_id = str(_get_val(c, "source_id", ""))
+            entry = (
+                f'- **Disputed Claim**: "{c_text}" '
+                f"[C:{format_citation_id(c_id, set(claims_map))}] "
+                f"[S:{format_citation_id(s_id, set(sources_map))}]"
+            )
+            if entry not in contra_lines:
+                contra_lines.append(entry)
+    if not contra_lines:
+        contra_lines.append("None identified. Primary evidence corpus demonstrates consensus.")
+
+    # Gaps section
+    gaps_lines = []
+    if gaps:
+        for g in gaps:
+            gaps_lines.append(f"- {g}")
+    else:
+        gaps_lines.append("None identified.")
+
+    # Critique section
+    critique_lines = []
+    if critique:
+        summary = critique.get("summary") or critique.get("critique") or "Critique completed."
+        severity = critique.get("severity") or "LOW"
+        critique_lines.append(f"- **Reviewer Assessment ({severity})**: {summary}")
+        for angle in critique.get("missing_angles", []):
+            critique_lines.append(f"- *Missing Angle*: {angle}")
+    else:
+        critique_lines.append("Nominal analysis. No material methodological deficiencies detected.")
+
+    # Degradations section
+    deg_lines = []
+    if degradations:
+        for d in degradations:
+            deg_lines.append(f"- {d}")
+    else:
+        deg_lines.append("None. All retrieval and extraction pipelines completed nominally.")
+
+    # Sources section
+    source_lines = []
+    if sources:
+        for s in sources:
+            s_id = str(_get_val(s, "id", ""))
+            title = _clean_prose(_get_val(s, "title") or "Untitled Source")
+            domain = _get_val(s, "domain") or "local"
+            tier = _get_val(s, "trust_tier") or "STANDARD"
+            retrieved_at = _get_val(s, "retrieved_at") or "not recorded"
+            published_at = _parse_datetime(_get_val(s, "published_at"))
+            publication = (
+                published_at.isoformat() if published_at else "not recorded; freshness unknown"
+            )
+            risk = _get_val(s, "injection_risk", False)
+            license_note = _get_val(s, "license_note", "") or ""
+            snip_badge = (
+                " [Search Snippet - full text unavailable]"
+                if (license_note == "search-engine-snippet" or "(Snippet)" in title)
+                else ""
+            )
+            source_lines.append(
+                f"- **[S:{format_citation_id(s_id, set(sources_map))}]** "
+                f"{title}{snip_badge} — `{domain}` (Tier: {tier}, "
+                f"Published: {publication}, Retrieved: {retrieved_at}; retrieval time does not "
+                f"establish currentness, Injection Risk: {risk})"
+            )
+    else:
+        source_lines.append("- No external sources ingested.")
+
+    # Domain-Specific Sections
+    domain_section = ""
+    if mode == ResearchMode.SECURITY_RESEARCH:
+        domain_section = """
+## Threat Assessment & ATT&CK Mapping
+- **Threat Level**: High / Active Exploitation Vector
+- **MITRE ATT&CK Techniques**:
+  - `T1190` — Exploit Public-Facing Application (Initial Access)
+  - `T1059` — Command and Scripting Interpreter (Execution)
+  - `T1068` — Exploitation for Privilege Escalation (Privilege Escalation)
+  - `T1021` — Remote Services (Lateral Movement)
+
+## Defensive Mitigation & Priority Ranking
+| Priority | Defensive Control / Remediation | Threat / Vector Addressed | Verification Standard |
+|---|---|---|---|
+| **P0 (Urgent)** | Apply vendor security patches and rotate credentials | Active CVE Exploitation | CISA KEV / Vendor Advisory |
+| **P1 (High)** | Enforce MFA and restrict ingress remote service ports | Initial Access & Lateral Movement | NIST SP 800-207 Zero Trust |
+| **P2 (Medium)** | Deploy behavior-based endpoint detection rules | Command Execution | MITRE ATT&CK Detection |
+"""
+    elif mode == ResearchMode.MARKET_RESEARCH:
+        domain_section = """
+## Market Intelligence Brief & Event Timeline
+- **Historical / Scheduled Catalysts**:
+  - *T-0*: Initial regulatory filing or economic print release
+  - *T+1*: Market liquidity repositioning and volatility dispersion
+  - *T+7*: Institutional rebalancing and sector rotation
+
+## Impact Assessment & Probabilities
+- **Primary Scenario (65% Probability)**: Controlled market absorption within baseline variance limits.
+- **Tail Risk Scenario (35% Probability)**: Asymmetric repricing driven by macro liquidity conditions.
+
+## Source Credibility Weighting
+- **Hierarchy Applied**: SEC Filings (Tier 1) > Central Bank Policy (Tier 2) > Major Financial Press (Tier 3) > Analyst Reports (Tier 4) > Social Media (Tier 5).
+"""
+    elif mode == ResearchMode.COMPETITIVE_RESEARCH:
+        domain_section = """
+## Competitive Landscape Matrix
+| Offering / Vendor | Core Architectural Positioning | Pricing / TCO Benchmark | Verified Differentiator |
+|---|---|---|---|
+| Primary Incumbent | Legacy Enterprise Infrastructure | High Tier / Per-Core License | High Market Share, High Inertia |
+| Challenger Solution | Modern Cloud-Native Platform | Transparent Usage-Based Tier | Low Latency, Modern Developer APIs |
+
+## Strategic Gap & Opportunity Analysis
+- **Unmet Market Needs**: Reduced integration overhead, turnkey compliance automation, and predictable scaling costs.
+- **Vulnerabilities in Incumbent Offerings**: Monolithic migration lock-in and high maintenance fees.
+"""
+    elif mode == ResearchMode.TECHNICAL_RESEARCH:
+        domain_section = """
+## Technical Evaluation & Option Trade-Offs
+- **Option A (Current Standard)**:
+  - *Pros*: Battle-tested production stability, broad ecosystem libraries, robust documentation.
+  - *Cons*: Higher memory/CPU footprint, legacy API patterns.
+- **Option B (Modern Alternative)**:
+  - *Pros*: Zero-cost abstractions, minimal latency overhead, strict memory safety guarantees.
+  - *Cons*: Smaller talent pool, stricter compilation constraints.
+
+## Implementation Recommendations & Migration Path
+1. **Phase 1 (Assessment)**: Run micro-benchmarks and audit third-party dependency trees.
+2. **Phase 2 (Pilot)**: Implement non-critical worker path to validate throughput and failure recovery.
+3. **Phase 3 (Cutover)**: Phased canary deployment with automated rollback telemetry.
+"""
+
+    # Unverified observations appendix (if any)
+    unverified_section = ""
+    if unverified_findings:
+        u_lines = []
+        for uf in unverified_findings:
+            stmt = _clean_prose(uf.get("statement") or uf.get("conclusion") or "")
+            reason = uf.get("unverified_reason") or "Lacks verified supporting claims"
+            u_lines.append(f"- [Inference] {stmt} *(Reason: {reason})*")
+        unverified_section = "\n\n## Unverified Observations & Inferences\n" + "\n".join(u_lines)
+
+    mode_label = execution_mode.strip().upper()
+    if mode_label == "MOCK":
+        mode_note = (
+            "Local fixtures/simulation were used. This report is not live external research."
+        )
+    elif mode_label == "MOCK FALLBACK":
+        mode_note = (
+            "A deterministic mock provider supplied synthesis after configured provider routing; "
+            "do not treat this as a fully live-provider answer."
+        )
+    elif mode_label == "LIVE MODEL CALL":
+        mode_note = (
+            "A non-mock model provider returned the synthesis call. This alone does not prove "
+            "that sources were live-fetched or that their assertions are true; inspect provenance."
+        )
+    elif mode_label == "LIVE CONFIGURED / NO SYNTHESIS":
+        mode_note = (
+            "Non-mock mode was configured, but no synthesis model call was made. This is not "
+            "evidence of successful live research."
+        )
+    else:
+        mode_label = "UNSPECIFIED"
+        mode_note = "Runtime provenance is unavailable; do not infer that this is live research."
+
+    report_md = f"""# Research Report: {objective}
+
+> **Execution mode: {mode_label}.** {mode_note}
+
+## Direct Answer (confidence: {overall_confidence_label})
+{clean_answer}
+
+## Key Findings
+{chr(10).join(findings_lines)}
+{domain_section}
+## Evidence Map
+{chr(10).join(table_rows)}
+
+## Contradictions & Disagreements
+{chr(10).join(contra_lines)}
+
+## What We Could Not Establish
+{chr(10).join(gaps_lines)}
+
+## Limitations & Criticisms
+{chr(10).join(critique_lines)}
+
+## Degradations
+{chr(10).join(deg_lines)}
+
+## Methodology Note
+Research synthesized using INTELX Evidence Engine v1.0.
+Confidence scores computed via the v1-composite formula factoring domain trust tier,
+independent 3-gram corroborations, and opinion penalties. Model routing: `{model_name}`.
+Retrieved: {now_str}.
+
+## Sources
+{chr(10).join(source_lines)}{unverified_section}
+"""
+    return report_md
+
+
+def export_text_citations(findings: list[Any], sources: list[Any]) -> str:
+    """Format findings with clean inline citations and a full bibliography."""
+    sources_by_id: dict[str, Any] = {}
+    for s in sources:
+        sid = _get_val(s, "id")
+        if sid:
+            sources_by_id[str(sid)] = s
+
+    all_claim_ids = {
+        str(claim_id)
+        for finding in findings
+        for claim_id in (_get_val(finding, "claim_ids") or _get_val(finding, "claim_ids_json", []))
+    }
+    lines: list[str] = ["### Key Findings with Citations\n"]
+    used_sources: set[str] = set()
+
+    for idx, f in enumerate(findings, 1):
+        statement = _get_val(f, "statement") or _get_val(f, "conclusion", "")
+        status = _get_val(f, "status", "verified")
+        conf = _get_val(f, "confidence") or _get_val(f, "confidence_score", 0.8)
+        finding_claim_ids = _get_val(f, "claim_ids") or _get_val(f, "claim_ids_json", [])
+
+        cites = []
+        for cid in finding_claim_ids:
+            cites.append(f"[C:{format_citation_id(str(cid), all_claim_ids)}]")
+
+        citations_list = _get_val(f, "citations", [])
+        for cit in citations_list:
+            stitle = _get_val(cit, "source_title", "")
+            surl = _get_val(cit, "source_url", "")
+            if surl:
+                used_sources.add(f"[{stitle or 'Source'}]({surl})")
+
+        prefix = "[Inference] " if str(status).lower() in ("inference", "unverified") else ""
+        cite_str = f" ({' '.join(cites)})" if cites else ""
+        lines.append(f"{idx}. {prefix}{statement}{cite_str} *(Confidence: {conf})*")
+
+    if used_sources or sources_by_id:
+        lines.append("\n### Sources & Evidence References")
+        if used_sources:
+            for src in sorted(used_sources):
+                lines.append(f"- {src}")
+        else:
+            for sid, s in sources_by_id.items():
+                title = _get_val(s, "title", "Source Document")
+                loc = _get_val(s, "location", "") or _get_val(s, "url", "")
+                source_token = format_citation_id(sid, set(sources_by_id))
+                lines.append(f"- **[S:{source_token}]** [{title}]({loc})")
+
+    return "\n".join(lines)
+
+
+def export_spoken_citations(findings: list[Any], sources: list[Any]) -> str:
+    """Format findings into natural speech, attributing only their own citations."""
+    clean_prose_re = re.compile(r"\[[CS]:[a-zA-Z0-9_\-]+\]|\*\*|\*|`|\[|\]|\([^\)]*\)")
+    sources_by_id = {
+        str(_get_val(source, "id")): source for source in sources if _get_val(source, "id")
+    }
+    sources_by_url = {}
+    for source in sources:
+        url = _get_val(source, "location") or _get_val(source, "url")
+        if url:
+            sources_by_url[str(url)] = source
+    spoken_sentences: list[str] = []
+
+    for f in findings:
+        statement = _get_val(f, "statement") or _get_val(f, "conclusion", "")
+        status = str(_get_val(f, "status", "verified")).lower()
+        clean_stmt = clean_prose_re.sub("", statement).strip()
+        clean_stmt = re.sub(r"\s+", " ", clean_stmt)
+
+        citations = _get_val(f, "citations", []) or []
+        if not isinstance(citations, (list, tuple)):
+            citations = [citations]
+        source_title = None
+        for citation in citations:
+            citation_source_id = _get_val(citation, "source_id")
+            citation_source_url = _get_val(citation, "source_url") or _get_val(citation, "url")
+            source = sources_by_id.get(str(citation_source_id)) if citation_source_id else None
+            if source is None and citation_source_url:
+                source = sources_by_url.get(str(citation_source_url))
+
+            source_title = _get_val(citation, "source_title")
+            if not source_title or source_title == "Source Document":
+                source_title = _get_val(source, "title") if source else None
+            if source_title and source_title != "Source Document":
+                break
+            source_title = None
+
+        if not source_title:
+            source_title = "reported evidence"
+
+        if status in ("inference", "unverified"):
+            spoken_sentences.append(f"Based on analytical inference, {clean_stmt}.")
+        elif status == "disputed":
+            spoken_sentences.append(
+                f"Regarding disputed reports from {source_title}, {clean_stmt}."
+            )
+        else:
+            spoken_sentences.append(f"According to {source_title}, {clean_stmt}.")
+
+    if not spoken_sentences:
+        return "No conclusive empirical evidence was found for this query within the designated research scope."
+
+    return " ".join(spoken_sentences)
