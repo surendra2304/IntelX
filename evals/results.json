@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-21T19:10:03Z",
+  "timestamp": "2026-10-23T15:54:26Z",
   "mode": "mock",
   "provider": "mock",
   "eval_provider": "mock",
@@ -16,7 +16,7 @@
     "null_result_correctness": 1.0,
     "completion_rate": 1.0,
     "avg_usd_cost": 0.00477,
-    "avg_latency_seconds": 0.24
+    "avg_latency_seconds": 0.26
   },
   "tasks": [
     {
@@ -24,7 +24,7 @@
       "status": "COMPLETED",
       "outcome": "ANSWERED",
       "cost_usd": 0.005604,
-      "latency_sec": 0.79
+      "latency_sec": 0.85
     },
     {
       "task_id": "task_02_solid_state_cycling",
@@ -38,21 +38,21 @@
       "status": "COMPLETED",
       "outcome": "ANSWERED",
       "cost_usd": 0.00539,
-      "latency_sec": 0.15
+      "latency_sec": 0.2
     },
     {
       "task_id": "task_04_syndicated_reuters_wire",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
       "cost_usd": 0.005369,
-      "latency_sec": 0.15
+      "latency_sec": 0.18
     },
     {
       "task_id": "task_05_contradictory_energy_density",
       "status": "COMPLETED",
       "outcome": "ANSWERED",
       "cost_usd": 0.008827,
-      "latency_sec": 0.27
+      "latency_sec": 0.32
     },
     {
       "task_id": "task_06_unsupported_perpetual_motion",
@@ -66,7 +66,7 @@
       "status": "COMPLETED",
       "outcome": "ANSWERED",
       "cost_usd": 0.002472,
-      "latency_sec": 0.12
+      "latency_sec": 0.13
     },
     {
       "task_id": "task_08_stale_historical_data",
