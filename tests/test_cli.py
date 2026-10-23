@@ -331,6 +331,14 @@ def test_run_smoke_live_execution():
         assert mock_write.called
 
 
+def test_run_oracle_smoke():
+    """Verify oracle-smoke runs connection ping and schema inspection."""
+    from intelx.cli.main import run_oracle_smoke
+
+    args = argparse.Namespace(db_url="sqlite+aiosqlite:///:memory:", create_tables=True)
+    run_oracle_smoke(args)
+
+
 def test_main_dispatch():
     """Verify main() parses argv and dispatches to appropriate handlers."""
     with (
@@ -339,6 +347,13 @@ def test_main_dispatch():
     ):
         main()
         mock_purge.assert_called_once()
+
+    with (
+        patch.object(sys, "argv", ["intelx", "oracle-smoke", "--create-tables"]),
+        patch("intelx.cli.main.run_oracle_smoke") as mock_oracle_smoke,
+    ):
+        main()
+        mock_oracle_smoke.assert_called_once()
 
     # Empty command prints help
     with (

@@ -44,6 +44,9 @@ dev = [
 redis = [
     "redis>=5.0.0,<7.0",
 ]
+oracle = [
+    "oracledb>=2.2.0",
+]
 
 [project.scripts]
 intelx = "intelx.cli.main:main"
