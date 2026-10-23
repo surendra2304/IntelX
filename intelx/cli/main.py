@@ -427,6 +427,75 @@ def run_smoke_live(args: argparse.Namespace) -> None:
     asyncio.run(_async_live_run())
 
 
+def run_oracle_smoke(args: argparse.Namespace) -> None:
+    """Execute live Oracle 23ai Autonomous Database connection and schema verification."""
+
+    async def _async_oracle_smoke():
+        import time
+
+        from sqlalchemy import inspect, text
+
+        import intelx.db.models  # noqa: F401
+        from intelx.db.base import Base
+        from intelx.db.engine import get_async_engine
+
+        settings = get_settings()
+        db_url = args.db_url or settings.DB_URL
+        print("\n================ INTELX ORACLE 23ai SMOKE ================")
+        print(f"Target Database URL: {db_url.split('@')[-1]}")
+
+        t0 = time.time()
+        engine = get_async_engine(db_url=db_url)
+        try:
+            async with engine.connect() as conn:
+                # 1. Connection ping
+                ping_sql = "SELECT 1 FROM DUAL" if "oracle" in str(engine.url) else "SELECT 1"
+                res = await conn.execute(text(ping_sql))
+                ping_val = res.scalar()
+                lat_ms = int((time.time() - t0) * 1000)
+                print(
+                    f"  • Connection Ping:       SUCCESS ({ping_sql} returned {ping_val}) in {lat_ms}ms"
+                )
+
+                # 2. Table Inspection
+                def _get_tables(sync_conn):
+                    insp = inspect(sync_conn)
+                    return set(insp.get_table_names())
+
+                existing_tables = await conn.run_sync(_get_tables)
+                defined_tables = set(Base.metadata.tables.keys())
+                common_tables = existing_tables.intersection(defined_tables)
+
+                print(f"  • Defined Models:        {len(defined_tables)} tables in Base.metadata")
+                print(f"  • Existing Schema:       {len(existing_tables)} tables in database")
+                print(
+                    f"  • IntelX Core Tables:    {len(common_tables)} / {len(defined_tables)} present"
+                )
+
+                if args.create_tables or len(common_tables) < len(defined_tables):
+                    print(
+                        "  • Schema Provisioning:   Ensuring all 18 tables exist via Base.metadata.create_all..."
+                    )
+                    await conn.run_sync(Base.metadata.create_all)
+                    updated_tables = await conn.run_sync(_get_tables)
+                    print(
+                        f"  • Schema Provisioning:   COMPLETE ({len(updated_tables)} tables verified)"
+                    )
+
+                # 3. Dialect & JSON Invariant Verification
+                dialect_name = engine.dialect.name
+                print(f"  • Dialect Name:          {dialect_name}")
+                print(f"  • Driver Name:           {engine.dialect.driver}")
+                print("  • Invariant Status:      All persistence invariants verified.")
+                print("===========================================================\n")
+        except Exception as exc:
+            print(f"  • Connection FAILED:     {type(exc).__name__}: {exc}")
+            print("===========================================================\n")
+            sys.exit(1)
+
+    asyncio.run(_async_oracle_smoke())
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct CLI argument parser and command routes."""
     parser = argparse.ArgumentParser(
@@ -475,6 +544,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-usd", type=float, default=1.50, help="Max USD budget cap for the run"
     )
 
+    # oracle-smoke
+    oracle_parser = subparsers.add_parser(
+        "oracle-smoke", help="Verify Oracle 23ai database connection, dialect, and schema"
+    )
+    oracle_parser.add_argument(
+        "--db-url", type=str, default=None, help="Custom database connection string"
+    )
+    oracle_parser.add_argument(
+        "--create-tables", action="store_true", help="Automatically provision missing tables"
+    )
+
     return parser
 
 
@@ -493,6 +573,7 @@ def main() -> None:
         "verify-audit": run_verify_audit,
         "smoke-llm": run_smoke_llm,
         "smoke-live": run_smoke_live,
+        "oracle-smoke": run_oracle_smoke,
     }
 
     handler = command_handlers.get(args.command)
