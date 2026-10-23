@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intelx.core.enums import (
@@ -38,6 +39,12 @@ from intelx.core.enums import (
     TrustTier,
 )
 from intelx.db.base import Base
+
+
+@compiles(JSON, "oracle")
+def _compile_json_oracle(_type, _compiler, **_kw):
+    """Oracle 23ai natively supports the JSON data type."""
+    return "JSON"
 
 
 def generate_uuid() -> str:
@@ -505,19 +512,26 @@ class Policy(Base):
 
 
 class ApiKey(Base):
-    """API authentication key store with hashed secrets."""
+    """API authentication key store with unified FRIDAY Universe superset schema."""
 
     __tablename__ = "api_keys"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    tenant_id: Mapped[str | None] = mapped_column(String(64), nullable=True, default="default")
+    site_id: Mapped[str | None] = mapped_column(String(64), nullable=True, default="default")
     key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    key_prefix: Mapped[str | None] = mapped_column(String(32), nullable=True, default=None)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     role: Mapped[ApiKeyRole] = mapped_column(
         Enum(ApiKeyRole, name="api_key_role_enum", native_enum=False),
         default=ApiKeyRole.MEMBER,
         nullable=False,
     )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, nullable=True
     )
     revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

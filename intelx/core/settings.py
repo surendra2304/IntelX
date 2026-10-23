@@ -52,6 +52,9 @@ class Settings(BaseSettings):
             "POSTGRES_URL",
             "POSTGRESQL_URL",
             "INTELX_POSTGRES_URL",
+            "ORACLE_CORE_ASYNC_URL",
+            "ORACLE_CORE_URL",
+            "ORACLE_URL",
         ),
         description="Async SQLAlchemy database URL (SQLite or PostgreSQL)",
     )
@@ -550,6 +553,10 @@ class Settings(BaseSettings):
             return "postgresql+asyncpg://" + normalized[len("postgresql://") :]
         if normalized.startswith("postgresql+psycopg2://"):
             return "postgresql+asyncpg://" + normalized[len("postgresql+psycopg2://") :]
+        if normalized.startswith("oracle+oracledb://"):
+            return "oracle+oracledb_async://" + normalized[len("oracle+oracledb://") :]
+        if normalized.startswith("oracle://"):
+            return "oracle+oracledb_async://" + normalized[len("oracle://") :]
         return normalized
 
     @field_validator("DOMAIN_ALLOWLIST", "DOMAIN_DENYLIST", "API_KEYS", mode="before")
