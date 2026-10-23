@@ -12,6 +12,7 @@ from intelx.core.settings import get_settings
 # Patch Oracle compiler for JSON support if using Oracle dialect
 try:
     from sqlalchemy.dialects.oracle.base import OracleTypeCompiler
+
     OracleTypeCompiler.visit_JSON = lambda self, type_, **kw: "CLOB"
     OracleTypeCompiler.visit_json = lambda self, type_, **kw: "CLOB"
 except Exception:
