@@ -115,11 +115,28 @@ class RunRepo:
 
         if is_oracle:
             from sqlalchemy import literal_column
+
             priority_order = case(
-                (func.json_value(ResearchRun.scope_json, literal_column("'$.priority'")) == "urgent", 0),
-                (func.json_value(ResearchRun.scope_json, literal_column("'$.context.priority'")) == "urgent", 0),
-                (func.json_value(ResearchRun.scope_json, literal_column("'$.priority'")) == "high", 1),
-                (func.json_value(ResearchRun.scope_json, literal_column("'$.context.priority'")) == "high", 1),
+                (
+                    func.json_value(ResearchRun.scope_json, literal_column("'$.priority'"))
+                    == "urgent",
+                    0,
+                ),
+                (
+                    func.json_value(ResearchRun.scope_json, literal_column("'$.context.priority'"))
+                    == "urgent",
+                    0,
+                ),
+                (
+                    func.json_value(ResearchRun.scope_json, literal_column("'$.priority'"))
+                    == "high",
+                    1,
+                ),
+                (
+                    func.json_value(ResearchRun.scope_json, literal_column("'$.context.priority'"))
+                    == "high",
+                    1,
+                ),
                 else_=2,
             )
         else:
