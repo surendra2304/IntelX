@@ -105,13 +105,31 @@ class RunRepo:
             .scalar_subquery()
         )
 
-        priority_order = case(
-            (ResearchRun.scope_json["priority"].as_string() == "urgent", 0),
-            (ResearchRun.scope_json["context"]["priority"].as_string() == "urgent", 0),
-            (ResearchRun.scope_json["priority"].as_string() == "high", 1),
-            (ResearchRun.scope_json["context"]["priority"].as_string() == "high", 1),
-            else_=2,
-        )
+        is_oracle = False
+        try:
+            bind = session.get_bind()
+            if bind and bind.dialect.name == "oracle":
+                is_oracle = True
+        except Exception:
+            pass
+
+        if is_oracle:
+            from sqlalchemy import literal_column
+            priority_order = case(
+                (func.json_value(ResearchRun.scope_json, literal_column("'$.priority'")) == "urgent", 0),
+                (func.json_value(ResearchRun.scope_json, literal_column("'$.context.priority'")) == "urgent", 0),
+                (func.json_value(ResearchRun.scope_json, literal_column("'$.priority'")) == "high", 1),
+                (func.json_value(ResearchRun.scope_json, literal_column("'$.context.priority'")) == "high", 1),
+                else_=2,
+            )
+        else:
+            priority_order = case(
+                (ResearchRun.scope_json["priority"].as_string() == "urgent", 0),
+                (ResearchRun.scope_json["context"]["priority"].as_string() == "urgent", 0),
+                (ResearchRun.scope_json["priority"].as_string() == "high", 1),
+                (ResearchRun.scope_json["context"]["priority"].as_string() == "high", 1),
+                else_=2,
+            )
         candidate_id = (
             select(ResearchRun.id)
             .where(
