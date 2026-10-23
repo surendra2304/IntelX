@@ -1,19 +1,30 @@
 """Database Engine Configuration with SQLite WAL Support."""
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.types import JSON
 
 from intelx.core.settings import get_settings
 
-# Patch Oracle compiler for JSON support if using Oracle dialect
+
+@compiles(JSON, "oracle")
+def _compile_json_oracle(_type, _compiler, **_kw):
+    """Oracle 23ai natively supports the JSON data type."""
+    return "JSON"
+
+
+# Fallback safety patch for older compiler implementations
 try:
     from sqlalchemy.dialects.oracle.base import OracleTypeCompiler
-    OracleTypeCompiler.visit_JSON = lambda self, type_, **kw: "CLOB"
-    OracleTypeCompiler.visit_json = lambda self, type_, **kw: "CLOB"
+
+    OracleTypeCompiler.visit_JSON = lambda self, type_, **kw: "JSON"
+    OracleTypeCompiler.visit_json = lambda self, type_, **kw: "JSON"
 except Exception:
     pass
 
@@ -44,6 +55,23 @@ def get_async_engine(db_url: str | None = None) -> AsyncEngine:
 
     settings = get_settings()
     url = db_url or settings.DB_URL
+
+    # Normalize Oracle URL to async driver
+    if url.startswith("oracle+oracledb://"):
+        url = "oracle+oracledb_async://" + url[len("oracle+oracledb://") :]
+    elif url.startswith("oracle://"):
+        url = "oracle+oracledb_async://" + url[len("oracle://") :]
+
+    # Invariant 2 (Zero-Disk SQLite): On Linux with /dev/shm, redirect local SQLite fallback to RAM tmpfs
+    if (
+        os.name != "nt"
+        and "sqlite" in url
+        and os.path.exists("/dev/shm")
+        and not url.startswith("sqlite+aiosqlite:////dev/shm")
+        and ":memory:" not in url
+    ):
+        if "data/intelx.db" in url or "./data" in url:
+            url = "sqlite+aiosqlite:////dev/shm/intelx.db"
 
     # Ensure parent directory exists for SQLite database files
     if "sqlite" in url:
