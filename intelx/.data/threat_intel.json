@@ -43,6 +43,28 @@
       "last_seen": 1792883882.8217006,
       "tags": [],
       "related_indicators": []
+    },
+    "ioc_0d10a88454fd": {
+      "indicator_id": "ioc_0d10a88454fd",
+      "value": "Detected command_injection pattern: ",
+      "type": "Detected command_injection pattern: ",
+      "tlp": "amber",
+      "confidence": 0.5,
+      "first_seen": 1792883924.207897,
+      "last_seen": 1792883924.2078972,
+      "tags": [],
+      "related_indicators": []
+    },
+    "ioc_bb5eac2a6a1f": {
+      "indicator_id": "ioc_bb5eac2a6a1f",
+      "value": "Detected command_injection pattern: ",
+      "type": "Detected command_injection pattern: ",
+      "tlp": "amber",
+      "confidence": 0.5,
+      "first_seen": 1792883945.7684066,
+      "last_seen": 1792883945.7684069,
+      "tags": [],
+      "related_indicators": []
     }
   },
   "campaigns": {},
