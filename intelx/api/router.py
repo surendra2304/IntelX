@@ -12,6 +12,7 @@ from routers.dynamic_osint_collector import router as osint_collector_router
 from routers.threat_intel_knowledge_base import router as threat_kb_router
 from routers.dark_web_monitor import router as darkweb_router
 from routers.adversary_emulation_engine import router as emulation_router
+from routers.threat_campaign_tracker import router as campaign_router
 from intelx.api.v1.cortex import router as cortex_root_router
 from intelx.api.v1.health import router as health_root_router
 from intelx.api.v1.stratex import router as stratex_root_router
@@ -28,6 +29,7 @@ root_api_router.include_router(osint_collector_router)
 root_api_router.include_router(threat_kb_router)
 root_api_router.include_router(darkweb_router)
 root_api_router.include_router(emulation_router)
+root_api_router.include_router(campaign_router)
 
 
 def _task_receipt(
