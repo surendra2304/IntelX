@@ -18,6 +18,7 @@ from routers.threat_forecast_engine import router as threat_forecast_router
 from routers.threat_hunting_query_optimizer import router as hunting_optimizer_router
 from routers.intel_sharing_manager import router as intel_sharing_router
 from intelx.services.disinformation_detector import router as disinfo_router
+from intelx.services.threat_attribution_engine import router as attribution_router
 from intelx.api.v1.cortex import router as cortex_root_router
 from intelx.api.v1.health import router as health_root_router
 from intelx.api.v1.stratex import router as stratex_root_router
@@ -40,6 +41,7 @@ root_api_router.include_router(threat_forecast_router)
 root_api_router.include_router(hunting_optimizer_router)
 root_api_router.include_router(intel_sharing_router)
 root_api_router.include_router(disinfo_router)
+root_api_router.include_router(attribution_router)
 
 
 def _task_receipt(
