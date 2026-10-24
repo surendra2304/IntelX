@@ -516,3 +516,60 @@ async def api_summarize(
         "evidence_claims": claims_text,
         "confidence": 0.90 if claims_text else 0.50,
     }
+
+
+# --- Deep Research Synthesis Engine Integration ---
+
+@root_api_router.post("/v1/synthesis/deep-research", tags=["Deep Research Synthesis"])
+async def deep_research_synthesis(
+    query: str = Query(..., description="Research question or topic"),
+    sources: list[dict] | None = None,
+    max_sources: int = Query(20, ge=1, le=50),
+):
+    """Synthesize research from multiple sources with contradiction detection."""
+    from intelx.agents.synthesis_engine import SynthesisEngine
+    engine = SynthesisEngine()
+    try:
+        result = await engine.synthesize_research(
+            query=query,
+            sources=sources,
+            max_sources=max_sources,
+        )
+        return {
+            "status": "ok",
+            "summary": result.summary,
+            "key_findings": result.key_findings,
+            "timeline": result.timeline,
+            "contradictions": result.contradictions,
+            "knowledge_gaps": result.knowledge_gaps,
+            "confidence": result.confidence,
+            "citations": result.citations,
+            "sources_analyzed": result.sources_analyzed,
+            "claims_extracted": result.claims_extracted,
+        }
+    except Exception as exc:
+        raise HTTPException(500, f"Synthesis failed: {exc}")
+
+
+@root_api_router.post("/v1/synthesis/evidence-check", tags=["Deep Research Synthesis"])
+async def evidence_check(
+    query: str = Query(..., description="Claim or statement to verify"),
+):
+    """Check a specific claim against gathered evidence."""
+    from intelx.agents.synthesis_engine import SynthesisEngine
+    engine = SynthesisEngine()
+    try:
+        result = await engine.synthesize_research(
+            query=query,
+            sources=[],
+            max_sources=10,
+        )
+        return {
+            "status": "ok",
+            "query": query,
+            "evidence_found": len(result.key_findings),
+            "contradictions": len(result.contradictions),
+            "confidence": result.confidence,
+        }
+    except Exception as exc:
+        raise HTTPException(500, f"Evidence check failed: {exc}")
