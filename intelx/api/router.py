@@ -21,6 +21,7 @@ from intelx.services.disinformation_detector import router as disinfo_router
 from intelx.services.threat_attribution_engine import router as attribution_router
 from intelx.services.supply_chain_threat_mapper import router as supplychain_router
 from intelx.services.threat_intel_exchange_protocol import router as intel_exchange_router
+from intelx.services.threat_intel_quality_evaluator import router as intel_quality_router
 from intelx.api.v1.cortex import router as cortex_root_router
 from intelx.api.v1.health import router as health_root_router
 from intelx.api.v1.stratex import router as stratex_root_router
@@ -46,6 +47,7 @@ root_api_router.include_router(disinfo_router)
 root_api_router.include_router(attribution_router)
 root_api_router.include_router(supplychain_router)
 root_api_router.include_router(intel_exchange_router)
+root_api_router.include_router(intel_quality_router)
 
 
 def _task_receipt(
