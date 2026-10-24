@@ -9,6 +9,7 @@ from intelx.api.v1 import v1_router
 from routers.universal_crawler import router as universal_crawler_router
 from routers.predictive_threat_analyzer import router as predictive_threat_router
 from routers.dynamic_osint_collector import router as osint_collector_router
+from routers.threat_intel_knowledge_base import router as threat_kb_router
 from intelx.api.v1.cortex import router as cortex_root_router
 from intelx.api.v1.health import router as health_root_router
 from intelx.api.v1.stratex import router as stratex_root_router
@@ -22,6 +23,7 @@ logger = logging.getLogger("intelx.api.router")
 root_api_router.include_router(universal_crawler_router)
 root_api_router.include_router(predictive_threat_router)
 root_api_router.include_router(osint_collector_router)
+root_api_router.include_router(threat_kb_router)
 
 
 def _task_receipt(
