@@ -1,0 +1,50 @@
+{
+  "indicators": {
+    "ioc_5443bc56f6c8": {
+      "indicator_id": "ioc_5443bc56f6c8",
+      "value": "Detected command_injection pattern: ",
+      "type": "Detected command_injection pattern: ",
+      "tlp": "amber",
+      "confidence": 0.5,
+      "first_seen": 1792883882.805228,
+      "last_seen": 1792883882.8052285,
+      "tags": [],
+      "related_indicators": []
+    },
+    "ioc_a51521e8214e": {
+      "indicator_id": "ioc_a51521e8214e",
+      "value": "Detected command_injection pattern: ",
+      "type": "Detected command_injection pattern: ",
+      "tlp": "amber",
+      "confidence": 0.5,
+      "first_seen": 1792883882.8083,
+      "last_seen": 1792883882.8083005,
+      "tags": [],
+      "related_indicators": []
+    },
+    "ioc_4b22cb74d7f0": {
+      "indicator_id": "ioc_4b22cb74d7f0",
+      "value": "Detected command_injection pattern: ",
+      "type": "Detected command_injection pattern: ",
+      "tlp": "amber",
+      "confidence": 0.5,
+      "first_seen": 1792883882.815836,
+      "last_seen": 1792883882.815836,
+      "tags": [],
+      "related_indicators": []
+    },
+    "ioc_6d05a619396b": {
+      "indicator_id": "ioc_6d05a619396b",
+      "value": "Detected command_injection pattern: ",
+      "type": "Detected command_injection pattern: ",
+      "tlp": "amber",
+      "confidence": 0.5,
+      "first_seen": 1792883882.8217003,
+      "last_seen": 1792883882.8217006,
+      "tags": [],
+      "related_indicators": []
+    }
+  },
+  "campaigns": {},
+  "reports": []
+}
