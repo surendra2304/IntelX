@@ -17,6 +17,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from fastapi import APIRouter, HTTPException
+
+router = APIRouter()
+
 
 @dataclass
 class Expert:
@@ -424,3 +428,51 @@ class ExpertNetwork:
             "total_recommendations": len(self._recommendations),
             "network_metrics": self.analyze_network().__dict__,
         }
+
+
+# ── Router Endpoints ──────────────────────────────────────────────────────────
+
+expert_network = ExpertNetwork()
+
+
+@router.post("/api/v1/intel/experts")
+async def create_expert_endpoint(payload: dict):
+    """Create an expert profile."""
+    expert = expert_network.create_expert(
+        name=payload["name"],
+        affiliation=payload.get("affiliation", ""),
+        field=payload.get("field", ""),
+        expertise_areas=payload.get("expertise_areas", []),
+        publications=payload.get("publications", 0),
+        h_index=payload.get("h_index", 0.0),
+    )
+    return expert.__dict__
+
+
+@router.post("/api/v1/intel/experts/match")
+async def match_expert_endpoint(payload: dict):
+    """Match experts to a research question."""
+    matches = expert_network.match_expert(
+        research_question=payload.get("research_question", ""),
+        required_expertise=payload.get("required_expertise", []),
+    )
+    return [m.__dict__ for m in matches]
+
+
+@router.get("/api/v1/intel/experts/network")
+async def analyze_network_endpoint():
+    """Analyze the expert network."""
+    return expert_network.analyze_network().__dict__
+
+
+@router.get("/api/v1/intel/experts/{expert_id}/recommendations")
+async def recommend_collaborations_endpoint(expert_id: str):
+    """Recommend collaborations for an expert."""
+    recommendations = expert_network.recommend_collaborations(expert_id)
+    return [r.__dict__ for r in recommendations]
+
+
+@router.get("/api/v1/intel/experts/report")
+async def get_network_report_endpoint():
+    """Get expert network report."""
+    return expert_network.get_network_report()
