@@ -6,6 +6,7 @@ from datetime import UTC
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from intelx.api.v1 import v1_router
+from routers.universal_crawler import router as universal_crawler_router
 from intelx.api.v1.cortex import router as cortex_root_router
 from intelx.api.v1.health import router as health_root_router
 from intelx.api.v1.stratex import router as stratex_root_router
@@ -14,6 +15,9 @@ from intelx.db.models import ApiKey
 
 root_api_router = APIRouter()
 logger = logging.getLogger("intelx.api.router")
+
+
+root_api_router.include_router(universal_crawler_router)
 
 
 def _task_receipt(
