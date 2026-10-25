@@ -6,6 +6,23 @@ from datetime import UTC
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from intelx.api.v1 import v1_router
+from routers.universal_crawler import router as universal_crawler_router
+from routers.predictive_threat_analyzer import router as predictive_threat_router
+from routers.dynamic_osint_collector import router as osint_collector_router
+from routers.threat_intel_knowledge_base import router as threat_kb_router
+from routers.dark_web_monitor import router as darkweb_router
+from routers.adversary_emulation_engine import router as emulation_router
+from routers.threat_campaign_tracker import router as campaign_router
+from routers.threat_intel_correlation_engine import router as correlation_router
+from routers.threat_forecast_engine import router as threat_forecast_router
+from routers.threat_hunting_query_optimizer import router as hunting_optimizer_router
+from routers.intel_sharing_manager import router as intel_sharing_router
+from intelx.services.disinformation_detector import router as disinfo_router
+from intelx.services.threat_attribution_engine import router as attribution_router
+from intelx.services.supply_chain_threat_mapper import router as supplychain_router
+from intelx.services.threat_intel_exchange_protocol import router as intel_exchange_router
+from intelx.services.threat_intel_quality_evaluator import router as intel_quality_router
+from intelx.services.threat_campaign_predictor import router as campaign_predictor_router
 from intelx.api.v1.cortex import router as cortex_root_router
 from intelx.api.v1.health import router as health_root_router
 from intelx.api.v1.stratex import router as stratex_root_router
@@ -14,6 +31,25 @@ from intelx.db.models import ApiKey
 
 root_api_router = APIRouter()
 logger = logging.getLogger("intelx.api.router")
+
+
+root_api_router.include_router(universal_crawler_router)
+root_api_router.include_router(predictive_threat_router)
+root_api_router.include_router(osint_collector_router)
+root_api_router.include_router(threat_kb_router)
+root_api_router.include_router(darkweb_router)
+root_api_router.include_router(emulation_router)
+root_api_router.include_router(campaign_router)
+root_api_router.include_router(correlation_router)
+root_api_router.include_router(threat_forecast_router)
+root_api_router.include_router(hunting_optimizer_router)
+root_api_router.include_router(intel_sharing_router)
+root_api_router.include_router(disinfo_router)
+root_api_router.include_router(attribution_router)
+root_api_router.include_router(supplychain_router)
+root_api_router.include_router(intel_exchange_router)
+root_api_router.include_router(intel_quality_router)
+root_api_router.include_router(campaign_predictor_router)
 
 
 def _task_receipt(
