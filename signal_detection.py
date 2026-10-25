@@ -200,7 +200,7 @@ class SignalDetector:
         for s in signals:
             all_entities.update(s.entities)
 
-        fused_id = hashlib.md5(f"fused:{time.time()}").hexdigest()[:12]
+        fused_id = hashlib.md5(f"fused:{time.time()}".encode()).hexdigest()[:12]
 
         result = SignalFusionResult(
             fused_id=fused_id,
@@ -338,7 +338,7 @@ class SignalDetector:
         else:
             actions = ["Monitor situation", "Gather more information", "Prepare response plan"]
 
-        threat_id = hashlib.md5(f"threat:{time.time()}").hexdigest()[:12]
+        threat_id = hashlib.md5(f"threat:{time.time()}".encode()).hexdigest()[:12]
 
         threat = ThreatAssessment(
             threat_id=threat_id,
