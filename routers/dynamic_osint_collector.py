@@ -235,7 +235,7 @@ class DynamicOSINTCollector:
         findings = []
 
         # Simulate finding data based on source type and target
-        for i in range(2 + (ord(hashlib.md5(f"{source.source_id}:{target}").encode()) % 5)):
+        for i in range(2 + (ord(hashlib.md5(f"{source.source_id}:{target}".encode()).encode()) % 5)):
             if source.source_type == "social":
                 finding_type = "username"
                 value = f"{target}_profile_{i}"
@@ -262,7 +262,7 @@ class DynamicOSINTCollector:
                 value=value,
                 context=f"Found via {source.name}",
                 timestamp=time.time(),
-                confidence=source.reliability * (0.7 + (ord(hashlib.md5(f"{source.source_id}:{i}").encode()) % 30) / 100),
+                confidence=source.reliability * (0.7 + (ord(hashlib.md5(f"{source.source_id}:{i}".encode()).encode()) % 30) / 100),
                 reliability=source.reliability,
                 metadata={"source_type": source.source_type, "target_type": target_type},
                 related_to_target=True,
