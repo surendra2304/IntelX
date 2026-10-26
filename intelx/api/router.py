@@ -94,6 +94,9 @@ root_api_router.include_router(stratex_root_router, prefix="/v1")
 # Cortex Direct Route (/v1/cortex/...)
 root_api_router.include_router(cortex_root_router, prefix="/v1")
 
+from intelx.api.real_osint_router import real_osint_router
+root_api_router.include_router(real_osint_router)
+
 
 @root_api_router.post("/v1/task/execute", tags=["Universal Task Protocol"])
 async def execute_task(body: dict, api_key: ApiKey = Depends(get_friday_api_key)):
