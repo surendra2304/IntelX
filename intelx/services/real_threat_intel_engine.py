@@ -150,7 +150,7 @@ class ThreatIntelEngine:
         for hit in batch.hits:
             text = texts.get(hit.url, "")
             values = {(hit.url, "url")}
-            for value in re.findall(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])", text):
+            for value in re.findall(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\w)", text):
                 try:
                     values.add((str(ipaddress.ip_address(value)), "ip"))
                 except ValueError:
