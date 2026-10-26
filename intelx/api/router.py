@@ -29,6 +29,7 @@ from intelx.api.v1.stratex import router as stratex_root_router
 from intelx.core.auth import get_friday_api_key
 from intelx.db.models import ApiKey
 
+from routers.real_osint_routes import router as real_osint_router
 root_api_router = APIRouter()
 logger = logging.getLogger("intelx.api.router")
 
@@ -50,6 +51,8 @@ root_api_router.include_router(supplychain_router)
 root_api_router.include_router(intel_exchange_router)
 root_api_router.include_router(intel_quality_router)
 root_api_router.include_router(campaign_predictor_router)
+root_api_router.include_router(real_osint_router)
+
 
 
 def _task_receipt(
