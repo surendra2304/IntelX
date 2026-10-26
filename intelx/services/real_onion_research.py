@@ -31,6 +31,16 @@ class OnionResearchEngine:
 
     TRACKING = frozenset({"utm", "ref", "referrer", "fbclid", "gclid", "yclid", "msclkid", "src"})
 
+    def __init__(self, engine_urls=()) -> None:
+        self.engine_hosts = set()
+        for url in engine_urls:
+            try:
+                host = urlsplit(url).hostname
+                if host:
+                    self.engine_hosts.add(host.lower())
+            except ValueError:
+                continue
+
     def validate(self, url: str, allow_clearweb: bool = False) -> str:
         """Return a normalized URL or raise; reject ambiguous URL authorities."""
         if not url or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in url) or "\\" in url:
@@ -46,12 +56,25 @@ class OnionResearchEngine:
         host = host.lower()
         if not re.fullmatch(r"[a-z0-9.-]+", host) or host.startswith(".") or ".." in host:
             raise ValueError("invalid hostname")
-        if not allow_clearweb and not host.endswith(".onion"):
-            raise ValueError("non-onion destination refused")
+        onion = host.endswith(".onion")
+        if not onion:
+            if not allow_clearweb:
+                raise ValueError("non-onion destination refused")
+            # Clearweb is opt-in and goes through Tor's remote-DNS proxy. Never
+            # accept IP literals or local/private hostnames from scraped pages.
+            import ipaddress
+            try:
+                address = ipaddress.ip_address(host)
+            except ValueError:
+                address = None
+            if address is not None or "." not in host or host.endswith((".localhost", ".local", ".internal", ".test", ".invalid")):
+                raise ValueError("private, local, or IP-literal clearweb destination refused")
+            if port not in (None, 80, 443):
+                raise ValueError("clearweb requests are limited to ports 80 and 443")
         authority = host + (f":{port}" if port is not None else "")
         return urlunsplit((parts.scheme, authority, parts.path or "/", parts.query, ""))
 
-    def extract_target(self, href: str, engine_url: str) -> str | None:
+    def extract_target(self, href: str, engine_url: str, allow_clearweb: bool = False) -> str | None:
         """Unwrap one redirect query layer only when it belongs to the engine."""
         engine = self.validate(engine_url)
         try:
@@ -63,22 +86,24 @@ class OnionResearchEngine:
                 candidates = [absolute]
             for candidate in candidates:
                 try:
-                    target = self.validate(candidate)
+                    target = self.validate(candidate, allow_clearweb=allow_clearweb)
                 except ValueError:
                     continue
-                if urlsplit(target).hostname != urlsplit(engine).hostname:
+                target_host = urlsplit(target).hostname
+                if target_host != urlsplit(engine).hostname and target_host not in self.engine_hosts:
                     return target
         except ValueError:
             return None
         return None
 
-    def canonical_key(self, url: str) -> str:
-        parts = urlsplit(self.validate(url))
+    def canonical_key(self, url: str, allow_clearweb: bool = False) -> str:
+        parts = urlsplit(self.validate(url, allow_clearweb=allow_clearweb))
         query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
                  if k.lower() not in self.TRACKING and not k.lower().startswith("utm_")]
         return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(sorted(query)), ""))
 
-    def process(self, hits: list[ResearchHit], per_host_limit: int = 3) -> ResearchBatch:
+    def process(self, hits: list[ResearchHit], per_host_limit: int = 3,
+                allow_clearweb: bool = False) -> ResearchBatch:
         if per_host_limit < 1:
             raise ValueError("per_host_limit must be positive")
         seen: set[str] = set()
@@ -88,8 +113,8 @@ class OnionResearchEngine:
         for hit in hits:
             title = " ".join("".join(c for c in hit.title if c.isprintable() or c.isspace()).split())
             try:
-                url = self.validate(hit.url)
-                key = self.canonical_key(url)
+                url = self.validate(hit.url, allow_clearweb=allow_clearweb)
+                key = self.canonical_key(url, allow_clearweb=allow_clearweb)
             except ValueError:
                 rejected += 1
                 continue
@@ -101,6 +126,9 @@ class OnionResearchEngine:
                 continue
             seen.add(key)
             host = urlsplit(url).hostname
+            if host in self.engine_hosts:
+                rejected += 1
+                continue
             if hosts[host] >= per_host_limit:
                 capped += 1
                 continue

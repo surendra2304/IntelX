@@ -79,7 +79,34 @@ class ThreatIntelEngine:
         self._ioc_correlations: dict[str, list[str]] = defaultdict(list)  # indicator -> correlated
         self._load_state()
 
-    def ingest_research(self, documents: list[dict[str, str]], per_host_limit: int = 3) -> dict[str, Any]:
+    def investigation_engine(self, endpoints=None, collector=None, ingest=None):
+        """Create the full Robin lifecycle against this agent's persistent state."""
+        import importlib.util
+        from pathlib import Path
+        import sys
+        name = "intelx_full_investigation"
+        if name not in sys.modules:
+            spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("real_investigation_pipeline.py"))
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+        if endpoints is None:
+            configured = os.environ.get("INTELX_SEARCH_ENGINES")
+            if configured and configured.strip().lower() in {"off", "disabled", "none"}:
+                endpoints = []
+            elif configured:
+                endpoints = [e.strip() for e in configured.split(",") if e.strip()]
+            else:
+                spec = importlib.util.spec_from_file_location("intelx_robin_config", Path(__file__).with_name("real_robin_config.py"))
+                config = importlib.util.module_from_spec(spec)
+                sys.modules[spec.name] = config
+                spec.loader.exec_module(config)
+                endpoints = [url for _, url in config.DEFAULT_SEARCH_ENGINES]
+        return sys.modules[name].InvestigationEngine(self, os.path.join(self._state_dir, "investigations"),
+                                                    endpoints, collector, ingest)
+
+    def ingest_research(self, documents: list[dict[str, str]], per_host_limit: int = 3,
+                        allow_clearweb: bool = False) -> dict[str, Any]:
         """Turn supplied Robin-style evidence into persistent IntelX indicators/report.
 
         No automatic fetching: callers supply collected documents. Findings are
@@ -109,12 +136,12 @@ class ThreatIntelEngine:
             normalized.append({**document, "url": url})
         documents = normalized
         hits = [research.ResearchHit(d.get("title", ""), d.get("url", "")) for d in documents]
-        batch = engine.process(hits, per_host_limit)
+        batch = engine.process(hits, per_host_limit, allow_clearweb=allow_clearweb)
         # Bind text to its own URL, never to a title or another engine result.
         texts = {}
         for document in documents:
             try:
-                key = engine.validate(document.get("url", ""))
+                key = engine.validate(document.get("url", ""), allow_clearweb=allow_clearweb)
             except ValueError:
                 continue
             texts.setdefault(key, document.get("text", "")[:100000])
