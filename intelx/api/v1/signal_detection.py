@@ -513,7 +513,7 @@ class SignalDetector:
 signal_detector = SignalDetector()
 
 
-@router.post("/api/v1/intel/signals/ingest")
+@router.post("/intel/signals/ingest")
 async def ingest_signal(payload: dict):
     """Ingest a signal."""
     signal = signal_detector.ingest_signal(
@@ -526,7 +526,7 @@ async def ingest_signal(payload: dict):
     return signal.__dict__
 
 
-@router.post("/api/v1/intel/signals/fuse")
+@router.post("/intel/signals/fuse")
 async def fuse_signals(payload: dict):
     """Fuse multiple signals."""
     result = signal_detector.fuse_signals(payload["signal_ids"])
@@ -535,13 +535,13 @@ async def fuse_signals(payload: dict):
     return result.__dict__
 
 
-@router.get("/api/v1/intel/signals/anomalies")
+@router.get("/intel/signals/anomalies")
 async def get_anomalies():
     """Get anomalies."""
     return [a.__dict__ for a in signal_detector.get_anomalies()]
 
 
-@router.get("/api/v1/intel/signals/classified")
+@router.get("/intel/signals/classified")
 async def classify_signals():
     """Classify signals."""
     classified = signal_detector.classify_signals()
@@ -551,7 +551,7 @@ async def classify_signals():
     }
 
 
-@router.post("/api/v1/intel/signals/correlate")
+@router.post("/intel/signals/correlate")
 async def correlate_threats(payload: dict):
     """Correlate signals for threats."""
     threat = signal_detector.correlate_threats(payload["signal_ids"])
@@ -560,13 +560,13 @@ async def correlate_threats(payload: dict):
     return threat.__dict__
 
 
-@router.get("/api/v1/intel/signals/threats")
+@router.get("/intel/signals/threats")
 async def get_threat_assessments():
     """Get threat assessments."""
     return [t.__dict__ for t in signal_detector.get_threat_assessments()]
 
 
-@router.post("/api/v1/intel/signals/predict")
+@router.post("/intel/signals/predict")
 async def predict_signal_patterns(payload: dict):
     """Predict signal patterns."""
     prediction = signal_detector.predict_signal_patterns(
@@ -576,14 +576,14 @@ async def predict_signal_patterns(payload: dict):
     return prediction.__dict__
 
 
-@router.get("/api/v1/intel/signals/alerts")
+@router.get("/intel/signals/alerts")
 async def get_alerts():
     """Get alerts."""
     alerts = signal_detector.generate_alerts()
     return [a.__dict__ for a in alerts]
 
 
-@router.get("/api/v1/intel/signals/report")
+@router.get("/intel/signals/report")
 async def get_signal_report():
     """Get signal report."""
     return signal_detector.get_signal_report()

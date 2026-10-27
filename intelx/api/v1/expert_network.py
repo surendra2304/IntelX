@@ -435,7 +435,7 @@ class ExpertNetwork:
 expert_network = ExpertNetwork()
 
 
-@router.post("/api/v1/intel/experts")
+@router.post("/intel/experts")
 async def create_expert_endpoint(payload: dict):
     """Create an expert profile."""
     expert = expert_network.create_expert(
@@ -449,7 +449,7 @@ async def create_expert_endpoint(payload: dict):
     return expert.__dict__
 
 
-@router.post("/api/v1/intel/experts/match")
+@router.post("/intel/experts/match")
 async def match_expert_endpoint(payload: dict):
     """Match experts to a research question."""
     matches = expert_network.match_expert(
@@ -459,20 +459,20 @@ async def match_expert_endpoint(payload: dict):
     return [m.__dict__ for m in matches]
 
 
-@router.get("/api/v1/intel/experts/network")
+@router.get("/intel/experts/network")
 async def analyze_network_endpoint():
     """Analyze the expert network."""
     return expert_network.analyze_network().__dict__
 
 
-@router.get("/api/v1/intel/experts/{expert_id}/recommendations")
+@router.get("/intel/experts/{expert_id}/recommendations")
 async def recommend_collaborations_endpoint(expert_id: str):
     """Recommend collaborations for an expert."""
     recommendations = expert_network.recommend_collaborations(expert_id)
     return [r.__dict__ for r in recommendations]
 
 
-@router.get("/api/v1/intel/experts/report")
+@router.get("/intel/experts/report")
 async def get_network_report_endpoint():
     """Get expert network report."""
     return expert_network.get_network_report()
