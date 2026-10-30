@@ -79,6 +79,100 @@ class ThreatIntelEngine:
         self._ioc_correlations: dict[str, list[str]] = defaultdict(list)  # indicator -> correlated
         self._load_state()
 
+    def investigation_engine(self, endpoints=None, collector=None, ingest=None):
+        """Create the full Robin lifecycle against this agent's persistent state."""
+        import importlib.util
+        from pathlib import Path
+        import sys
+        name = "intelx_full_investigation"
+        if name not in sys.modules:
+            spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("real_investigation_pipeline.py"))
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+        if endpoints is None:
+            configured = os.environ.get("INTELX_SEARCH_ENGINES")
+            if configured and configured.strip().lower() in {"off", "disabled", "none"}:
+                endpoints = []
+            elif configured:
+                endpoints = [e.strip() for e in configured.split(",") if e.strip()]
+            else:
+                spec = importlib.util.spec_from_file_location("intelx_robin_config", Path(__file__).with_name("real_robin_config.py"))
+                config = importlib.util.module_from_spec(spec)
+                sys.modules[spec.name] = config
+                spec.loader.exec_module(config)
+                endpoints = [url for _, url in config.DEFAULT_SEARCH_ENGINES]
+        return sys.modules[name].InvestigationEngine(self, os.path.join(self._state_dir, "investigations"),
+                                                    endpoints, collector, ingest)
+
+    def ingest_research(self, documents: list[dict[str, str]], per_host_limit: int = 3,
+                        allow_clearweb: bool = False) -> dict[str, Any]:
+        """Turn supplied Robin-style evidence into persistent IntelX indicators/report.
+
+        No automatic fetching: callers supply collected documents. Findings are
+        unverified observations, not proof that the source or address is malicious.
+        """
+        import importlib.util
+        import sys
+        from pathlib import Path
+        from dataclasses import asdict
+        import ipaddress
+        name = "intelx_onion_research_engine"
+        if name not in sys.modules:
+            spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("real_onion_research.py"))
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+        research = sys.modules[name]
+        engine = research.OnionResearchEngine()
+        normalized = []
+        for document in documents:
+            url = document.get("url", "")
+            if document.get("engine_url"):
+                try:
+                    url = engine.extract_target(url, document["engine_url"]) or ""
+                except ValueError:
+                    url = ""
+            normalized.append({**document, "url": url})
+        documents = normalized
+        hits = [research.ResearchHit(d.get("title", ""), d.get("url", "")) for d in documents]
+        batch = engine.process(hits, per_host_limit, allow_clearweb=allow_clearweb)
+        # Bind text to its own URL, never to a title or another engine result.
+        texts = {}
+        for document in documents:
+            try:
+                key = engine.validate(document.get("url", ""), allow_clearweb=allow_clearweb)
+            except ValueError:
+                continue
+            texts.setdefault(key, document.get("text", "")[:100000])
+        ids = []
+        evidence = []
+        for hit in batch.hits:
+            text = texts.get(hit.url, "")
+            values = {(hit.url, "url")}
+            for value in re.findall(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\w)", text):
+                try:
+                    values.add((str(ipaddress.ip_address(value)), "ip"))
+                except ValueError:
+                    continue
+            values.update((v.lower(), "email") for v in re.findall(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", text))
+            values.update((v.lower(), "hash") for v in re.findall(r"\b[a-fA-F0-9]{64}\b", text))
+            found = []
+            for value, type_ in sorted(values):
+                existing = next((i for i in self._indicators.values() if i.value == value and i.type == type_), None)
+                indicator = existing or self.add_indicator(value, type_, confidence=0.3, tags=["osint", "unverified"])
+                if existing:
+                    indicator.last_seen = time.time()
+                found.append(indicator.indicator_id)
+                if indicator.indicator_id not in ids:
+                    ids.append(indicator.indicator_id)
+            evidence.append({"url": hit.url, "title": hit.title, "indicator_ids": found})
+        report = self.generate_report(
+            "Onion research observations", f"{len(batch.hits)} sources; {len(ids)} unverified indicators.",
+            ids, [h.url for h in batch.hits],
+            ["Independently corroborate observations before attribution or blocking."])
+        return {"batch": asdict(batch), "report": asdict(report), "evidence": evidence}
+
     def _load_state(self) -> None:
         """Load threat intel state from disk."""
         state_file = os.path.join(self._state_dir, "threat_intel.json")
