@@ -44,7 +44,7 @@ class Settings(BaseSettings):
         description="Runtime environment: development | staging | production",
     )
     DB_URL: str = Field(
-        default="sqlite+aiosqlite:///./data/intelx.db",
+        default="",
         validation_alias=AliasChoices(
             "INTELX_DB_URL",
             "DATABASE_URL",
@@ -538,6 +538,12 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "CRITICAL SECURITY VIOLATION: the inference provider requires "
                 "INTELX_INFERENCE_API_KEY in production."
+            )
+        if not self.DB_URL.strip().lower().startswith("oracle"):
+            raise RuntimeError(
+                "CRITICAL SECURITY VIOLATION: INTELX_DB_URL/DATABASE_URL must be an Oracle "
+                "Autonomous Database DSN in production. SQLite and PostgreSQL are not "
+                "supported backends."
             )
 
     @field_validator("DB_URL", mode="before")

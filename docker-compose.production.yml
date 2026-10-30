@@ -1,25 +1,6 @@
 version: "3.8"
 
 services:
-  # PostgreSQL 18 Database
-  postgres:
-    image: postgres:18-alpine
-    container_name: intelx-postgres
-    restart: unless-stopped
-    environment:
-      - POSTGRES_USER=intelx
-      - POSTGRES_PASSWORD
-      - POSTGRES_DB=intelx
-    volumes:
-      - postgres_data:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U intelx -d intelx"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - intelx-network
-
   # Redis 7 for Queue Orchestration & Pub/Sub
   redis:
     image: redis:7-alpine
@@ -44,14 +25,12 @@ services:
     container_name: intelx-api-1
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
       - INTELX_ENV=production
       - INTELX_MOCK_MODE=false
-      - INTELX_DB_URL=${INTELX_DB_URL:?Set INTELX_DB_URL in the deployment environment}
+      - INTELX_DB_URL=${INTELX_DB_URL:?INTELX_DB_URL must be an Oracle DSN}
       - INTELX_REDIS_URL=redis://redis:6379/0
       - INTELX_DATA_DIR=/app/data
       - INTELX_MAX_CONCURRENT_RUNS=5
@@ -77,14 +56,12 @@ services:
     container_name: intelx-api-2
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
       - INTELX_ENV=production
       - INTELX_MOCK_MODE=false
-      - INTELX_DB_URL=${INTELX_DB_URL:?Set INTELX_DB_URL in the deployment environment}
+      - INTELX_DB_URL=${INTELX_DB_URL:?INTELX_DB_URL must be an Oracle DSN}
       - INTELX_REDIS_URL=redis://redis:6379/0
       - INTELX_DATA_DIR=/app/data
       - INTELX_MAX_CONCURRENT_RUNS=5
@@ -112,14 +89,12 @@ services:
     entrypoint: ["tini", "--", "python", "-m", "intelx.cli.main"]
     command: ["worker"]
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
       - INTELX_ENV=production
       - INTELX_MOCK_MODE=false
-      - INTELX_DB_URL=${INTELX_DB_URL:?Set INTELX_DB_URL in the deployment environment}
+      - INTELX_DB_URL=${INTELX_DB_URL:?INTELX_DB_URL must be an Oracle DSN}
       - INTELX_REDIS_URL=redis://redis:6379/0
       - INTELX_DATA_DIR=/app/data
       - INTELX_MAX_CONCURRENT_RUNS=5
@@ -152,8 +127,6 @@ services:
       - intelx-network
 
 volumes:
-  postgres_data:
-    driver: local
   redis_data:
     driver: local
   shared_data:

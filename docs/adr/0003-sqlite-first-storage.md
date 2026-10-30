@@ -1,7 +1,8 @@
 # ADR 0003: SQLite-First Storage Architecture with WAL Mode
 
 ## Status
-Accepted
+Superseded. Production now uses Oracle Autonomous Database only; SQLite is no longer a
+supported backend. This record is retained as history.
 
 ## Context
 INTELX is designed to operate seamlessly out-of-the-box on developer laptops, edge workstations, air-gapped lab environments, and standard cloud containers without requiring a fleet of external database services.

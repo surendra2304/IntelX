@@ -13,7 +13,7 @@ services:
       - PORT=8000
       - INTELX_ENV=production
       - INTELX_MOCK_MODE=false
-      - INTELX_DB_URL=sqlite+aiosqlite:////app/data/intelx.db
+      - INTELX_DB_URL=${INTELX_DB_URL:?INTELX_DB_URL must be an Oracle DSN}
       - INTELX_DATA_DIR=/app/data
       - INTELX_API_KEYS=${INTELX_API_KEYS:-}
       - INTELX_API_KEY=${INTELX_API_KEY:-}

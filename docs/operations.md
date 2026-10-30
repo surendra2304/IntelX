@@ -11,7 +11,7 @@ This document details runtime configuration, environment variables, provider set
 | `INTELX_ENV` | String | `development` | Deployment environment (`development`, `staging`, `production`). |
 | `INTELX_MOCK_MODE` | Boolean | `true` | When `true`, runs fully offline with deterministic synthetic generators. Production must set this to `false`. |
 | `INTELX_ALLOW_MOCK_FALLBACK` | Boolean | `false` | Explicitly allow a failed live provider to return synthetic output in development/test only. Keep disabled for real research; production rejects it. |
-| `INTELX_DB_URL` | String | `sqlite+aiosqlite:///./data/intelx.db` | Async database connection string (SQLite or PostgreSQL). |
+| `INTELX_DB_URL` | String | Required in production | Oracle Autonomous Database DSN (for example `oracle+oracledb://INTELX:...@(description=...)`). PostgreSQL and SQLite are not supported production backends. |
 | `INTELX_DATA_DIR` | String | `./data` | Local directory for raw file storage and exported report artifacts. |
 | `INTELX_API_KEY` | String | Empty | Main service API key; required in production, at least 32 characters, unique from the session secret. |
 | `INTELX_API_KEYS` | Comma-separated string or JSON array | Empty | Additional API key values to seed (not a role map). Keys are stored as SHA-256 hashes; roles follow the application seeding policy. |

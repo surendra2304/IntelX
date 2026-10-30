@@ -14,6 +14,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Oracle Autonomous Database DSN for the golden evaluations; the step
+      # below is skipped when this secret is not configured.
+      INTELX_EVAL_ORACLE_DSN: ${{ secrets.INTELX_EVAL_ORACLE_DSN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,8 +44,12 @@ jobs:
         run: python -m pytest -q tests/ --ignore=tests/test_live.py
 
       - name: Run deterministic golden evaluations
+        # Evaluations persist to a database, so they require an Oracle
+        # Autonomous Database DSN and are skipped when it is not configured.
+        # CI never falls back to SQLite or PostgreSQL.
+        if: env.INTELX_EVAL_ORACLE_DSN != ''
         env:
-          INTELX_EVAL_DB_URL: sqlite+aiosqlite:////tmp/intelx-eval-ci.db
+          INTELX_EVAL_DB_URL: ${{ env.INTELX_EVAL_ORACLE_DSN }}
         run: python -m evals.run
 
       - name: Verify Docker build

@@ -164,7 +164,7 @@ IntelX leverages **SQLite 3** running in **Write-Ahead Logging (WAL)** mode for 
 | `PORT` | Integer | `8000` | Internal HTTP container binding port. |
 | `INTELX_ENV` | String | `production` | Deployment mode: `development`, `staging`, `production`. |
 | `INTELX_MOCK_MODE` | Boolean | `false` | When true, mock generators simulate research. Must be `false` in production. |
-| `INTELX_DB_URL` | String | `sqlite+aiosqlite:///./data/intelx.db` | SQLAlchemy async connection string. |
+| `INTELX_DB_URL` | String | Required in production | Oracle Autonomous Database DSN. PostgreSQL and SQLite are not supported production backends. |
 | `INTELX_DATA_DIR` | String | `./data` | File storage path for artifacts, raw files, and uploads. |
 | `INTELX_SECRET_KEY` | String | *(Required)* | HMAC signing key for sessions and cryptographic audits. |
 | `INTELX_API_KEY` | String | *(Required)* | Bearer authentication key for IntelX REST endpoints. |
