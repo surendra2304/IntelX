@@ -5,14 +5,175 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
 import sys
+import threading
 import time
 from threading import RLock
-from typing import Callable
+from typing import Any, Callable
 import uuid
+
+
+_ORACLE_PREFIXES = ("oracle://", "oracle+oracledb://", "oracledb://")
+
+
+def _oracle_dsn(value: str | None) -> str | None:
+    text = (value or "").strip()
+    if not text.lower().startswith(_ORACLE_PREFIXES):
+        return None
+    scheme, _, rest = text.partition("://")
+    if scheme.lower() in {"oracle", "oracledb"}:
+        return "oracle+oracledb://" + rest
+    return text
+
+
+def _store_dsn(directory: str | None) -> str | None:
+    """Resolve the investigation store backend.
+
+    An explicit Oracle DSN wins, then ``INTELX_DB_URL``/``DATABASE_URL``. An
+    explicit directory is a test-only SQLite override and is rejected in
+    production. A missing configuration leaves the caller with a local store.
+    """
+    explicit = _oracle_dsn(directory)
+    if explicit:
+        return explicit
+    testing = "pytest" in sys.modules or (os.getenv("INTELX_ENV") or os.getenv("FRIDAY_ENV") or "").strip().lower() in {"testing", "test"}
+    if directory and testing:
+        return None
+    configured_raw = (os.getenv("INTELX_DB_URL") or os.getenv("DATABASE_URL") or "").strip()
+    configured = _oracle_dsn(configured_raw)
+    if configured:
+        return configured
+    if directory:
+        environment = (os.getenv("INTELX_ENV") or os.getenv("FRIDAY_ENV") or "").strip().lower()
+        if environment == "production":
+            raise RuntimeError(
+                "IntelX investigation cases require an Oracle DSN in production; "
+                "explicit directories are test-only."
+            )
+        return None
+    if configured_raw:
+        raise RuntimeError(
+            "INTELX_DB_URL must be an oracle+oracledb:// DSN; SQLite and PostgreSQL "
+            "are not supported production backends."
+        )
+    return None
+
+
+def _lob_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    read = getattr(value, "read", None)
+    return read() if callable(read) else str(value)
+
+
+class _OracleCases:
+    """Oracle-backed durable case history owned by the IntelX schema."""
+
+    def __init__(self, dsn: str) -> None:
+        self.dsn = dsn
+        self._engine: Any | None = None
+        self._lock = threading.RLock()
+        self._ensure_schema()
+
+    def _get_engine(self):
+        if self._engine is not None:
+            return self._engine
+        with self._lock:
+            if self._engine is None:
+                from sqlalchemy import create_engine
+
+                self._engine = create_engine(
+                    self.dsn,
+                    pool_pre_ping=True,
+                    pool_size=2,
+                    max_overflow=3,
+                    pool_recycle=1800,
+                )
+        return self._engine
+
+    def _ensure_schema(self) -> None:
+        from sqlalchemy import text
+
+        with self._get_engine().begin() as conn:
+            present = conn.execute(
+                text("SELECT COUNT(*) FROM user_tables WHERE table_name = 'INVESTIGATION_CASES'")
+            ).scalar_one()
+            if not present:
+                conn.exec_driver_sql(
+                    """CREATE TABLE investigation_cases (
+                        id VARCHAR2(64) PRIMARY KEY,
+                        started NUMBER NOT NULL,
+                        query_text VARCHAR2(4000),
+                        body CLOB NOT NULL
+                    )"""
+                )
+
+    def save(self, record: "Investigation") -> None:
+        from sqlalchemy import text
+
+        stored = asdict(record)
+        for source in stored.get("sources", []):
+            source["text"] = ""
+        stored["raw_evidence_persisted"] = False
+        statement = text(
+            """MERGE INTO investigation_cases target
+               USING (SELECT :id AS id FROM dual) source
+               ON (target.id = source.id)
+               WHEN MATCHED THEN
+                   UPDATE SET started = :started, query_text = :query_text, body = :body
+               WHEN NOT MATCHED THEN
+                   INSERT (id, started, query_text, body)
+                   VALUES (:id, :started, :query_text, :body)"""
+        )
+        params = {
+            "id": record.investigation_id,
+            "started": record.started_at,
+            "query_text": record.query,
+            "body": json.dumps(stored),
+        }
+        with self._get_engine().begin() as conn:
+            conn.execute(statement, params)
+
+    def get(self, case_id: str) -> dict:
+        from sqlalchemy import text
+
+        with self._get_engine().connect() as conn:
+            row = conn.execute(
+                text("SELECT body FROM investigation_cases WHERE id = :id"), {"id": case_id}
+            ).fetchone()
+        if not row:
+            raise KeyError(case_id)
+        return json.loads(_lob_text(row[0]))
+
+    def list(self, query: str = "", limit: int = 50) -> list[dict]:
+        from sqlalchemy import text
+
+        statement = text(
+            """SELECT body FROM investigation_cases
+               WHERE instr(lower(NVL(query_text, ' ')), lower(NVL(:query, ' '))) > 0
+               ORDER BY started DESC FETCH FIRST :limit ROWS ONLY"""
+        )
+        with self._get_engine().connect() as conn:
+            rows = conn.execute(statement, {"query": query, "limit": limit}).fetchall()
+        return [{k: record[k] for k in ("investigation_id", "query", "preset", "status", "started_at")}
+                for record in (json.loads(_lob_text(row[0])) for row in rows)]
+
+    def delete(self, case_id: str) -> bool:
+        from sqlalchemy import text
+
+        with self._get_engine().begin() as conn:
+            result = conn.execute(
+                text("DELETE FROM investigation_cases WHERE id = :id"), {"id": case_id}
+            )
+        return bool(result.rowcount)
 
 
 def sibling(name: str):
@@ -49,12 +210,18 @@ class InvestigationStore:
     """Transactional storage; generated IDs only, no user-controlled filenames."""
 
     def __init__(self, directory: str) -> None:
-        Path(directory).mkdir(parents=True, exist_ok=True)
-        self.path = str(Path(directory) / "investigations.sqlite3")
-        with sqlite3.connect(self.path) as db:
-            db.execute("CREATE TABLE IF NOT EXISTS cases (id TEXT PRIMARY KEY, started REAL, query TEXT, body TEXT)")
+        dsn = _store_dsn(directory)
+        self._oracle: _OracleCases | None = _OracleCases(dsn) if dsn else None
+        self.path = dsn if self._oracle is not None else str(Path(directory) / "investigations.sqlite3")
+        if self._oracle is None:
+            Path(directory).mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(self.path) as db:
+                db.execute("CREATE TABLE IF NOT EXISTS cases (id TEXT PRIMARY KEY, started REAL, query TEXT, body TEXT)")
 
     def save(self, record: Investigation) -> None:
+        if self._oracle is not None:
+            self._oracle.save(record)
+            return
         stored = asdict(record)
         # Match Robin's saved-case privacy boundary: raw page text stays in the
         # request/session process only; durable cases retain report + citations.
@@ -66,6 +233,8 @@ class InvestigationStore:
                        (record.investigation_id, record.started_at, record.query, json.dumps(stored)))
 
     def get(self, case_id: str) -> dict:
+        if self._oracle is not None:
+            return self._oracle.get(case_id)
         with sqlite3.connect(self.path) as db:
             row = db.execute("SELECT body FROM cases WHERE id = ?", (case_id,)).fetchone()
         if not row:
@@ -75,6 +244,8 @@ class InvestigationStore:
     def list(self, query: str = "", limit: int = 50) -> list[dict]:
         if not 1 <= limit <= 200:
             raise ValueError("limit must be between 1 and 200")
+        if self._oracle is not None:
+            return self._oracle.list(query, limit)
         with sqlite3.connect(self.path) as db:
             rows = db.execute("SELECT body FROM cases WHERE instr(lower(query), lower(?)) > 0 ORDER BY started DESC LIMIT ?",
                               (query, limit)).fetchall()
@@ -82,6 +253,8 @@ class InvestigationStore:
                 for record in (json.loads(row[0]) for row in rows)]
 
     def delete(self, case_id: str) -> bool:
+        if self._oracle is not None:
+            return self._oracle.delete(case_id)
         with sqlite3.connect(self.path) as db:
             return bool(db.execute("DELETE FROM cases WHERE id = ?", (case_id,)).rowcount)
 
