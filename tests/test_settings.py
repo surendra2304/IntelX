@@ -24,17 +24,28 @@ def test_mock_mode_defaults_to_offline_without_environment_overrides(monkeypatch
     assert Settings(_env_file=None).MOCK_MODE is True
 
 
-def test_deployment_environment_and_postgres_url_aliases(monkeypatch):
-    """Render environment markers and provider PostgreSQL URLs are interpreted correctly."""
+def test_deployment_environment_and_oracle_url_aliases(monkeypatch):
+    """Render environment markers and canonicalise Oracle DSN aliases."""
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.delenv("INTELX_ENV", raising=False)
     assert Settings(_env_file=None).ENV == "production"
 
     settings = Settings(
         _env_file=None,
-        INTELX_DB_URL="postgres://intelx:secret@db.example:5432/intelx",
+        INTELX_DB_URL="oracle://intelx:pw@db.example:1521/?service_name=intelx",
     )
-    assert settings.DB_URL == "postgresql+asyncpg://intelx:secret@db.example:5432/intelx"
+    assert settings.DB_URL == "oracle+oracledb://intelx:pw@db.example:1521/?service_name=intelx"
+
+
+def test_postgres_url_is_rejected():
+    """PostgreSQL is no longer a supported backend and must fail at config time."""
+    import pytest
+
+    with pytest.raises(ValueError, match="PostgreSQL is not a supported backend"):
+        Settings(
+            _env_file=None,
+            INTELX_DB_URL="postgres://intelx:secret@db.example:5432/intelx",
+        )
 
 
 def test_role_model_fallback():
@@ -98,6 +109,7 @@ def test_provider_specific_key_environment_aliases(monkeypatch):
 def test_redacted_dict_hides_secrets():
     """Verify secret keys and tokens are redacted when exporting settings."""
     settings = Settings(
+        _env_file=None,
         SECRET_KEY="super-secret-key-123",
         INTELX_API_KEY="local-service-key",
         LLM_API_KEY="local-generic-llm-key",
@@ -109,9 +121,8 @@ def test_redacted_dict_hides_secrets():
         STRATEX_API_KEY="local-stratex-key",
         TAVILY_API_KEY="tvly-fake-search-key",
         API_KEYS="client-key-1,client-key-2",
-        DB_URL="postgresql+asyncpg://intelx:local-db-test-pass@database/intelx",
+        DB_URL="oracle+oracledb://intelx:local-db-test-pass@database:1521/?service_name=intelx",
         REDIS_URL="redis://:local-redis-test-pass@redis:6379/0",
-        TURSO_AUTH_TOKEN="local-turso-test-token",
     )
     redacted = settings.get_redacted_dict()
     for key in (
@@ -128,17 +139,6 @@ def test_redacted_dict_hides_secrets():
         "API_KEYS",
         "DB_URL",
         "REDIS_URL",
-        "TURSO_AUTH_TOKEN",
     ):
         assert redacted[key] == "[REDACTED]"
     assert redacted["LLM_MODEL"] == "mock-gpt-4o"
-
-
-def test_turso_database_url_has_no_external_default(monkeypatch):
-    """Self-hosted deployments must not inherit a hosted database endpoint."""
-    from intelx.core.settings import Settings
-
-    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
-    monkeypatch.delenv("INTELX_TURSO_DATABASE_URL", raising=False)
-    settings = Settings(_env_file=None)
-    assert settings.TURSO_DATABASE_URL is None

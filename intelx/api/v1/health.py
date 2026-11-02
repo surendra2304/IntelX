@@ -74,17 +74,11 @@ async def readyz() -> dict[str, Any]:
         }:
             provider_healthy = bool(settings.get_llm_api_key("openai_compatible"))
 
-    all_ready = db_healthy and storage_healthy and provider_healthy
-    # Production readiness: non-Oracle backend must return 503
-    prod_check = get_settings()
-    is_prod = getattr(prod_check, "APP_ENV", "development").lower() == "production"
-    if is_prod and db_backend != "oracle" and all_ready:
-        all_ready = False
-
-    # Read database backend from SQLAlchemy engine when available
+    # Resolve the backend before any readiness decision that depends on it.
     db_backend = "unconfigured"
     try:
         from intelx.db.engine import _engine
+
         if _engine is not None and hasattr(_engine, "dialect"):
             db_backend = str(getattr(_engine.dialect, "name", "unconfigured"))
     except Exception:
@@ -93,10 +87,14 @@ async def readyz() -> dict[str, Any]:
         url = str(getattr(settings, "DB_URL", "")).lower()
         if "oracle" in url:
             db_backend = "oracle"
-        elif "postgresql" in url:
-            db_backend = "postgresql"
-        elif "sqlite" in url:
-            db_backend = "sqlite"
+        else:
+            db_backend = "unsupported"
+
+    all_ready = db_healthy and storage_healthy and provider_healthy
+    # INTELX runs on Oracle Autonomous Database; in production any other
+    # backend is not ready.
+    if db_backend != "oracle" and getattr(settings, "is_production", lambda: False)():
+        all_ready = False
 
     payload = {
         "status": "ready" if all_ready else "not_ready",

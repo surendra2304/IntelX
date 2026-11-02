@@ -39,7 +39,7 @@ async def test_readyz_endpoint(client: AsyncClient):
     data = response.json()
     assert data["status"] == "ready"
     assert data["ready"] is True
-    assert data["database"] == "ok"
+    assert data["database"] == "connected"
     assert data["evidence_class"] == "dependency_readiness"
     assert "observed_at" in data
 

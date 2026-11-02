@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -104,11 +105,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     (data_dir / "raw").mkdir(parents=True, exist_ok=True)
     (data_dir / "artifacts").mkdir(parents=True, exist_ok=True)
 
-    # 3. Initialize database connection, schemas, and FTS5 search indexes
+    # 3. Initialize database connection, schemas, and search indexes. The FTS5
+    # block only runs for the test suite's SQLite engine; Oracle uses the
+    # repository's case-insensitive substring search instead.
     engine = get_async_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        if engine.dialect.name == "sqlite":
+        if engine.dialect.name == "sqlite" and "pytest" in sys.modules:
             await conn.execute(
                 text(
                     "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(id UNINDEXED, text);"
@@ -147,7 +150,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     "END;"
                 )
             )
-    logger.info("Database schemas and FTS5 indexes initialized.")
+    logger.info("Database schemas and search indexes initialized.")
 
     # 3.5 Seed API keys from settings
     from intelx.core.auth import seed_api_keys_from_settings

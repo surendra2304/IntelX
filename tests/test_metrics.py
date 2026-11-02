@@ -33,7 +33,7 @@ async def test_healthz_and_readyz_endpoints():
         data_r = resp_r.json()
         assert data_r["status"] == "ready"
         assert data_r["ready"] is True
-        assert data_r["database"] == "ok"
+        assert data_r["database"] == "connected"
         assert data_r["storage"] == "ok"
 
 

@@ -26,24 +26,6 @@ def _source(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
 
 
-def test_sqlite_busy_timeout_is_bounded():
-    """A 60s busy timeout turns write contention into a 60-second stall."""
-    source = _source("intelx/db/engine.py")
-    match = re.search(r"PRAGMA busy_timeout\s*=\s*(\d+)", source)
-    assert match, "engine.py no longer sets a busy_timeout"
-    assert int(match.group(1)) <= 5000, (
-        f"busy_timeout is {match.group(1)}ms; anything near the old 60000ms turns "
-        "contention into a request that blocks for a minute"
-    )
-
-
-def test_sqlite_connect_timeout_is_bounded():
-    source = _source("intelx/db/engine.py")
-    match = re.search(r'"timeout"\s*:\s*([0-9.]+)', source)
-    assert match, "engine.py no longer sets a connect timeout"
-    assert float(match.group(1)) <= 5.0, f"connect timeout is {match.group(1)}s"
-
-
 def test_research_run_writes_are_serialized():
     """Without the lock, simultaneous submissions collide on the single writer."""
     from intelx.api.v1.friday import _RUN_WRITE_ATTEMPTS, _RUN_WRITE_LOCK

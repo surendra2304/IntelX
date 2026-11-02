@@ -11,13 +11,20 @@ from intelx.db.models import ResearchRun
 logger = logging.getLogger(__name__)
 
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
-_SQLITE_WRITE_LOCK = asyncio.Lock()
+# Serialises write transactions. Oracle handles concurrent writers, but the
+# research pipeline still stages long external calls between flushes; holding
+# one writer at a time keeps transaction boundaries predictable and bounded.
+_WRITE_LOCK = asyncio.Lock()
+
+
+def get_write_lock() -> asyncio.Lock:
+    """Return the process-wide mutex that serialises research write transactions."""
+    return _WRITE_LOCK
 
 
 def get_sqlite_write_lock() -> asyncio.Lock:
-    """Return process-wide mutex for serializing write transactions on SQLite."""
-    global _SQLITE_WRITE_LOCK
-    return _SQLITE_WRITE_LOCK
+    """Backwards-compatible alias for :func:`get_write_lock`."""
+    return _WRITE_LOCK
 
 
 def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
@@ -53,7 +60,12 @@ async def check_database_health() -> bool:
     try:
         session_factory = get_sessionmaker()
         async with session_factory() as session:
-            result = await session.execute(text("SELECT 1"))
+            bind = session.get_bind()
+            dialect = getattr(bind, "dialect", None)
+            statement = (
+                "SELECT 1 FROM DUAL" if dialect is not None and dialect.name == "oracle" else "SELECT 1"
+            )
+            result = await session.execute(text(statement))
             return result.scalar() == 1
     except Exception as e:
         logger.warning(f"Database health check failed: {e}")
@@ -61,7 +73,7 @@ async def check_database_health() -> bool:
 
 
 async def release_writer_lock(session: AsyncSession, run: ResearchRun) -> ResearchRun:
-    """End the open write transaction so SQLite's single writer lock is freed."""
-    async with get_sqlite_write_lock():
+    """End the open write transaction so the writer lock is released."""
+    async with get_write_lock():
         await session.commit()
     return run

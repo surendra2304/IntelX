@@ -36,6 +36,7 @@ def _production_settings(**overrides):
         "SECRET_KEY": "production-session-secret-aB3x" * 2,
         "INTELX_API_KEY": "production-api-key-cD4y" * 2,
         "API_KEYS": ["production-client-key-eF5z" * 2],
+        "DB_URL": "oracle+oracledb://intelx:pw@adb.example:1522/?service_name=intelx",
     }
     base.update(overrides)
     return IntelXSettings(_env_file=None, **base)

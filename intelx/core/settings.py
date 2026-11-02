@@ -1,6 +1,8 @@
 """INTELX Application Settings and Configuration Management."""
 
 import json
+import os
+import sys
 from functools import lru_cache
 from typing import Annotated, Any, Literal
 
@@ -56,17 +58,7 @@ class Settings(BaseSettings):
             "ORACLE_CORE_URL",
             "ORACLE_URL",
         ),
-        description="Async SQLAlchemy database URL (SQLite or PostgreSQL)",
-    )
-    TURSO_DATABASE_URL: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("TURSO_DATABASE_URL", "INTELX_TURSO_DATABASE_URL"),
-        description="Turso LibSQL cloud database URL",
-    )
-    TURSO_AUTH_TOKEN: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("TURSO_AUTH_TOKEN", "INTELX_TURSO_AUTH_TOKEN"),
-        description="Turso LibSQL cloud database auth token",
+        description="Async SQLAlchemy DSN; Oracle Autonomous Database only",
     )
     SECRET_KEY: str | None = Field(
         default=None,
@@ -548,21 +540,40 @@ class Settings(BaseSettings):
 
     @field_validator("DB_URL", mode="before")
     @classmethod
-    def normalize_async_database_url(cls, value: Any) -> str:
-        """Normalize provider PostgreSQL URLs to SQLAlchemy's asyncpg driver."""
+    def normalize_database_url(cls, value: Any) -> str:
+        """Canonicalise the Oracle DSN and fail closed on unsupported backends.
+
+        INTELX runs on Oracle Autonomous Database. SQLite survives only inside
+        the test suite, where ``tests/conftest.py`` passes an explicit file path;
+        any other SQLite or PostgreSQL DSN is rejected at configuration time
+        rather than silently serving traffic from the wrong database.
+        """
         if not isinstance(value, str):
             raise ValueError("DB_URL must be a string")
         normalized = value.strip()
-        if normalized.startswith("postgres://"):
-            return "postgresql+asyncpg://" + normalized[len("postgres://") :]
-        if normalized.startswith("postgresql://"):
-            return "postgresql+asyncpg://" + normalized[len("postgresql://") :]
-        if normalized.startswith("postgresql+psycopg2://"):
-            return "postgresql+asyncpg://" + normalized[len("postgresql+psycopg2://") :]
-        if normalized.startswith("oracle+oracledb://"):
-            return "oracle+oracledb_async://" + normalized[len("oracle+oracledb://") :]
-        if normalized.startswith("oracle://"):
-            return "oracle+oracledb_async://" + normalized[len("oracle://") :]
+        if not normalized:
+            return normalized
+
+        lowered = normalized.lower()
+        if lowered.startswith("sqlite"):
+            if "pytest" in sys.modules or os.getenv("INTELX_ENV", "").lower() in {
+                "test",
+                "testing",
+            }:
+                return normalized
+            raise ValueError(
+                "INTELX_DB_URL must be an Oracle Autonomous Database DSN; SQLite is "
+                "available only to the test suite through an explicit path."
+            )
+        if lowered.startswith(("postgres://", "postgresql")):
+            raise ValueError(
+                "PostgreSQL is not a supported backend. Configure an "
+                "oracle+oracledb:// DSN for Oracle Autonomous Database."
+            )
+        if lowered.startswith("oracle+oracledb_async://"):
+            return "oracle+oracledb://" + normalized[len("oracle+oracledb_async://") :]
+        if lowered.startswith("oracle://"):
+            return "oracle+oracledb://" + normalized[len("oracle://") :]
         return normalized
 
     @field_validator("DOMAIN_ALLOWLIST", "DOMAIN_DENYLIST", "API_KEYS", mode="before")
@@ -608,7 +619,6 @@ class Settings(BaseSettings):
             "API_KEYS",
             "DB_URL",
             "REDIS_URL",
-            "TURSO_AUTH_TOKEN",
         }
         sensitive_keys.update(key for key in data if key.endswith("_API_KEY"))
         sensitive_keys.add("AI_UNIVERSE_API_KEY")

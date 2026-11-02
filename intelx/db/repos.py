@@ -7,8 +7,6 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import case, func, or_, select, text, update
-from sqlalchemy.dialects.postgresql import insert as postgresql_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intelx.core.enums import (
@@ -80,11 +78,6 @@ class RunRepo:
         """Atomically claim the next queued research job with priority handling and concurrency bounds."""
         settings = get_settings()
         limit = max_concurrent if max_concurrent is not None else settings.MAX_CONCURRENT_RUNS
-
-        # Serialize admission decisions across PostgreSQL worker processes so the
-        # active-run ceiling cannot be exceeded by simultaneous claims.
-        if session.get_bind().dialect.name == "postgresql":
-            await session.execute(select(func.pg_advisory_xact_lock(0x494E54454C58)))
 
         if limit < 1:
             return None
@@ -386,22 +379,15 @@ class SourceRepo:
             fingerprint=fingerprint,
             **kwargs,
         )
-        columns = Source.__table__.columns
-        values = {
-            column.key: getattr(candidate, column.key)
-            for column in columns
-            if getattr(candidate, column.key, None) is not None
-        }
-        dialect_name = session.get_bind().dialect.name
-        if dialect_name == "sqlite":
-            insert_stmt = sqlite_insert(Source)
-        elif dialect_name == "postgresql":
-            insert_stmt = postgresql_insert(Source)
-        else:
-            raise IntegrityError(f"Unsupported database dialect for source upsert: {dialect_name}")
-        await session.execute(
-            insert_stmt.values(**values).on_conflict_do_nothing(index_elements=[Source.fingerprint])
-        )
+        # A savepoint keeps a unique-constraint race from poisoning the caller's
+        # transaction: the loser rolls back only its own insert, then re-reads the
+        # row the winner committed.
+        try:
+            async with session.begin_nested():
+                session.add(candidate)
+                await session.flush()
+        except IntegrityError:
+            pass
 
         source = await SourceRepo.get_source_by_fingerprint(session, fingerprint)
         if source is None:
@@ -646,50 +632,14 @@ class ClaimRepo:
 
     @staticmethod
     async def search_claims_fts(session: AsyncSession, search_query: str) -> list[Claim]:
-        """Search claims using FTS5 match where available, falling back to LIKE query."""
-        dialect_name = session.get_bind().dialect.name
-        if dialect_name == "sqlite":
-            try:
-                raw_stmt = text(
-                    "SELECT claims.* FROM claims "
-                    "JOIN claims_fts ON claims.id = claims_fts.id "
-                    "WHERE claims_fts MATCH :query"
-                )
-                result = await session.execute(raw_stmt, {"query": search_query})
-                claim_ids = [row.id for row in result.fetchall()]
-                if claim_ids:
-                    stmt = select(Claim).where(Claim.id.in_(claim_ids))
-                    res = await session.execute(stmt)
-                    return list(res.scalars().all())
-            except Exception:
-                # Fallback to standard substring search if FTS5 is not available
-                pass
-
+        """Search claims with a dialect-neutral case-insensitive substring match."""
         stmt = select(Claim).where(Claim.text.ilike(f"%{search_query}%"))
         result = await session.execute(stmt)
         return list(result.scalars().all())
 
     @staticmethod
     async def search_chunks_fts(session: AsyncSession, search_query: str) -> list[Chunk]:
-        """Search text chunks using FTS5 match where available, falling back to LIKE query."""
-        dialect_name = session.get_bind().dialect.name
-        if dialect_name == "sqlite":
-            try:
-                raw_stmt = text(
-                    "SELECT chunks.* FROM chunks "
-                    "JOIN chunks_fts ON chunks.id = chunks_fts.id "
-                    "WHERE chunks_fts MATCH :query"
-                )
-                result = await session.execute(raw_stmt, {"query": search_query})
-                chunk_ids = [row.id for row in result.fetchall()]
-                if chunk_ids:
-                    stmt = select(Chunk).where(Chunk.id.in_(chunk_ids))
-                    res = await session.execute(stmt)
-                    return list(res.scalars().all())
-            except Exception:
-                # Fallback to substring query
-                pass
-
+        """Search text chunks with a dialect-neutral case-insensitive substring match."""
         stmt = select(Chunk).where(Chunk.text.ilike(f"%{search_query}%"))
         result = await session.execute(stmt)
         return list(result.scalars().all())

@@ -1,11 +1,15 @@
-"""Database Engine Configuration with SQLite WAL Support."""
+"""Database engine configuration for INTELX.
+
+INTELX persists to Oracle Autonomous Database only. A SQLite engine is built
+only when the test suite passes an explicit URL, so a misconfigured deployment
+fails closed instead of quietly writing to a local file.
+"""
 
 import logging
 import os
-from pathlib import Path
+import sys
 from typing import Any
 
-from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.types import JSON
@@ -33,81 +37,63 @@ logger = logging.getLogger(__name__)
 _engine: AsyncEngine | None = None
 
 
-def configure_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
-    """Set SQLite pragmas for optimal concurrent performance and integrity."""
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA journal_mode = WAL;")
-    cursor.execute("PRAGMA synchronous = NORMAL;")
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    # WAL lets readers proceed during a write but still permits only one writer.
-    # A 60s busy_timeout turned ordinary write contention into a 60-second stall that
-    # then surfaced as "database is locked" and a 500, so concurrent research
-    # submissions hung instead of being rejected or serialized promptly.
-    cursor.execute("PRAGMA busy_timeout = 5000;")
-    cursor.close()
+def _is_test_environment() -> bool:
+    return "pytest" in sys.modules or os.getenv("INTELX_ENV", "").lower() in {
+        "test",
+        "testing",
+    }
 
 
 def get_async_engine(db_url: str | None = None) -> AsyncEngine:
-    """Create or return existing async database engine."""
+    """Create or return the process-wide async engine.
+
+    ``db_url`` is honoured only by the test suite, which passes an explicit
+    SQLite file. Runtime callers always resolve the Oracle DSN from settings.
+    """
     global _engine
     if _engine is not None:
         return _engine
 
-    settings = get_settings()
-    url = db_url or settings.DB_URL
+    url = (db_url or get_settings().DB_URL).strip()
+    if not url:
+        raise RuntimeError(
+            "INTELX_DB_URL is not configured. Set an oracle+oracledb:// DSN for "
+            "Oracle Autonomous Database."
+        )
 
-    # Normalize Oracle URL to async driver
-    if url.startswith("oracle+oracledb://"):
-        url = "oracle+oracledb_async://" + url[len("oracle+oracledb://") :]
-    elif url.startswith("oracle://"):
-        url = "oracle+oracledb_async://" + url[len("oracle://") :]
+    lowered = url.lower()
+    if lowered.startswith("sqlite"):
+        if db_url is None or not _is_test_environment():
+            raise RuntimeError(
+                "INTELX refuses to start on SQLite outside the test suite. "
+                "Configure an oracle+oracledb:// DSN."
+            )
+        _engine = create_async_engine(url, echo=False, future=True)
+        logger.info("Test database engine initialised on an explicit SQLite path.")
+        return _engine
 
-    # Invariant 2 (Zero-Disk SQLite): On Linux with /dev/shm, redirect local SQLite fallback to RAM tmpfs
-    if (
-        os.name != "nt"
-        and "sqlite" in url
-        and os.path.exists("/dev/shm")
-        and not url.startswith("sqlite+aiosqlite:////dev/shm")
-        and ":memory:" not in url
-    ):
-        if "data/intelx.db" in url or "./data" in url:
-            url = "sqlite+aiosqlite:////dev/shm/intelx.db"
+    if lowered.startswith(("postgres://", "postgresql")):
+        raise RuntimeError(
+            "PostgreSQL is not a supported backend. Configure an "
+            "oracle+oracledb:// DSN for Oracle Autonomous Database."
+        )
 
-    # Ensure parent directory exists for SQLite database files
-    if "sqlite" in url:
-        # Extract relative path if standard file format
-        db_path_str = url.split(":///")[-1]
-        if db_path_str and not db_path_str.startswith(":memory:"):
-            db_path = Path(db_path_str).resolve()
-            db_path.parent.mkdir(parents=True, exist_ok=True)
+    if not lowered.startswith("oracle"):
+        raise RuntimeError(
+            f"Unsupported database backend in INTELX_DB_URL: {url.split('://')[0]}. "
+            "Oracle Autonomous Database is the only supported backend."
+        )
 
     engine_kwargs: dict[str, Any] = {
         "echo": False,
         "future": True,
+        "pool_pre_ping": True,
+        "pool_size": 10,
+        "max_overflow": 20,
+        "pool_recycle": 300,
     }
-
-    if "sqlite" in url:
-        # Matches the busy_timeout above; a long connect timeout just deferred the
-        # same stall to the moment a connection was first requested.
-        engine_kwargs["connect_args"] = {"timeout": 5.0, "check_same_thread": False}
-        if ":memory:" in url:
-            from sqlalchemy.pool import StaticPool
-
-            engine_kwargs["poolclass"] = StaticPool
-        _engine = create_async_engine(url, **engine_kwargs)
-        event.listen(_engine.sync_engine, "connect", configure_sqlite_pragmas)
-    else:
-        # PostgreSQL / other async engines
-        _engine = create_async_engine(
-            url,
-            pool_pre_ping=True,
-            pool_size=10,
-            max_overflow=20,
-            pool_recycle=300,
-            **engine_kwargs,
-        )
-
-    logger.info(f"Database engine initialized for: {url.split('@')[-1]}")
+    _engine = create_async_engine(url, **engine_kwargs)
+    logger.info("Database engine initialised for: %s", url.split("@")[-1])
     return _engine
 
 

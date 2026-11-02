@@ -33,9 +33,9 @@ def _oracle_dsn(value: str | None) -> str | None:
 def _store_dsn(directory: str | None) -> str | None:
     """Resolve the investigation store backend.
 
-    An explicit Oracle DSN wins, then ``INTELX_DB_URL``/``DATABASE_URL``. An
-    explicit directory is a test-only SQLite override and is rejected in
-    production. A missing configuration leaves the caller with a local store.
+    An explicit Oracle DSN wins, then ``INTELX_DB_URL``/``DATABASE_URL``. A
+    SQLite store exists only for the test suite, which passes an explicit
+    directory while pytest is loaded; every other environment fails closed.
     """
     explicit = _oracle_dsn(directory)
     if explicit:
@@ -47,20 +47,15 @@ def _store_dsn(directory: str | None) -> str | None:
     configured = _oracle_dsn(configured_raw)
     if configured:
         return configured
-    if directory:
-        environment = (os.getenv("INTELX_ENV") or os.getenv("FRIDAY_ENV") or "").strip().lower()
-        if environment == "production":
-            raise RuntimeError(
-                "IntelX investigation cases require an Oracle DSN in production; "
-                "explicit directories are test-only."
-            )
-        return None
     if configured_raw:
         raise RuntimeError(
             "INTELX_DB_URL must be an oracle+oracledb:// DSN; SQLite and PostgreSQL "
-            "are not supported production backends."
+            "are not supported backends."
         )
-    return None
+    raise RuntimeError(
+        "IntelX investigation cases require an Oracle DSN. Set INTELX_DB_URL to an "
+        "oracle+oracledb:// DSN; local SQLite storage is test-only."
+    )
 
 
 def _lob_text(value: Any) -> str:
