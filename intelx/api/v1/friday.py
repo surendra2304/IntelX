@@ -312,157 +312,290 @@ async def delegate_research_from_friday(
     idempotency_input = effective_idempotency_key or payload.friday_request_id or query
     run_id = f"friday-mesh-{hashlib.sha256(idempotency_input.encode()).hexdigest()[:12]}"
 
-    # 3. Query existing completed runs for findings matching the query (mesh dispatch path)
-    # This mirrors the logic in /v1/task/execute which works reliably
-    key_role = getattr(_api_key.role, "value", _api_key.role)
-    run_stmt = select(ResearchRun.id).where(ResearchRun.status == RunStatus.COMPLETED)
-    if str(key_role).lower() != "admin":
-        run_stmt = run_stmt.where(ResearchRun.created_by == _api_key.name)
+    # 3. MESH DISPATCH: planner → scout → retriever → extractor → synthesizer.
+    #    All findings/citations are built from in-memory agent outputs. This
+    #    bypasses the broken Oracle JSON deserializer: no ResearchRun/Claim/
+    #    Finding/Source JSON columns are read to build the response.
+    gateway = get_model_gateway()
+    settings = get_settings()
+    domain_hint = (payload.context.domain_hint if payload.context else "general") or "general"
 
-    query_terms = [word.strip(".,:;!?()[]{}\"'").lower() for word in query.split()]
-    query_terms = [word for word in query_terms if len(word) >= 3][:6]
-    if query_terms and query.lower() != "macro intelligence":
-        run_stmt = run_stmt.where(
-            or_(*(ResearchRun.objective.ilike(f"%{word}%") for word in query_terms))
+    # ---- Planner: decompose query into subquestions ----
+    planner = PlannerAgent(gateway=gateway)
+    scope_dict = {
+        "domain_hint": domain_hint,
+        "context": {
+            "domain_hint": domain_hint,
+            "requesting_system": (payload.context.requesting_system if payload.context else "friday"),
+            "priority": (payload.context.priority if payload.context else "normal"),
+        },
+        "depth": payload.depth,
+        "budget": {
+            "max_sources": payload.budget.max_sources,
+            "max_time_minutes": payload.budget.max_time_minutes,
+        },
+    }
+    try:
+        plan: Plan = await planner.execute(objective=query, scope=scope_dict, run_id=run_id)
+        subquestions = list(plan.subquestions) or [query]
+    except (ProviderError, Exception) as exc:  # noqa: BLE001
+        logger.warning(
+            "Planner unavailable (%s); falling back to template subquestions", type(exc).__name__
         )
-    run_stmt = run_stmt.order_by(ResearchRun.created_at.desc()).limit(20)
-    run_ids = list((await session.execute(run_stmt)).scalars().all())
+        subquestions = ResearchQuestionEnhancer.enhance_question(query, domain_hint) or [query]
+    subquestions = subquestions[:5]
 
-    if run_ids:
-        claims_stmt = (
-            select(Claim)
-            .where(Claim.run_id.in_(run_ids), Claim.status != "DISPUTED")
-            .order_by(Claim.created_at.desc())
-            .limit(50)
+    # ---- Scout: discover source candidates for each subquestion ----
+    scout = ScoutAgent(gateway=gateway)
+    all_candidates: list[SourceCandidate] = []
+    seen_locations: set[str] = set()
+    for sq in subquestions:
+        try:
+            scout_out = await scout.execute(subquestion=sq, plan=None, session=session, run_id=run_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Scout failed for subquestion %r: %s", sq[:40], exc)
+            continue
+        for cand in scout_out.candidates:
+            loc = cand.location.strip()
+            if loc and loc not in seen_locations:
+                seen_locations.add(loc)
+                all_candidates.append(cand)
+
+    # ---- Retriever: fetch and ingest documents (Source/Document/Chunk have no JSON cols) ----
+    retriever = RetrieverAgent(gateway=gateway, settings=settings)
+    try:
+        retriever_out: RetrieverOutput = await retriever.execute(
+            candidates=all_candidates, session=session, run_id=run_id
         )
-        claims = list((await session.execute(claims_stmt)).scalars().all())
-        findings_stmt = (
-            select(Finding)
-            .where(Finding.run_id.in_(run_ids))
-            .order_by(Finding.created_at.desc())
-            .limit(5)
-        )
-        findings = list((await session.execute(findings_stmt)).scalars().all())
-        needed_claim_ids = {
-            str(claim_id) for finding in findings for claim_id in (finding.claim_ids_json or [])
-        }
-        known_claim_ids = {claim.id for claim in claims}
-        missing_claim_ids = needed_claim_ids - known_claim_ids
-        if missing_claim_ids:
-            extra_stmt = select(Claim).where(
-                Claim.id.in_(missing_claim_ids), Claim.run_id.in_(run_ids)
-            )
-            claims.extend((await session.execute(extra_stmt)).scalars().all())
-        source_ids = {claim.source_id for claim in claims}
-        sources = (
-            list(
-                (
-                    await session.execute(
-                        select(Source)
-                        .where(Source.id.in_(source_ids))
-                        .order_by(Source.retrieved_at.desc())
-                    )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Retriever failed: %s", exc)
+        retriever_out = RetrieverOutput(retrieved=[], failures=[])
+
+    # Fetch Document + Chunk ORM rows (Text columns only; no Oracle JSON deserialization).
+    retrieved_docs: list[tuple[str, Document, list[Chunk], Source | None]] = []
+    for rd in retriever_out.retrieved:
+        doc = (
+            await session.execute(select(Document).where(Document.id == rd.document_id))
+        ).scalar_one_or_none()
+        if doc is None:
+            continue
+        chunks = list(
+            (
+                await session.execute(
+                    select(Chunk).where(Chunk.document_id == doc.id).order_by(Chunk.idx.asc())
                 )
-                .scalars()
-                .all()
-            )
-            if source_ids
-            else []
+            ).scalars().all()
         )
-    else:
-        claims = []
-        findings = []
-        sources = []
+        if not chunks:
+            continue
+        src = (
+            await session.execute(select(Source).where(Source.id == rd.source_id))
+        ).scalar_one_or_none()
+        retrieved_docs.append((rd.source_id, doc, chunks, src))
 
-    # Construct per-finding source citations from the exact supporting claims
-    claims_by_id = {claim.id: claim for claim in claims}
-    sources_by_id = {source.id: source for source in sources}
-    findings_items = []
-    for finding in findings:
-        claim_ids = [str(claim_id) for claim_id in (finding.claim_ids_json or [])]
-        citations = []
-        for claim_id in claim_ids:
-            claim = claims_by_id.get(claim_id)
-            source = sources_by_id.get(claim.source_id) if claim else None
-            if source:
-                citations.append(
+    # ---- Extractor: extract verifiable claims from chunks ----
+    extractor = ExtractorAgent(gateway=gateway)
+    claim_dicts: list[dict[str, Any]] = []
+    for source_id, document, chunks, _src in retrieved_docs:
+        chunk_claims: list[dict[str, Any]] = []
+        try:
+            extractions = await extractor._model_calls(document, chunks, run_id, source_id)
+        except (ProviderError, Exception) as exc:  # noqa: BLE001
+            logger.warning(
+                "Extractor LLM unavailable for doc %s (%s); declarative fallback",
+                document.id,
+                type(exc).__name__,
+            )
+            extractions = []
+        for chunk, extraction in extractions:
+            for claim_data in extraction.claims:
+                rel = getattr(claim_data, "relative_span", None) or {}
+                chunk_claims.append(
                     {
-                        "source_id": source.id,
-                        "source_title": source.title or "Source Document",
-                        "source_url": source.location,
+                        "id": uuid.uuid4().hex,
+                        "text": claim_data.text,
+                        "confidence": float(claim_data.preliminary_confidence or 0.8),
+                        "status": "ACTIVE",
+                        "claim_type": str(getattr(claim_data, "claim_type", "FACT")),
+                        "source_id": source_id,
+                        "quote": claim_data.quote,
+                        "span_start": chunk.start_char + int(rel.get("start", 0) or 0),
+                        "span_end": chunk.start_char + int(rel.get("end", 0) or 0),
+                        "document_id": document.id,
+                        "chunk_id": chunk.id,
                     }
                 )
+        # Declarative fallback: extract sentences directly when LLM produced no claims.
+        if not chunk_claims and chunks:
+            for chunk in chunks[:3]:
+                doc_block = format_external_document(document.id, source_id, chunk.text)
+                try:
+                    mock = MockProvider._mock_extract_claims([{"content": doc_block}])
+                except Exception:  # noqa: BLE001
+                    mock = {"claims": []}
+                for cd in mock.get("claims", []):
+                    rel = cd.get("relative_span") or {"start": 0, "end": len(cd.get("quote", ""))}
+                    quote = cd.get("quote", "")
+                    chunk_claims.append(
+                        {
+                            "id": uuid.uuid4().hex,
+                            "text": cd.get("text", quote),
+                            "confidence": float(cd.get("preliminary_confidence", 0.85)),
+                            "status": "ACTIVE",
+                            "claim_type": str(cd.get("claim_type", "FACT")),
+                            "source_id": source_id,
+                            "quote": quote,
+                            "span_start": chunk.start_char + int(rel.get("start", 0) or 0),
+                            "span_end": chunk.start_char + int(rel.get("end", 0) or 0),
+                            "document_id": document.id,
+                            "chunk_id": chunk.id,
+                        }
+                    )
+        claim_dicts.extend(chunk_claims)
+    claim_dicts = claim_dicts[:25]
+
+    # ---- Synthesizer: build findings from extracted claims ----
+    synthesizer = SynthesizerAgent(gateway=gateway)
+    source_objects = [src for (_s, _d, _c, src) in retrieved_docs if src is not None]
+
+    synthesis_findings: list[dict[str, Any]] = []
+    executive_answer = ""
+    gaps: list[str] = []
+    try:
+        synth_result = await synthesizer.execute(
+            objective=query,
+            claims=claim_dicts,
+            sources=source_objects,
+            session=None,
+            run_id=None,
+        )
+        executive_answer = synth_result.executive_summary or ""
+        gaps = list(synth_result.gaps or [])
+        for f in synth_result.findings or []:
+            synthesis_findings.append(
+                {
+                    "statement": f.statement,
+                    "confidence": float(f.confidence or 0.8),
+                    "confidence_label": f.confidence_label or "High",
+                    "claim_ids": list(f.claim_ids or []),
+                }
+            )
+    except (ProviderError, Exception) as exc:  # noqa: BLE001
+        logger.warning(
+            "Synthesizer unavailable (%s); building findings directly from claims",
+            type(exc).__name__,
+        )
+        for c in claim_dicts[:8]:
+            synthesis_findings.append(
+                {
+                    "statement": c["text"],
+                    "confidence": c["confidence"],
+                    "confidence_label": "High" if c["confidence"] >= 0.70 else "Moderate",
+                    "claim_ids": [c["id"]],
+                }
+            )
+        executive_answer = (
+            f"Investigation for '{query}' completed with {len(claim_dicts)} extracted claim(s). "
+            "LLM synthesis was unavailable; findings are attributed directly to extracted evidence."
+        )
+        if not claim_dicts:
+            gaps = ["No verifiable primary sources found matching scope constraints."]
+            executive_answer = f"Investigation for '{query}' concluded with INSUFFICIENT EVIDENCE."
+
+    # Build citations / sources from retrieved sources (no Oracle JSON reads).
+    claims_by_id = {c["id"]: c for c in claim_dicts}
+    sources_data: list[dict[str, Any]] = []
+    seen_source_ids: set[str] = set()
+    for source_id, _document, _chunks, src in retrieved_docs:
+        if src is None or src.id in seen_source_ids:
+            continue
+        seen_source_ids.add(src.id)
+        sources_data.append(
+            {
+                "id": src.id,
+                "title": src.title or "Source Document",
+                "url": src.location,
+                "publisher": src.publisher,
+                "trust_tier": str(src.trust_tier),
+            }
+        )
+
+    citations = [
+        {"source_id": s["id"], "source_title": s["title"], "source_url": s["url"]}
+        for s in sources_data
+    ]
+
+    # Build per-finding items with citations from supporting claims.
+    findings_items: list[dict[str, Any]] = []
+    for f in synthesis_findings:
+        claim_ids = f.get("claim_ids", [])
+        finding_citations = []
+        for cid in claim_ids:
+            c = claims_by_id.get(cid)
+            if c:
+                src = next((s for s in sources_data if s["id"] == c["source_id"]), None)
+                if src:
+                    finding_citations.append(
+                        {
+                            "source_id": src["id"],
+                            "source_title": src["title"],
+                            "source_url": src["url"],
+                        }
+                    )
         findings_items.append(
             {
-                "finding_id": finding.id,
-                "statement": finding.conclusion,
-                "confidence_score": finding.confidence,
-                "evidence_count": len(citations),
-                "citations": citations,
-                "status": "verified" if finding.confidence >= 0.70 else "inference",
+                "finding_id": (claim_ids[0][:8] if claim_ids else uuid.uuid4().hex[:8]),
+                "statement": f["statement"],
+                "confidence_score": f["confidence"],
+                "evidence_count": len(finding_citations),
+                "citations": finding_citations,
+                "status": "verified" if f["confidence"] >= 0.70 else "inference",
                 "claim_ids": claim_ids,
             }
         )
 
-    if not findings_items and claims:
-        for claim in claims[:5]:
-            source = sources_by_id.get(claim.source_id)
-            citations = (
-                [
-                    {
-                        "source_id": source.id,
-                        "source_title": source.title or "Source Document",
-                        "source_url": source.location,
-                    }
-                ]
-                if source
+    if not findings_items and claim_dicts:
+        for c in claim_dicts[:5]:
+            src = next((s for s in sources_data if s["id"] == c["source_id"]), None)
+            cit = (
+                [{"source_id": src["id"], "source_title": src["title"], "source_url": src["url"]}]
+                if src
                 else []
             )
             findings_items.append(
                 {
-                    "finding_id": f"cl-{claim.id[:8]}",
-                    "statement": claim.text,
-                    "confidence_score": claim.confidence,
-                    "evidence_count": len(citations),
-                    "citations": citations,
-                    "status": "verified" if claim.confidence >= 0.75 else "inference",
-                    "claim_ids": [claim.id],
+                    "finding_id": c["id"][:8],
+                    "statement": c["text"],
+                    "confidence_score": c["confidence"],
+                    "evidence_count": len(cit),
+                    "citations": cit,
+                    "status": "verified" if c["confidence"] >= 0.75 else "inference",
+                    "claim_ids": [c["id"]],
                 }
             )
 
-    # Build provenance chain
-    provenance_chain = []
-    for cl in claims[:10]:
-        matching_s = next((s for s in sources if s.id == cl.source_id), None)
+    # Build provenance chain from extracted claims.
+    provenance_chain: list[dict[str, Any]] = []
+    for c in claim_dicts[:10]:
+        src = next((s for s in sources_data if s["id"] == c["source_id"]), None)
         provenance_chain.append(
             {
-                "claim_id": cl.id,
-                "claim_text": cl.text,
-                "quote": cl.quote,
-                "span_start": cl.span_start,
-                "span_end": cl.span_end,
-                "document_id": cl.document_id,
-                "source_id": cl.source_id,
-                "source_title": matching_s.title if matching_s else "Source Document",
-                "source_url": matching_s.location if matching_s else "internal://source",
-                "publisher": matching_s.publisher if matching_s else None,
+                "claim_id": c["id"],
+                "claim_text": c["text"],
+                "quote": c.get("quote", ""),
+                "span_start": c.get("span_start", 0),
+                "span_end": c.get("span_end", 0),
+                "document_id": c.get("document_id", ""),
+                "source_id": c.get("source_id", ""),
+                "source_title": src["title"] if src else "Source Document",
+                "source_url": src["url"] if src else "internal://source",
+                "publisher": src["publisher"] if src else None,
             }
         )
 
-    sources_data = [
-        {
-            "id": s.id,
-            "title": s.title,
-            "url": s.location,
-            "publisher": s.publisher,
-            "trust_tier": str(s.trust_tier),
-        }
-        for s in sources[:5]
-    ]
-
-    # Generate spoken summary and text response using existing citation formatters
-    spoken_summary = export_spoken_citations(findings_items, sources)
-    text_response = export_text_citations(findings_items, sources)
+    # Generate spoken summary and text response using existing citation formatters.
+    spoken_summary = export_spoken_citations(findings_items, source_objects)
+    text_response = export_text_citations(findings_items, source_objects)
 
     lat = int((time.time() - t0) * 1000)
     summary = f"IntelX synthesized evidence-driven research for query '{query}' with {len(sources_data)} cited sources."
@@ -472,12 +605,11 @@ async def delegate_research_from_friday(
         f"findings={len(findings_items)} sources={len(sources_data)} latency_ms={lat}"
     )
 
-    # Return the same response shape as the mesh dispatch: run_id, status, findings, citations, spoken_summary, sources
     return {
         "run_id": run_id,
         "status": "SUCCESS",
         "findings": findings_items,
-        "citations": sources_data,  # sources_data serves as citations
+        "citations": citations,
         "spoken_summary": spoken_summary,
         "sources": sources_data,
         "provenance_chain": provenance_chain,
