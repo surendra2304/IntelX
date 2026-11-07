@@ -63,7 +63,12 @@ def get_async_engine(db_url: str | None = None) -> AsyncEngine:
 
     lowered = url.lower()
     if lowered.startswith("sqlite"):
-        if db_url is None or not _is_test_environment():
+        standalone_test = (
+            os.getenv("FRIDAY_STANDALONE_TEST_MODE", "").strip().lower() in {"1", "true", "yes"}
+            and os.getenv("APP_ENV", "").strip().lower() in {"test", "testing"}
+            and url.startswith("sqlite+aiosqlite:////tmp/")
+        )
+        if (db_url is None and not standalone_test) or not _is_test_environment():
             raise RuntimeError(
                 "INTELX refuses to start on SQLite outside the test suite. "
                 "Configure an oracle+oracledb:// DSN."
